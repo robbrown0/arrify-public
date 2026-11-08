@@ -136,7 +136,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Original Arrify branding, privacy-policy access from sign-in and Settings, and expanded demo library. Also check browsing below the player, shuffle/repeat, background playback, lock-screen controls, and Apple TV artwork.'}
+    attrs = {'whatsNew': 'Redesigned compact and full-screen players with AirPlay, Up Next, system volume, an artwork presentation view, the Aurora icon, and custom server branding. Check background playback, lock-screen controls, and receiver artwork.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:

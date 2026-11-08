@@ -72,6 +72,9 @@ struct LibraryHome: View {
             }
             .scrollContentBackground(.hidden).background(Color.black)
             .navigationTitle("Library")
+            .toolbar { ToolbarItem(placement: .topBarLeading) {
+                if let image = model.brandIcon { Image(uiImage: image).resizable().scaledToFit().frame(width: 32, height: 32).clipShape(RoundedRectangle(cornerRadius: 7)).accessibilityLabel("Server icon") }
+            } }
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.library.refresh() } }.accessibilityIdentifier("refreshLibrary") } }
             .task { if model.library.overview == nil { await model.library.refresh() } }
             .refreshable { await model.library.refresh() }

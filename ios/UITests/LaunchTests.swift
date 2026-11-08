@@ -105,5 +105,12 @@ extension LaunchTests {
         repeatButton.tap()
         expectation(for: NSPredicate(format: "value == 'all'"), evaluatedWith: repeatButton)
         waitForExpectations(timeout: 5)
+        let playerShot = XCTAttachment(screenshot: app.screenshot()); playerShot.name = "Redesigned player"; playerShot.lifetime = .keepAlways; add(playerShot)
+        app.buttons["upNext"].tap()
+        XCTAssertTrue(app.staticTexts["Family Portrait"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        app.buttons["artworkDisplayButton"].tap()
+        XCTAssertTrue(app.buttons["Close artwork"].waitForExistence(timeout: 5))
+        app.buttons["Close artwork"].tap()
     }
 }
