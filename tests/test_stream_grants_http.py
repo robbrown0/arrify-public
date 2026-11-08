@@ -92,6 +92,7 @@ class StreamGrantHTTPTests(unittest.TestCase):
 
     def test_receiver_artwork_is_track_scoped_and_revocable(self):
         self.lib.supplemental_artwork=lambda *args,**kwargs:b'artwork-fixture'
+        self.lib.music.artwork=lambda tid:('image/png',b'','fallback')
         url=self.url().replace('/stream/','/artwork/')
         status,body,headers=self.raw(url)
         self.assertEqual((status,body),(200,b'artwork-fixture'))
@@ -100,3 +101,9 @@ class StreamGrantHTTPTests(unittest.TestCase):
         self.assertEqual(self.raw(url.replace('/artwork/1','/artwork/3'))[0],403)
         self.s.stream_grants.now=lambda:self.state['stream_grants']['1']['expires']
         self.assertEqual(self.raw(url)[0],403)
+
+    def test_confirmed_album_cover_wins_over_recognition_cover(self):
+        self.lib.supplemental_artwork=lambda *args,**kwargs:b'other-release'
+        self.lib.music.artwork=lambda tid:('image/png',b'confirmed-album','confirmed')
+        status,body,_=self.raw(self.url().replace('/stream/','/artwork/'))
+        self.assertEqual((status,body),(200,b'confirmed-album'))

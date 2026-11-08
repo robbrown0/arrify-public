@@ -13,6 +13,8 @@ COPY vendor/music-playlists.json /opt/arrify/music-playlists.json
 COPY app /opt/arrify/app
 COPY web /opt/arrify/web
 COPY VERSION /opt/arrify/VERSION
+# Source archives may use a restrictive umask; the runtime user needs read access.
+RUN chmod -R a+rX /opt/arrify/app /opt/arrify/web /opt/arrify/music-playlists.json /opt/arrify/VERSION
 ARG VCS_REF=unknown
 RUN printf '%s\n' "$VCS_REF" > /opt/arrify/REVISION
 LABEL org.opencontainers.image.source="https://github.com/robbrown0/arrify" \

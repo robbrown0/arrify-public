@@ -140,7 +140,7 @@ struct NowPlayingView: View {
             SystemVolumeSlider().frame(height: 32).padding(.top, 6)
             HStack {
                 Button { showArtwork = true } label: { Image(systemName: "photo").frame(width: 44, height: 44) }
-                    .accessibilityLabel("Show artwork")
+                    .accessibilityLabel("Show artwork").accessibilityIdentifier("artworkDisplayButton")
                 Spacer()
                 VStack(spacing: 0) {
                     AirPlayPicker().frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")

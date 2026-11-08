@@ -425,14 +425,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,image.read_bytes(),'image/jpeg',{'Cache-Control':'private, max-age=3600'})
         if re.fullmatch('/api/v1/artwork/[0-9]+',path):
             artwork_headers={'Cache-Control':'private, no-store' if 'grant' in q else 'private, max-age=300'}
-            identified=lib.supplemental_artwork(int(path.rsplit('/',1)[1]),directory='/data/recognition-artwork')
-            if identified is not None:
-                return self.send(200,identified,'image/jpeg',artwork_headers)
             try:
                 mime,data,source=lib.music.artwork(int(path.rsplit('/',1)[1]))
             except FileNotFoundError:
                 # Missing local artwork continues through Arrify's fallback chain.
                 mime,data,source='',b'','fallback'
+            # Preserve administrator-confirmed album covers ahead of recording
+            # recognition results, which may belong to another release.
+            if source!='confirmed':
+                identified=lib.supplemental_artwork(int(path.rsplit('/',1)[1]),directory='/data/recognition-artwork')
+                if identified is not None:
+                    return self.send(200,identified,'image/jpeg',artwork_headers)
             if source=='fallback':
                 supplemental=lib.supplemental_artwork(int(path.rsplit('/',1)[1]))
                 if supplemental is not None:

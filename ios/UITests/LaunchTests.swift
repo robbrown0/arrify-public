@@ -109,9 +109,7 @@ extension LaunchTests {
         app.buttons["upNext"].tap()
         XCTAssertTrue(app.staticTexts["Family Portrait"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
-        app.scrollViews.firstMatch.swipeDown()
-        app.buttons["More player options"].tap()
-        app.buttons["Show artwork"].lastMatch.tap()
+        app.buttons["artworkDisplayButton"].tap()
         XCTAssertTrue(app.buttons["Close artwork"].waitForExistence(timeout: 5))
         app.buttons["Close artwork"].tap()
     }
