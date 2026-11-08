@@ -1,0 +1,35 @@
+name: TestFlight beta review
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: Exact uploaded build number
+        required: true
+        type: string
+      app_version:
+        description: Exact marketing version
+        required: true
+        default: '0.2.1'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: arrify-beta-review
+  cancel-in-progress: false
+jobs:
+  submit:
+    if: github.ref == 'refs/heads/main'
+    environment: testflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify demo and submit selected beta build
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_BETA_REVIEW_CONFIG: ${{ secrets.ASC_BETA_REVIEW_CONFIG }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          APP_VERSION: ${{ inputs.app_version }}
+        run: python3 tools/testflight_beta_review.py

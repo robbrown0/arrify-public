@@ -1,0 +1,580 @@
+{
+  "date": "2026-11-02",
+  "policy": "Explicit reviewed aliases only; never auto-merge by fuzzy similarity or leading article. Applies to Arrify catalog display/index, not source audio tags.",
+  "corrections": [
+    {
+      "canonical": "Bee Gees",
+      "aliases": [
+        "Bee Gees, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Alone / Alone"
+      ]
+    },
+    {
+      "canonical": "The Verve",
+      "aliases": [
+        "Verve, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Bitter Sweet Symphony / Urban Hymns"
+      ]
+    },
+    {
+      "canonical": "The All-American Rejects",
+      "aliases": [
+        "All-American Rejects, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Dirty Little Secret / Move Along"
+      ]
+    },
+    {
+      "canonical": "Commodores",
+      "aliases": [
+        "Commodores, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Flying Hill / Commodores Hits Vol. 2"
+      ]
+    },
+    {
+      "canonical": "The J. Geils Band",
+      "aliases": [
+        "J. Geils Band, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Freeze-Frame / Freeze-Frame"
+      ]
+    },
+    {
+      "canonical": "Thompson Twins",
+      "aliases": [
+        "Thompson Twins, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: In The Name Of Love '88 / Best of The Thompson Twins: Greatest Mixes"
+      ]
+    },
+    {
+      "canonical": "The Pointer Sisters",
+      "aliases": [
+        "Pointer Sisters, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Jump (For My Love) / Break Out"
+      ]
+    },
+    {
+      "canonical": "The Click Five",
+      "aliases": [
+        "Click Five, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Just The Girl / Just the Girl"
+      ]
+    },
+    {
+      "canonical": "Divinyls",
+      "aliases": [
+        "Divinyls, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Make Out Alright / Divinyls, The"
+      ]
+    },
+    {
+      "canonical": "The Wallflowers",
+      "aliases": [
+        "Wallflowers, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: One Headlight / Bringing Down the Horse"
+      ]
+    },
+    {
+      "canonical": "The Last Goodnight",
+      "aliases": [
+        "Last Goodnight, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Pictures Of You / Pictures of You (Single)"
+      ]
+    },
+    {
+      "canonical": "The Fixx",
+      "aliases": [
+        "Fixx, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Red Skies / React"
+      ]
+    },
+    {
+      "canonical": "The Police",
+      "aliases": [
+        "Police, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Roxanne / Every Breath You Take: the Classics"
+      ]
+    },
+    {
+      "canonical": "The Tubes",
+      "aliases": [
+        "Tubes, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: She's A Beauty / Best of The Tubes, The"
+      ]
+    },
+    {
+      "canonical": "The Postal Service",
+      "aliases": [
+        "Postal Service, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: The District Sleeps Alone Tonight / District Sleeps Alone Tonight, The"
+      ]
+    },
+    {
+      "canonical": "The Guess Who",
+      "aliases": [
+        "Guess Who, The",
+        "Guess Who"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: These Eyes / These Eyes",
+        "Same local band catalog; restore leading article."
+      ]
+    },
+    {
+      "canonical": "The Escape Club",
+      "aliases": [
+        "Escape Club, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Wild, Wild West / Wild Wild West"
+      ]
+    },
+    {
+      "canonical": "The Moody Blues",
+      "aliases": [
+        "Moody Blues, The",
+        "Moody Blues"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Your Wildest Dreams / Other Side of Life, The",
+        "Same local band catalog; restore leading article."
+      ]
+    },
+    {
+      "canonical": "The Clash",
+      "aliases": [
+        "Clash, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Rock The Casbah / Story of The Clash, Volume 1, The"
+      ]
+    },
+    {
+      "canonical": "The Presidents of the United States of America",
+      "aliases": [
+        "Presidents of The United States of America, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Some Postman / Love Everybody"
+      ]
+    },
+    {
+      "canonical": "The Cure",
+      "aliases": [
+        "Cure, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Boys Don't Cry / Staring At the Sea: the Singles",
+        "https://musicbrainz.org/artist/69ee3720-a7cb-4402-b48d-a02c366f2bcf"
+      ]
+    },
+    {
+      "canonical": "The Cranberries",
+      "aliases": [
+        "Cranberries, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Promises / Bury the Hatchet"
+      ]
+    },
+    {
+      "canonical": "The Hives",
+      "aliases": [
+        "Hives, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Walk Idiot Walk / Tyrannosaurus Hives"
+      ]
+    },
+    {
+      "canonical": "The Submarines",
+      "aliases": [
+        "Submarines, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: You Me And The Bourgeoisie / Honeysuckle Weeks"
+      ]
+    },
+    {
+      "canonical": "The Darkness",
+      "aliases": [
+        "Darkness, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: I Believe In A Thing Called Love / Permission to Land"
+      ]
+    },
+    {
+      "canonical": "The Stone Roses",
+      "aliases": [
+        "Stone Roses, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Waterfall / Stone Roses, The"
+      ]
+    },
+    {
+      "canonical": "The Cars",
+      "aliases": [
+        "Cars, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: You're All I've Got Tonight / Complete Greatest Hits"
+      ]
+    },
+    {
+      "canonical": "The Go-Go's",
+      "aliases": [
+        "Go-Go's, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: This Town / Vh1 Behind the Music: Go-Go's Collection"
+      ]
+    },
+    {
+      "canonical": "The Beach Boys",
+      "aliases": [
+        "Beach Boys, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Kokomo / Cocktail: Original Motion Picture Soundtrack"
+      ]
+    },
+    {
+      "canonical": "Pretenders",
+      "aliases": [
+        "Pretenders, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: I'll Stand By You / Last of The Independents"
+      ]
+    },
+    {
+      "canonical": "The Cardigans",
+      "aliases": [
+        "Cardigans, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Lovefool / First Band On the Moon"
+      ]
+    },
+    {
+      "canonical": "Four Tops",
+      "aliases": [
+        "Four Tops, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: I Can't Help Myself (Sugar Pie, Honey Bunch) / Ultimate Collection, The"
+      ]
+    },
+    {
+      "canonical": "The Jacksons",
+      "aliases": [
+        "Jacksons, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: State Of Shock / Pure...80's Cd 1"
+      ]
+    },
+    {
+      "canonical": "The Hooters",
+      "aliases": [
+        "Hooters, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Miles / Pure...80's Cd 1"
+      ]
+    },
+    {
+      "canonical": "The Manhattans",
+      "aliases": [
+        "Manhattans, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Shining Star / Super Hits"
+      ]
+    },
+    {
+      "canonical": "The Church",
+      "aliases": [
+        "Church, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Under The Milky Way / Under the Milky Way: Best of The Church"
+      ]
+    },
+    {
+      "canonical": "The Spinners",
+      "aliases": [
+        "Spinners, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Working My Way Back To You/Forgive Me, Girl / Essentials"
+      ]
+    },
+    {
+      "canonical": "Captain & Tennille",
+      "aliases": [
+        "Captain and Tennille, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Do That To Me One More Time / 20th Century Masters - the Millennium Collection: the Best of Captain and Tennille"
+      ]
+    },
+    {
+      "canonical": "The Psychedelic Furs",
+      "aliases": [
+        "Psychedelic Furs, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Pretty In Pink / Pure...80's Cd 2"
+      ]
+    },
+    {
+      "canonical": "The Isley Brothers",
+      "aliases": [
+        "Isley Brothers, The",
+        "Isley Brothers"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Caravan Of Love / Pure...80's Cd 2",
+        "Same local band catalog; restore leading article."
+      ]
+    },
+    {
+      "canonical": "The Alan Parsons Project",
+      "aliases": [
+        "Alan Parsons Project, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Don't Answer Me / Pure...80's Cd 3"
+      ]
+    },
+    {
+      "canonical": "The Blow Monkeys",
+      "aliases": [
+        "Blow Monkeys, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: It Doesn't Have To Be This Way / Pure...80's Cd 4"
+      ]
+    },
+    {
+      "canonical": "The Comsat Angels",
+      "aliases": [
+        "Comsat Angels, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: I'm Falling / 7 Day Weekend"
+      ]
+    },
+    {
+      "canonical": "The Isaacs",
+      "aliases": [
+        "Isaacs, The"
+      ],
+      "evidence": [
+        "Reviewed sort-name form against local track/album credits: Rest On The Rock / Increase My Faith"
+      ]
+    },
+    {
+      "canonical": "Kool & the Gang",
+      "aliases": [
+        "Kool and The Gang"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: Emergency / Emergency"
+      ]
+    },
+    {
+      "canonical": "Hank Williams, Jr.",
+      "aliases": [
+        "Hank Williams, Jr",
+        "Hank Williams Jr."
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: Family Tradition / Hank Williams Jr.'s Greatest Hits",
+        "Reviewed spelling/credit variant: Finer Things / F-1 Trillion"
+      ]
+    },
+    {
+      "canonical": "Run‐D.M.C.",
+      "aliases": [
+        "Run-D.M.C"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: Walk This Way / Pure...80's Cd 3"
+      ]
+    },
+    {
+      "canonical": "Dwight Yoakam",
+      "aliases": [
+        "Dwight Yoakum",
+        "Dwight Yokum"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: I Hear You Knocking / dwight yoakum",
+        "Reviewed spelling/credit variant: The Heart That You Own - G / If There Was a Way"
+      ]
+    },
+    {
+      "canonical": "Derek Clegg",
+      "aliases": [
+        "Derek Cegg"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: Deck Of Cards / One Coin, Two Sides",
+        "https://freemusicarchive.org/music/Derek_Clegg/Loose_Fur_-_The_Best_of_Derek_Clegg/Derek_Clegg_-_Loose_Fur_-_The_Best_Of_Derek_Clegg_-_14_Deck_Of_Cards/"
+      ]
+    },
+    {
+      "canonical": "Scissor Sisters",
+      "aliases": [
+        "Scissor Sister"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: Comfortably Numb / Scissor Sisters",
+        "https://www.officialcharts.com/songs/scissor-sisters-comfortably-numb/"
+      ]
+    },
+    {
+      "canonical": "Electric Light Orchestra",
+      "aliases": [
+        "Electric Light Orcherstra"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: Rock and roll is king / 50's60's70's"
+      ]
+    },
+    {
+      "canonical": "Gold City",
+      "aliases": [
+        "Gold City Quartet",
+        "Gol City Quartet"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: Sing With The Angels / Gold City Collection - Disc 1",
+        "Reviewed spelling/credit variant: Who But God / Gold City Collection -Disc1",
+        "https://musicbrainz.org/artist/e434c190-2f7b-4256-97d1-4e0d8d825acf/releases"
+      ]
+    },
+    {
+      "canonical": "The Cathedrals",
+      "aliases": [
+        "Cathedrals",
+        "Cathedral Quartet",
+        "Cathedrals Quartet",
+        "The Cathedral Quartet"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: O What A Savior / Climbing Higeher and Higher",
+        "Reviewed spelling/credit variant: I'm going to shout all over He / A Renunion",
+        "Reviewed spelling/credit variant: Then Came The Morning / Cathedrals Anthology Disk 2",
+        "Reviewed spelling/credit variant: Mansion Over The Hilltop / The Cathedrals Alive!",
+        "https://www.allmusic.com/artist/cathedrals-mn0000054204"
+      ]
+    },
+    {
+      "canonical": "London Symphony Orchestra",
+      "aliases": [
+        "The London Symphony Orchestra"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: The Magic Flute K.620: Overture / 99 Must-Have Mozart Masterpieces"
+      ]
+    },
+    {
+      "canonical": "Melbourne Symphony Orchestra",
+      "aliases": [
+        "The Melbourne Symphony Orchestra"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: The Planets, Op. 32: I. Mars, The Bringer Of War / The 99 Darkest Pieces Of Classical Music"
+      ]
+    },
+    {
+      "canonical": "Bruce Hungerford",
+      "aliases": [
+        "Bruce Hungerford,"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: Chopin: Nocturne in E-flat Major, Op.55, No.2 / Little Big Box of Romance"
+      ]
+    },
+    {
+      "canonical": "Edwin McCain",
+      "aliases": [
+        "Edwin Mccain"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: I'll Be / Misguided Roses"
+      ]
+    },
+    {
+      "canonical": "P!nk",
+      "aliases": [
+        "Pink"
+      ],
+      "evidence": [
+        "Reviewed spelling/credit variant: Trouble / Trouble"
+      ]
+    }
+  ],
+  "kept_separate": [
+    {
+      "names": [
+        "Kingsmen, The",
+        "The Kingsmen",
+        "Kingsmen"
+      ],
+      "reason": "Louie Louie garage-rock group differs from Southern Gospel group. Do not collapse sort-name candidate.",
+      "source": "https://musicbrainz.org/artist/3ac98ac1-d2b0-40d7-a88b-870a97492507/aliases"
+    },
+    {
+      "names": [
+        "Berlin Philharmonic Orchestra",
+        "Bergen Philharmonic Orchestra"
+      ],
+      "reason": "Different orchestras."
+    },
+    {
+      "names": [
+        "Hungarian State Orchestra, Adam Fischer",
+        "Hungarian State Orchestra, Ivan Fischer"
+      ],
+      "reason": "Different conductors; preserve contributor credits."
+    }
+  ],
+  "review_remaining": [
+    "Classical transliteration and ensemble-credit differences require recording-level identity evidence; similarity alone is insufficient.",
+    "Malformed download-group/various-artists tags need track metadata research, not artist-name merging."
+  ]
+}

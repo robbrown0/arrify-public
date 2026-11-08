@@ -1,0 +1,14 @@
+const fs=require('fs'),assert=require('assert/strict'),{chromium}=require('playwright');
+(async()=>{const browser=await chromium.launch({args:['--no-sandbox']});try{
+const p=await browser.newPage({viewport:{width:393,height:852}}),errors=[];p.on('pageerror',e=>errors.push(e.message));
+await p.setContent('<main><section id="station-personal"></section></main>');await p.addStyleTag({path:'web/brand.css'});
+await p.addScriptTag({content:`const $=s=>document.querySelector(s),esc=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');let home={collections:[]};const tabs=()=>'',stations=()=>'<p>Listening grid</p>',toast=()=>{};let mutations=[];const api=async(path,data)=>{if(path==='/home')return home;mutations.push(data);let items=stationPreferences.items.map(x=>({...x}));const i=items.findIndex(x=>x.slug===data.slug);if(data.action==='move'){const t=data.target??i+data.direction;items.splice(t,0,items.splice(i,1)[0]);}if(data.action==='remove')items.splice(i,1);if(data.action==='add')items.push({slug:data.slug,name:'New station'});return {items,revision:stationPreferences.revision+1}};`});
+const app=fs.readFileSync('web/app.js','utf8');await p.addScriptTag({content:app.slice(app.indexOf('let stationPreferences='),app.indexOf('let radioSuggestionState='))+app.slice(app.indexOf('// Pointer handles keep'))});
+await p.evaluate(()=>{stationPreferences={items:[{slug:'one',name:'One'},{slug:'two',name:'Two'},{slug:'three',name:'Three'}],revision:0,catalog:[{slug:'new',name:'New station',number:'99',genres:['Rock']}]};paintStations()});
+await p.locator('[data-station-edit]').click();assert.equal(await p.locator('[data-station-row]').count(),3);
+await p.locator('[data-station-direction="1"]').first().click();assert.equal(await p.locator('[data-station-row]').first().getAttribute('data-station-row'),'two');
+const handle=p.locator('[data-station-drag="two"]'),target=p.locator('[data-station-row="three"]');const h=await handle.boundingBox(),t=await target.boundingBox();await p.mouse.move(h.x+h.width/2,h.y+h.height/2);await p.mouse.down();await p.mouse.move(t.x+20,t.y+t.height-5,{steps:12});await p.mouse.up();await p.waitForTimeout(100);assert.equal(await p.locator('[data-station-row]').last().getAttribute('data-station-row'),'two');
+await p.locator('[data-station-action="remove"]').first().click();assert.equal(await p.locator('[data-station-row]').count(),2);
+await p.locator('[data-station-add]').first().click();await p.locator('#station-picker input').fill('new');await p.locator('[data-station-action="add"]').click();assert.equal(await p.locator('[data-station-action="add"]').innerText(),'Added');
+assert.deepEqual(errors,[]);console.log('PASS mobile edit, move, drag, remove, searchable add, no browser errors');
+}finally{await browser.close()}})().catch(e=>{console.error(e);process.exit(1)});

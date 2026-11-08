@@ -1,0 +1,9 @@
+# Apply the reviewed hardening to the current live image, preserving concurrent playback work.
+ARG PLAYER_BASE=arrify:partyqueue-startup-20261026
+FROM ${PLAYER_BASE}
+USER root
+COPY app/accounts.py app/party_http.py app/server.py /opt/arrify/app/
+COPY web/brand.css web/index.html web/party-host.js web/party-guest.js /opt/arrify/web/
+COPY tools/review_copy_polish.py /tmp/review_copy_polish.py
+RUN python3 /tmp/review_copy_polish.py /opt/arrify/web && python3 -c "import importlib.util,subprocess,sys; subprocess.run([sys.executable,'-m','pip','uninstall','-y','pip'],check=True) if importlib.util.find_spec('pip') else None" && rm /tmp/review_copy_polish.py
+USER 21012:21012

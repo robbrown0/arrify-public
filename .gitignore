@@ -1,0 +1,32 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.log
+*.pem
+*.key
+node_modules/
+playwright-report/
+test-results/
+backups/
+secrets/
+# Generated QA screenshots stay on the server, outside source history.
+docs/*.png
+docs/*.jpg
+docs/*.webm
+# Apple Music signing credentials must remain outside source control.
+*.p8
+
+# Native build outputs and signing material
+ios/.build/
+build/
+*.xcuserstate
+xcuserdata/
+*.p12
+*.mobileprovision

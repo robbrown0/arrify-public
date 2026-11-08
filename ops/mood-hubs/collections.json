@@ -1,0 +1,362 @@
+[
+  {
+    "slug": "mood-golden-hour",
+    "name": "Golden Hour",
+    "section": "moods",
+    "description": "Warm melodies that brighten gently, then settle into the evening.",
+    "tracks": [
+      {
+        "artist": "Bill Withers",
+        "title": "10 - Lovely Day",
+        "album": "Greatest Hits_ Lean On Me"
+      },
+      {
+        "artist": "The Beatles",
+        "title": "07 Here Comes the Sun",
+        "album": "Abbey Road"
+      },
+      {
+        "artist": "Fleetwood Mac",
+        "title": "09 - Dreams",
+        "album": "Greatest Hits"
+      },
+      {
+        "artist": "Stevie Wonder",
+        "title": "08 - You Are The Sunshine Of My Life",
+        "album": "The Definitive Collection"
+      },
+      {
+        "artist": "George Harrison",
+        "title": "31 My Sweet Lord 1",
+        "album": "Billboard Top 100 of 1971"
+      },
+      {
+        "artist": "Van Morrison",
+        "title": "Van Morrison - Moondance - 05 - Into the Mystic",
+        "album": "Moondance (1970)"
+      },
+      {
+        "artist": "The Eagles",
+        "title": "09 Peaceful Easy Feeling",
+        "album": "Their Greatest Hits"
+      },
+      {
+        "artist": "America",
+        "title": "04 Ventura Highway",
+        "album": "America's Greatest Hits - History"
+      },
+      {
+        "artist": "James Taylor",
+        "title": "03 - Your Smiling Face",
+        "album": "Greatest Hits Volume 2"
+      },
+      {
+        "artist": "Jack Johnson",
+        "title": "01 Better Together",
+        "album": "In Between Dreams"
+      },
+      {
+        "artist": "Norah Jones",
+        "title": "01 Sunrise",
+        "album": "Feels Like Home"
+      },
+      {
+        "artist": "John Mayer",
+        "title": "01 - Waiting On The World To Change",
+        "album": "Continuum"
+      },
+      {
+        "artist": "Tom Petty",
+        "title": "Tom Petty - Wildflowers - 01 - Wildflowers",
+        "album": "Wildflowers (1994)"
+      },
+      {
+        "artist": "Nick Drake",
+        "title": "10 Northern Sky",
+        "album": "Way to Blue  An Introduction to Nick Drake"
+      },
+      {
+        "artist": "Fleetwood Mac",
+        "title": "06 Songbird",
+        "album": "Rumours"
+      }
+    ]
+  },
+  {
+    "slug": "mood-dinner-for-two",
+    "name": "Dinner for Two",
+    "section": "moods",
+    "description": "Soul, jazz vocals, and intimate favorites for an unhurried evening.",
+    "tracks": [
+      {
+        "artist": "Sade",
+        "title": "01 By Your Side",
+        "album": "Lovers Rock"
+      },
+      {
+        "artist": "Norah Jones",
+        "title": "05 - Come Away With Me",
+        "album": "Come Away With Me"
+      },
+      {
+        "artist": "Al Green",
+        "title": "Al Green - Greatest Hits - 06 - Let\u2019s Stay Together",
+        "album": "Greatest Hits (1975)"
+      },
+      {
+        "artist": "The Very Best of Marvin Gaye (2001)",
+        "title": "Marvin Gaye - The Very Best of Marvin Gaye - 07 - Let's Get It On",
+        "album": "CD 02"
+      },
+      {
+        "artist": "Stevie Wonder",
+        "title": "20 - Overjoyed",
+        "album": "The Definitive Collection"
+      },
+      {
+        "artist": "Anita Baker",
+        "title": "Anita Baker - Rapture - 01 - Sweet Love",
+        "album": "Rapture (1986)"
+      },
+      {
+        "artist": "Grover Washington, Jr",
+        "title": "Grover Washington, Jr. - Winelight - 05 - Just the Two of Us",
+        "album": "Winelight (1980)"
+      },
+      {
+        "artist": "Etta James",
+        "title": "Etta James - The Heart of a Woman - 05 - At Last",
+        "album": "The Heart of a Woman (1999)"
+      },
+      {
+        "artist": "Van Morrison",
+        "title": "Van Morrison - Moondance - 03 - Crazy Love",
+        "album": "Moondance (1970)"
+      },
+      {
+        "artist": "Diana Krall",
+        "title": "Diana Krall - The Look of Love - 09 - The Look of Love",
+        "album": "The Look of Love (2001)"
+      },
+      {
+        "artist": "Norah Jones",
+        "title": "07 - Turn Me On",
+        "album": "Come Away With Me"
+      },
+      {
+        "artist": "Eric Clapton",
+        "title": "04 Wonderful Tonight",
+        "album": "Time Pieces  Best of Eric Clapton"
+      }
+    ]
+  },
+  {
+    "slug": "mood-acoustic-reset",
+    "name": "Acoustic Reset",
+    "section": "moods",
+    "description": "A gentle acoustic arc, with space for the words and room to breathe.",
+    "tracks": [
+      {
+        "artist": "Jack Johnson",
+        "title": "03 Banana Pancakes",
+        "album": "In Between Dreams"
+      },
+      {
+        "artist": "James Taylor",
+        "title": "02 - Carolina In My Mind",
+        "album": "Greatest Hits"
+      },
+      {
+        "artist": "Norah Jones",
+        "title": "01 - Don't Know Why",
+        "album": "Come Away With Me"
+      },
+      {
+        "artist": "John Mayer",
+        "title": "07 - Stop This Train",
+        "album": "Continuum"
+      },
+      {
+        "artist": "Tracy Chapman",
+        "title": "Tracy Chapman - Tracy Chapman - 02 - Fast Car",
+        "album": "Tracy Chapman (1988)"
+      },
+      {
+        "artist": "Nick Drake",
+        "title": "14 Pink Moon",
+        "album": "Way to Blue  An Introduction to Nick Drake"
+      },
+      {
+        "artist": "Fleetwood_Mac",
+        "title": "08_-_Landslide",
+        "album": "Fleetwood_Mac"
+      },
+      {
+        "artist": "Compilations",
+        "title": "06 Time In A Bottle",
+        "album": "Classic Hits"
+      },
+      {
+        "artist": "Cat Stevens",
+        "title": "Cat Stevens - Tea for the Tillerman - 03 - Wild World",
+        "album": "Tea for the Tillerman (1970)"
+      },
+      {
+        "artist": "Neil Young",
+        "title": "04 Heart Of Gold",
+        "album": "Harvest"
+      },
+      {
+        "artist": "James Taylor",
+        "title": "06 - You've Got A Friend",
+        "album": "Greatest Hits"
+      },
+      {
+        "artist": "Bon Iver",
+        "title": "09 Re_ Stacks",
+        "album": "For Emma, Forever Ago"
+      },
+      {
+        "artist": "Fleetwood Mac",
+        "title": "03 Never Going Back Again",
+        "album": "Rumours"
+      }
+    ]
+  },
+  {
+    "slug": "mood-soul-sunshine",
+    "name": "Soul Sunshine",
+    "section": "moods",
+    "description": "Warm soul voices, an easy lift, and a little room to dance.",
+    "tracks": [
+      {
+        "artist": "Bill Withers",
+        "title": "10 - Lovely Day",
+        "album": "Greatest Hits_ Lean On Me"
+      },
+      {
+        "artist": "Stevie Wonder",
+        "title": "15 - Sir Duke",
+        "album": "The Definitive Collection"
+      },
+      {
+        "artist": "Aretha Franklin",
+        "title": "01 Respect",
+        "album": "I Never Loved a Man the Way I Love You"
+      },
+      {
+        "artist": "The Very Best of Marvin Gaye (2001)",
+        "title": "Marvin Gaye - The Very Best of Marvin Gaye - 06 - How Sweet It Is (to Be Loved by You)",
+        "album": "CD 01"
+      },
+      {
+        "artist": "An American Love Story",
+        "title": "01 My Girl",
+        "album": "An American Love Story"
+      },
+      {
+        "artist": "An American Love Story",
+        "title": "08 [Sittin' On] The Dock Of The Bay",
+        "album": "An American Love Story"
+      },
+      {
+        "artist": "Stevie Wonder",
+        "title": "07 - Signed, Sealed, Delivered (I'm Yours)",
+        "album": "The Definitive Collection"
+      },
+      {
+        "artist": "Bill Withers",
+        "title": "03 - Lean On Me",
+        "album": "Greatest Hits_ Lean On Me"
+      },
+      {
+        "artist": "Lionel Richie",
+        "title": "02 All Night Long (All Night)",
+        "album": "Can't Slow Down - Deluxe Edition"
+      },
+      {
+        "artist": "Stevie Wonder",
+        "title": "14 - I Wish",
+        "album": "The Definitive Collection"
+      }
+    ]
+  },
+  {
+    "slug": "mood-road-singalongs",
+    "name": "Road Trip Singalongs",
+    "section": "moods",
+    "description": "Start rolling, lift the energy, and finish with a big chorus.",
+    "tracks": [
+      {
+        "artist": "Fleetwood Mac",
+        "title": "03 - Go Your Own Way",
+        "album": "Greatest Hits"
+      },
+      {
+        "artist": "The Doobie Brothers",
+        "title": "04 Listen to the Music",
+        "album": "Best of the Doobies (Remastered)"
+      },
+      {
+        "artist": "The Eagles",
+        "title": "01 Take It Easy",
+        "album": "Their Greatest Hits"
+      },
+      {
+        "artist": "America",
+        "title": "10 Sister Golden Hair",
+        "album": "America's Greatest Hits - History"
+      },
+      {
+        "artist": "Bruce_Springsteen",
+        "title": "07_-_Dancing_In_The_Dark",
+        "album": "Greatest_Hits"
+      },
+      {
+        "artist": "The Killers",
+        "title": "The Killers - Hot Fuss - 02 - Mr. Brightside",
+        "album": "Hot Fuss (2004)"
+      },
+      {
+        "artist": "Compilations",
+        "title": "01 Africa 1",
+        "album": "Let It Rock 1983"
+      },
+      {
+        "artist": "Queen",
+        "title": "Queen - Jazz - 12 - Don\u2019t Stop Me Now",
+        "album": "Jazz (1978)"
+      },
+      {
+        "artist": "Music from old computer",
+        "title": "Journey - Dont Stop Believin",
+        "album": "Pop and rock"
+      },
+      {
+        "artist": "Bon Jovi",
+        "title": "03 Livin' On A Prayer",
+        "album": "Slippery When Wet (Remastered)"
+      },
+      {
+        "artist": "The Proclaimers",
+        "title": "The Proclaimers - Sunshine on Leith - 01 - I\u2019m Gonna Be (500 Miles)",
+        "album": "Sunshine on Leith (1988)"
+      },
+      {
+        "artist": "Oasis",
+        "title": "2-03 Don't Look Back In Anger",
+        "album": "Familiar To Millions"
+      },
+      {
+        "artist": "Billy Joel",
+        "title": "02 Piano Man",
+        "album": "Piano Man"
+      },
+      {
+        "artist": "Elton John",
+        "title": "03 Tiny Dancer",
+        "album": "Greatest Hits 1970-2002 (Double Us Cd),"
+      }
+    ]
+  }
+]

@@ -1,0 +1,15 @@
+.git
+__pycache__
+*.pyc
+docs
+.env
+.env.*
+*.p8
+secrets
+backups
+
+*.pem
+*.key
+*.db
+*.sqlite3
+node_modules

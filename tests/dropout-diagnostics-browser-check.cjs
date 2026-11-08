@@ -1,0 +1,20 @@
+// Real audio with synthetic visibility/route/buffering events; no AirPlay hardware.
+const {chromium,webkit}=require('playwright'),assert=require('node:assert/strict'),crypto=require('node:crypto'),{execFileSync}=require('node:child_process');
+(async()=>{const engine=process.env.ARRIFY_ENGINE||'chromium',browser=await({chromium,webkit}[engine]).launch({headless:true,args:engine==='chromium'?['--no-sandbox']:[]});try{
+ const fixture=process.env.ARRIFY_AUDIT_FIXTURE?JSON.parse(require('node:fs').readFileSync(process.env.ARRIFY_AUDIT_FIXTURE,'utf8'))[engine+'_phone']:null;const base='http://127.0.0.1:8793',username=fixture?.username||'drops_'+crypto.randomBytes(5).toString('hex'),password=fixture?.password||crypto.randomBytes(24).toString('hex');
+ const context=await browser.newContext({viewport:{width:393,height:700},hasTouch:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(base);if(!fixture){assert.equal((await context.request.post(base+'/api/v1/auth/register',{headers:{Origin:base},data:{username,password,email:username+'@example.invalid'}})).status(),201);
+ execFileSync('docker',['exec','arrify-admin-review','python3','-m','app.server','make-admin',username],{stdio:'pipe'});}
+ await page.locator('#username').fill(username);await page.locator('#password').fill(password);await page.locator('#auth-submit').click();await page.locator('.home-page').waitFor({timeout:30000});
+ await page.evaluate(async()=>{await command({action:'play',ids:[19073]},true);if(!ownsListening())await command({action:'takeover'},true)});await page.waitForFunction(()=>audio.currentTime>1&&!playback.loading).catch(async error=>{console.error('Playback state',await page.evaluate(()=>({owns:ownsListening(),paused:audio.paused,intent:playback.intent,loading:playback.loading,needsGesture:listeningNeedsGesture,ready:audio.readyState,error:audio.error?.code||0})));throw error});
+ await page.waitForTimeout(16000);const report=page.waitForRequest(r=>r.url().endsWith('/player/diagnostics')&&r.method()==='POST');
+ await page.evaluate(()=>{window.beforeDropoutAudio=audio;window.beforeDropoutSrc=audio.currentSrc;Object.defineProperty(document,'hidden',{configurable:true,value:true});Object.defineProperty(audio,'webkitCurrentPlaybackTargetIsWireless',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));audio.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));audio.dispatchEvent(new Event('waiting'));audio.dispatchEvent(new Event('stalled'))});
+ const request=await report,events=request.postDataJSON().events;
+ assert.ok(events.some(e=>e.event==='visibility'&&e.hidden));
+ await page.waitForTimeout(2200);
+ assert.ok(await page.evaluate(()=>audio===beforeDropoutAudio&&audio.currentSrc===beforeDropoutSrc&&!audio.paused&&playback.intent&&audio.dataset.profile==='original'));
+ const contextEvents=await page.evaluate(()=>playbackEvents.slice(-10));for(const name of ['waiting','stalled','route-change'])assert.ok(contextEvents.some(e=>e.event===name&&e.hidden&&e.wireless&&Number.isFinite(e.buffered_ahead)),name);
+ const count=await page.evaluate(()=>diagnosticUploads.length);await page.evaluate(()=>{for(let i=0;i<20;i++){audio.dispatchEvent(new Event('stalled'));uploadPlayback({routine:true,keepalive:true})}});await page.waitForTimeout(1800);assert.equal(await page.evaluate(()=>diagnosticUploads.length),count,'diagnostic storm must be throttled');
+ await page.evaluate(()=>{delete document.hidden;document.dispatchEvent(new Event('visibilitychange'));playback.pause()});await page.waitForTimeout(1500);assert.ok(await page.evaluate(()=>audio.paused&&!playback.intent));assert.deepEqual(errors,[]);
+ console.log('PASS '+engine+': background/route/buffering context retained, stable audio and quality, uploads bounded, explicit pause respected. Synthetic lifecycle events; physical AirPlay remains unverified.');
+ }finally{await browser.close()}})().catch(error=>{console.error(error.stack);process.exit(1)});

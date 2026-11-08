@@ -1,0 +1,26 @@
+'use strict';
+const fs=require('fs'),assert=require('node:assert/strict'),{chromium,webkit}=require('playwright');
+(async()=>{const engine=process.env.BROWSER||'chromium',browser=await({chromium,webkit}[engine]).launch(engine==='chromium'?{args:['--no-sandbox']}:{});try{
+const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.setContent('<audio id="audio"></audio><button data-tune="station">Tile</button><button id="play-all">Play</button><button data-quick="collection/station">Quick</button><button data-play="7">Song</button>');
+await page.addScriptTag({path:process.cwd()+'/web/playback.js'});
+await page.addScriptTag({content:`
+const $=s=>document.querySelector(s),audio=$('#audio'),listeningDevice={id:'local',name:'iPad'};let state,context={channel:'station'},home={collections:[{slug:'station',section:'channels'}]},shownTracks=[],gesture=false,unlocked=false,paused=true,plays=0,pending,requests=[],serverOnline=false,serverRevision=0,loads=0;
+audio.load=()=>{};audio.pause=()=>{paused=true};Object.defineProperty(audio,'paused',{get:()=>paused});audio.play=()=>{plays++;if(gesture)unlocked=true;if(!unlocked)return Promise.reject(Object.assign(Error('Tap required'),{name:'NotAllowedError'}));paused=false;return Promise.resolve()};document.addEventListener('click',()=>{gesture=true;setTimeout(()=>gesture=false,0)},true);
+const nativePlayback=window.ArrifyPlayback.create({element:audio,stableElement:true}),playback=nativePlayback;
+window.ArrifyApple={isActive:()=>false};window.ArrifySpotify={isActive:()=>false};window.ArrifyParty={controlParty:()=>null};
+let listeningSelectionTicket=0,listeningSeekTicket=0,listeningControl=0,rpcChain=Promise.resolve(),listeningPushPending=false,listeningSigningOut=false,listeningReceived=0,listeningReconciling=false,listeningApplied=-1,listeningSeekApplied=-1,listeningNeedsGesture=false,nativeAdvance=null,retryTimer=null,pendingAdvance=null,pendingRecovery=null,retryCount=0,compatibleFallback=false,listeningPolling=false,listeningQueueSignature='',queueOpen=false;
+const remoteListening=()=>Boolean(state?.listening?.owner&&state.listening.owner!==listeningDevice.id),listeningOnline=()=>Boolean(state?.listening?.online),ownsListening=()=>state?.listening?.owner===listeningDevice.id;
+const safe=fn=>{pending=Promise.resolve().then(fn)},applyState=async()=>{},paintListening=()=>{},refreshListeningEvents=()=>{},listeningHeartbeat=()=>{},renderQueue=()=>{},pollListening=()=>{},handlePlaybackError=e=>{throw e},startCurrentPlayback=async track=>{loads++;await playback.load(track,'original')};
+const api=async(path,body)=>{requests.push(body);await new Promise(r=>setTimeout(r,30));const old=state.listening,claim=!old.owner||body.takeover_if_offline&&!serverOnline;const owner=claim?'local':old.owner;return{current:7,track:{id:7},position:0,upcoming:[],listening:{owner,epoch:old.epoch+(claim&&owner!==old.owner?1:0),intent:++serverRevision,revision:serverRevision,seek_intent:serverRevision,playing:true,action:'play',online:true},server_time:serverRevision}};
+function reset(mode){nativePlayback.stop();unlocked=false;plays=0;loads=0;requests=[];listeningApplied=-1;listeningSeekApplied=-1;serverRevision=0;serverOnline=mode==='remote-live'||mode==='remote-returned';state={current:1,track:{id:1},upcoming:[],server_time:0,listening:{owner:mode==='fresh'?null:'remote',epoch:1,intent:0,revision:0,online:mode==='remote-live'}};}
+`});
+const app=fs.readFileSync('web/app.js','utf8'),lines=app.split('\n');for(const name of ['command','playSelection','quick'])await page.addScriptTag({content:lines.find(l=>l.startsWith('function '+name+'(')||l.startsWith('async function '+name+'('))});
+const consumeStart=app.indexOf('async function consumeListening('),consumeEnd=app.indexOf('\nasync function pollListening(',consumeStart);await page.addScriptTag({content:app.slice(consumeStart,consumeEnd)});
+const clickStart=app.indexOf("document.addEventListener('click',e=>{const b=e.target.closest('button,[data-go],[data-play]')"),clickEnd=app.indexOf("\ndocument.addEventListener('keydown'",clickStart);await page.addScriptTag({content:app.slice(clickStart,clickEnd)});
+for(const mode of ['fresh','remote-offline','remote-live','remote-returned'])for(const selector of ['[data-tune]','#play-all','[data-quick]','[data-play]']){
+await page.evaluate(mode=>reset(mode),mode);await page.locator(selector).click();await page.evaluate(()=>pending);const result=await page.evaluate(()=>({owner:state.listening.owner,paused,plays,loads,requests}));
+const local=['fresh','remote-offline'].includes(mode);assert.equal(result.owner,local?'local':'remote');assert.equal(result.loads,local?1:0);assert.equal(result.paused,!local);assert.equal(result.requests[0].takeover_if_offline,['remote-offline','remote-returned'].includes(mode));if(local)assert.equal(result.plays,2,'one gesture prime and one selected-track start');if(mode==='remote-live')assert.equal(result.plays,0,'live remote remains untouched');
+console.log('PASS',engine,mode,selector);
+}
+assert.deepEqual(errors,[]);console.log('Uses actual click handler, command and state consumer with delayed server and simulated gesture enforcement. Physical iPad not tested.');
+}finally{await browser.close()}})().catch(e=>{console.error(e);process.exit(1)});

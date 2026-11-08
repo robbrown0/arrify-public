@@ -1,0 +1,38 @@
+services:
+  player:
+    volumes:
+      - /srv/arrify-example/arrify-requests:/requests
+  requests:
+    build:
+      context: .
+      dockerfile: Dockerfile.requests
+    image: arrify-requests:pulse-20261026
+    container_name: arrify-requests
+    restart: unless-stopped
+    init: true
+    env_file: /srv/arrify-example/hitdiscovery/.env
+    environment:
+      LIDARR_API_KEY_FILE: /run/secrets/lidarr_api_key
+      DATA_DIR: /data
+      REPORT_DIR: /reports
+      REQUEST_DIR: /requests
+    volumes:
+      - /srv/arrify-example/arrify-requests:/requests
+      - /srv/arrify-example/hitdiscovery/data:/data
+      - /srv/arrify-example/hitdiscovery/reports:/reports
+      - /srv/arrify-example/hitdiscovery/secrets/lidarr_api_key:/run/secrets/lidarr_api_key:ro
+      - /srv/arrify-example/legacy-catalog:/existing-catalog:ro
+      - /srv/music/library-b:/music:ro
+      - /srv/music/library-a:/nas01:ro
+      - /srv/arrify-example/music-extra:/extra:ro
+    read_only: true
+    tmpfs: [/tmp:size=32m]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 1
+    mem_limit: 2g
+    healthcheck:
+      test: [CMD, python, -c, "import socket,http.client; c=http.client.HTTPConnection('localhost'); s=socket.socket(socket.AF_UNIX); s.settimeout(5); s.connect('/requests/request.sock'); c.sock=s; c.request('GET','/health'); r=c.getresponse(); print(r.read().decode()); assert r.status==200; c.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

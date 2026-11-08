@@ -1,0 +1,3 @@
+ARG REQUESTS_BASE=arrify-requests:wrong-edition-20261026
+FROM ${REQUESTS_BASE}
+COPY request-bridge/hitdiscovery/request_service.py /app/hitdiscovery/request_service.py

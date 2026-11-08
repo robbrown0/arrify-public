@@ -1,0 +1,1060 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Arrify Native Playback Foundation",
+    "version": "1.0.0",
+    "description": "Bearer-authenticated control and catalog API; scoped media URLs require no bearer header. Catalog revision is a paging snapshot, not media identity. Durations and timestamps are seconds. Ignore unknown optional fields and handle unknown enum strings. Album/artist IDs currently change with metadata names; do not persist them as durable references."
+  },
+  "paths": {
+    "/api/v1/native/playback/manifest": {
+      "post": {
+        "operationId": "prepareNativeManifest",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Manifest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManifestRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/native/playback": {
+      "get": {
+        "operationId": "getNativePlayback",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Playback"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "commandNativePlayback",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Playback"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaybackCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/native/catalog": {
+      "get": {
+        "operationId": "getNativeCatalog",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tracks",
+                "artists",
+                "albums"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/native/library": {
+      "get": {
+        "summary": "Browse the existing account library",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Library data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryOverview"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sign in again"
+          },
+          "409": {
+            "description": "Restart pagination after a catalog change"
+          }
+        }
+      }
+    },
+    "/api/v1/native/library/detail": {
+      "get": {
+        "summary": "Page songs in a library context",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Library data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sign in again"
+          },
+          "409": {
+            "description": "Restart pagination after a catalog change"
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "request_id"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ManifestRequest": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9-]{16,64}$"
+          },
+          "owner_epoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "original",
+              "aac",
+              "mp3"
+            ]
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "off"
+            ]
+          },
+          "retry": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "device_id",
+          "owner_epoch"
+        ]
+      },
+      "MediaItem": {
+        "type": "object",
+        "properties": {
+          "track_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source_revision": {
+            "type": "string",
+            "nullable": true
+          },
+          "profile": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "preparing",
+              "queued",
+              "retrying",
+              "failed",
+              "unavailable"
+            ]
+          },
+          "duration_seconds": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true
+          },
+          "mime_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "url": {
+            "type": "string",
+            "nullable": true
+          },
+          "url_expires": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "range_supported": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "track_id",
+          "source_revision",
+          "profile",
+          "state",
+          "duration_seconds",
+          "mime_type",
+          "size_bytes",
+          "url",
+          "url_expires",
+          "range_supported"
+        ]
+      },
+      "Manifest": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "owner_epoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "queue_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItem"
+            },
+            "maxItems": 3
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "device_id",
+          "owner_epoch",
+          "queue_revision",
+          "items",
+          "retry_after_seconds"
+        ]
+      },
+      "Track": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "album": {
+            "type": "string"
+          },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "local"
+            ]
+          },
+          "artwork": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "artist",
+          "album"
+        ]
+      },
+      "Entity": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "track_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "artwork": {
+            "type": "string",
+            "nullable": true
+          },
+          "kind": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "artist",
+          "track_count"
+        ]
+      },
+      "CatalogPage": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "next_offset": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/Track"
+                },
+                {
+                  "$ref": "#/components/schemas/Entity"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "revision",
+          "total",
+          "next_offset",
+          "items"
+        ]
+      },
+      "Playback": {
+        "type": "object",
+        "properties": {
+          "partial": {
+            "type": "boolean"
+          },
+          "current_track_id": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "position_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "server_time": {
+            "type": "number",
+            "minimum": 0
+          },
+          "queue_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "owner_device_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "owner_epoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "intent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "playing": {
+            "type": "boolean"
+          },
+          "observed": {
+            "type": "string"
+          },
+          "seek_target_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "seek_intent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "play_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "upcoming_track_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxItems": 2,
+            "nullable": true
+          },
+          "repeat_mode": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "off",
+              "all",
+              "one",
+              null
+            ]
+          },
+          "queue_controls_available": {
+            "type": "boolean",
+            "nullable": true
+          }
+        },
+        "required": [
+          "partial",
+          "current_track_id",
+          "position_seconds",
+          "server_time",
+          "queue_revision",
+          "owner_device_id",
+          "owner_epoch",
+          "intent",
+          "playing",
+          "observed",
+          "seek_target_seconds",
+          "seek_intent",
+          "play_id",
+          "upcoming_track_ids"
+        ]
+      },
+      "PlaybackCommand": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "play",
+              "pause",
+              "resume",
+              "seek",
+              "next",
+              "previous",
+              "heartbeat",
+              "takeover",
+              "reattach",
+              "shuffle",
+              "repeat"
+            ]
+          },
+          "device_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9-]{16,64}$"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "owner_epoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "minItems": 1,
+            "maxItems": 1000
+          },
+          "channel": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "position": {
+            "type": "number",
+            "minimum": 0
+          },
+          "duration": {
+            "type": "number",
+            "minimum": 0
+          },
+          "expected_current": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "expected_next": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "transition_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "automatic": {
+            "type": "boolean"
+          },
+          "intent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "report_seq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "observed": {
+            "type": "string",
+            "enum": [
+              "playing",
+              "paused",
+              "buffering",
+              "needs-gesture"
+            ]
+          },
+          "quality": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "playing": {
+            "type": "boolean"
+          },
+          "takeover_if_offline": {
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/LibrarySource"
+          },
+          "shuffle": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "all",
+              "one"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "device_id"
+        ]
+      },
+      "LibrarySource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "albums",
+              "artists",
+              "collections",
+              "channels",
+              "playlists"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ]
+      },
+      "LibraryEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "artwork": {
+            "type": "string",
+            "nullable": true
+          },
+          "track_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "subtitle",
+          "section",
+          "track_count"
+        ]
+      },
+      "MoodGroup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "slugs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "color",
+          "slugs"
+        ]
+      },
+      "LibraryOverview": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LibraryEntry"
+            }
+          },
+          "moods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MoodGroup"
+            }
+          },
+          "tracks": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "albums": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "artists": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "items",
+          "moods",
+          "tracks",
+          "albums",
+          "artists"
+        ]
+      },
+      "LibraryDetail": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/LibraryEntry"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/Track"
+            }
+          },
+          "revision": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "next_offset": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "item",
+          "items",
+          "revision",
+          "total",
+          "next_offset"
+        ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "headers": {
+          "X-Request-ID": {
+            "schema": {
+              "type": "string"
+            }
+          },
+          "Cache-Control": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Error",
+        "headers": {
+          "X-Request-ID": {
+            "schema": {
+              "type": "string"
+            }
+          },
+          "Cache-Control": {
+            "schema": {
+              "type": "string"
+            }
+          },
+          "Retry-After": {
+            "schema": {
+              "type": "string"
+            },
+            "description": "Seconds before retry."
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

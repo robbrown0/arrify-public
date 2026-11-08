@@ -1,0 +1,11 @@
+/* Existing main-player safe-area rules remain authoritative. */
+html.ipad-installed{min-height:100%;background:#000}
+.ipad-installed body{min-height:100vh;min-height:100dvh}
+.ipad-installed .party-tv{padding-top:max(3vh,env(safe-area-inset-top,0px));padding-right:max(3vw,env(safe-area-inset-right,0px));padding-bottom:max(3vh,env(safe-area-inset-bottom,0px));padding-left:max(3vw,env(safe-area-inset-left,0px))}
+.ipad-installed #party-host-display .host-display-bar{padding-top:max(6px,env(safe-area-inset-top,0px))}
+.ipad-installed #party-host-display{padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box}
+@media print{.ipad-installed .party-tv{padding:0}}
+
+/* iPad fullscreen can report zero safe-area inset while retaining the clock. */
+.ipad-device body.party-tv{padding-top:max(32px,env(safe-area-inset-top,0px))}
+@media print{.ipad-device body.party-tv{padding-top:0}}

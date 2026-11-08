@@ -1,0 +1,10 @@
+# Optional overlay. Do not apply until the key is configured and device checks pass.
+services:
+  player:
+    environment:
+      ARRIFY_APPLE_MUSIC_ENABLED: "1"
+      ARRIFY_APPLE_TEAM_ID: ${ARRIFY_APPLE_TEAM_ID:?Set the Apple Developer Team ID}
+      ARRIFY_APPLE_KEY_ID: ${ARRIFY_APPLE_KEY_ID:?Set the MusicKit Key ID}
+      ARRIFY_APPLE_KEY_FILE: /run/secrets/arrify-musickit.p8
+    volumes:
+      - ${ARRIFY_APPLE_KEY_PATH:?Set the protected absolute p8 key path}:/run/secrets/arrify-musickit.p8:ro

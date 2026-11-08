@@ -1,0 +1,5 @@
+FROM hitdiscovery:0.7.1
+COPY request-bridge/hitdiscovery /app/hitdiscovery
+USER 21012:21012
+ENTRYPOINT ["python", "-m", "hitdiscovery.request_service"]
+CMD []

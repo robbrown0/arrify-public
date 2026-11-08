@@ -1,0 +1,13 @@
+// Disposable local accounts only. Native media API resume, not physical iOS/AirPlay.
+const{chromium,webkit}=require('playwright'),fs=require('node:fs'),assert=require('node:assert/strict');
+(async()=>{const engine=process.env.ARRIFY_ENGINE||'chromium',account=JSON.parse(fs.readFileSync(process.env.ARRIFY_AUDIT_FIXTURE||'/tmp/arrify-orientation-fixture.json','utf8'))[engine+'_phone'],b=await({chromium,webkit}[engine]).launch({headless:true,...(engine==='chromium'?{args:['--no-sandbox']}: {})});try{
+ const p=await b.newPage({viewport:{width:393,height:852},hasTouch:true,isMobile:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'}),errors=[];p.on('pageerror',e=>errors.push(e.message));await p.goto('http://127.0.0.1:8793');await p.locator('#username').fill(account.username);await p.locator('#password').fill(account.password);await p.locator('#auth-submit').click();await p.locator('.home-page').waitFor();
+ await p.evaluate(async()=>{await command({action:'play',ids:[19073,9707]},true);if(!ownsListening())await command({action:'takeover'},true)});await p.waitForFunction(()=>audio.currentTime>1&&!playback.loading);
+ await p.evaluate(()=>{window.nativeResumeAudio=audio;window.nativeResumeSource=audio.currentSrc;audio.pause()});await p.waitForFunction(()=>audio.paused&&!playback.intent);await p.waitForTimeout(600);assert.ok(await p.evaluate(()=>audio.paused&&!playback.intent),'pause remains paused');
+ // Equivalent to the browser/system starting the existing media element;
+ // intentionally bypass Arrify's resume() command to exercise the bug.
+ await p.evaluate(()=>audio.play());await p.waitForFunction(()=>!audio.paused&&playback.intent);assert.ok(await p.evaluate(()=>audio===nativeResumeAudio&&audio.currentSrc===nativeResumeSource));await p.evaluate(()=>listeningHeartbeat(true));await p.waitForFunction(()=>state.listening.observed==='playing');
+ await p.evaluate(()=>{audio.currentTime=audio.duration-.5});await p.waitForFunction(()=>state.current===9707&&!audio.paused&&playback.intent&&!playback.loading,{},{timeout:25000});assert.ok(await p.evaluate(()=>audio===nativeResumeAudio));
+ await p.evaluate(()=>playback.pause());await p.waitForTimeout(800);assert.ok(await p.evaluate(()=>audio.paused&&!playback.intent));await p.evaluate(()=>audio.dispatchEvent(new Event('playing')));assert.ok(await p.evaluate(()=>audio.paused&&!playback.intent));assert.deepEqual(errors,[]);
+ console.log('PASS '+engine+': native resume restores intent, preserves stream, publishes playing and advances queue; intentional pause/stale events remain safe. Physical AirPlay unverified.');
+ }finally{await b.close()}})().catch(e=>{console.error(e.message);process.exit(1)});

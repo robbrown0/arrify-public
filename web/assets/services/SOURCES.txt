@@ -1,0 +1,1 @@
+These SVGs are original neutral audio symbols used as integration placeholders. They contain no third-party service logos. Service names in the UI identify interoperability and do not imply endorsement.

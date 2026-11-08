@@ -1,0 +1,5 @@
+const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const source=fs.readFileSync(require('node:path').join(__dirname,'../web/output.js'),'utf8');
+function describe(navigator,audio){const context={window:{},navigator};vm.runInNewContext(source,context);return context.window.ArrifyOutput.describe(audio)}
+test('unknown iPad route stays neutral unless wireless output is confirmed',()=>{const n={userAgent:'Macintosh',platform:'MacIntel',maxTouchPoints:5};assert.equal(describe(n,{}).label,'Audio output');assert.equal(describe(n,{webkitCurrentPlaybackTargetIsWireless:false}).label,'Audio output');assert.equal(describe(n,{webkitCurrentPlaybackTargetIsWireless:true}).label,'AirPlay');assert.equal(describe(n,{remote:{state:'connected'}}).label,'Wireless output')});
+test('confirmed speaker is named while an unreported desktop route stays neutral',()=>{assert.equal(describe({userAgent:'Linux'},{}).label,'Audio output');assert.equal(describe({userAgent:'Linux'},{sinkId:'speaker-id'}).label,'Selected speaker')});

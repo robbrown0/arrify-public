@@ -1,0 +1,38 @@
+name: arrify
+services:
+  player:
+    build: .
+    image: arrify:active-streams-20261026
+    container_name: arrify-player
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:8792:8080"
+    environment:
+      ARRIFY_DATA: /data
+      ARRIFY_ORIGIN: ${ARRIFY_ORIGIN:-https://music.example.com}
+      ARRIFY_ALLOWED_ORIGINS: ${ARRIFY_ALLOWED_ORIGINS:-http://localhost:8792,http://127.0.0.1:8792}
+      ARRIFY_SECURE_COOKIE: ${ARRIFY_SECURE_COOKIE:-1}
+      ARRIFY_REQUESTS_PER_DAY: ${ARRIFY_REQUESTS_PER_DAY:-0}
+      ARRIFY_PARTY_PUBLIC_ORIGIN: ${ARRIFY_PARTY_PUBLIC_ORIGIN:-}
+      ARRIFY_IOS_APP_IDS: ${ARRIFY_IOS_APP_IDS:-}
+    volumes:
+      - /srv/arrify-example/arrify:/data
+      - /srv/arrify-example/arrify-requests:/requests
+      - /srv/music/library-a:/music/nas01:ro
+      - /srv/music/library-b:/music/unr01:ro
+      - /srv/arrify-example/music-extra:/music/extra:ro
+      - /srv/arrify-example/hitdiscovery/channels:/spectrum-channel:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 100
+    mem_limit: 768m
+    cpus: 2
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3

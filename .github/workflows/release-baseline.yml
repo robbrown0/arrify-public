@@ -1,0 +1,34 @@
+name: Release baseline
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: baseline-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - run: node --test tests/*.test.cjs
+  server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build and test the release dependencies
+        run: |
+          docker build --target test -t arrify:test .
+          docker run --rm --network none --cpus=2 --memory=2g arrify:test
+      - name: Build immutable runtime and smoke test
+        run: |
+          docker build --build-arg VCS_REF="$GITHUB_SHA" -t arrify:release .
+          bash tools/smoke_release.sh arrify:release "$GITHUB_SHA"

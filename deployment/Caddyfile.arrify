@@ -1,0 +1,5 @@
+# Example HTTPS reverse proxy; adjust hostname and upstream for your host.
+music.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8792
+}

@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh Arrify channel helper catalog snapshot
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/arrify/refresh-channel-catalog.py
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=90

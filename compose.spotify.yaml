@@ -1,0 +1,7 @@
+# Optional: use alongside the existing Arrify configuration and other provider overlays.
+services:
+  player:
+    environment:
+      ARRIFY_SPOTIFY_ENABLED: "1"
+      ARRIFY_SPOTIFY_CLIENT_ID: ${ARRIFY_SPOTIFY_CLIENT_ID:?Set the Spotify app Client ID}
+      ARRIFY_SPOTIFY_REDIRECT_URI: ${ARRIFY_SPOTIFY_REDIRECT_URI:?Set the exact registered HTTPS callback URI}
