@@ -775,3 +775,5 @@ dialog.profile-dialog .account-panel-header .dialog-close{position:relative;inse
 .mood-hub:hover .mood-cover svg{transform:scale(1.025)}.mood-hub-copy{display:flex;flex-direction:column;gap:10px;padding:20px;flex:1}.mood-hub-copy h2{font-size:1.5rem}.mood-hub-copy>span{margin-top:auto;padding-top:6px;color:#aebbb2;font-size:.85rem}.mood-hub-copy>span>span{float:right;color:#69df91}
 @media(max-width:600px){.mood-hub{padding:0;min-height:0}.mood-hub-copy{padding:16px 13px;gap:8px}.mood-hub-copy h2{font-size:1.2rem}.mood-hub-copy p{font-size:.82rem}.mood-hub-copy>span{font-size:.78rem}}
 @media(prefers-reduced-motion:reduce){.mood-cover svg{transition:none}.mood-hub:hover .mood-cover svg{transform:none}}
+
+.branding-editor{max-width:560px}.branding-preview{display:block;border-radius:22px;object-fit:contain;background:#111;margin:20px 0}.branding-editor p{line-height:1.6}.branding-editor input[type=file]{width:100%;margin:12px 0}

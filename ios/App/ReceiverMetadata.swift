@@ -15,6 +15,7 @@ import ArrifyCore
         if let artwork {
             let item = AVMutableMetadataItem()
             item.identifier = .commonIdentifierArtwork; item.dataType = "public.jpeg"
+            item.extendedLanguageTag = "und"
             item.value = artwork as NSData
             result.append(item.copy() as! AVMetadataItem)
         }

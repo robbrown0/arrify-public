@@ -136,7 +136,7 @@ public actor APIClient {
     public func artwork(path: String) async throws -> Data? {
         // Only our authenticated image endpoints; never fetch arbitrary catalog URLs.
         guard let c = URLComponents(string: path), c.scheme == nil, c.host == nil,
-              ["/api/v1/artwork/", "/api/v1/artist-artwork/", "/api/v1/stations/artwork/"].contains(where: c.path.hasPrefix) else { return nil }
+              ["/api/v1/artwork/", "/api/v1/artist-artwork/", "/api/v1/stations/artwork/", "/api/v1/branding/icon"].contains(where: c.path.hasPrefix) else { return nil }
         let response = try await authorizedResponse(path)
         guard response.status == 200, response.data.count <= 10 * 1024 * 1024 else { return nil }
         return response.data

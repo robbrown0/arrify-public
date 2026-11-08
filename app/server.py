@@ -18,6 +18,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 from .build_info import identity as build_identity
 from .accounts import Accounts
 from .avatars import Avatars
+from .branding import Branding
 from .diagnostics import Diagnostics
 from .stream_grants import StreamGrants
 from .request_submission import RequestSubmissions, RequestLimit
@@ -165,9 +166,9 @@ class Handler(BaseHTTPRequestHandler):
         except PermissionError:
             if getattr(self.server,'diagnostics',None):self.server.diagnostics.denied_stream(tid)
             raise
-    def body(self):
+    def body(self, maximum=128000):
         size=int(self.headers.get('Content-Length','0'))
-        if size<1 or size>128000: raise Error(413,'Invalid request size.')
+        if size<1 or size>maximum: raise Error(413,'Invalid request size.')
         if self.headers.get_content_type()!='application/json': raise Error(415,'JSON required.')
         value=json.loads(self.rfile.read(size))
         if not isinstance(value,dict): raise ValueError('JSON object required.')
@@ -201,13 +202,15 @@ class Handler(BaseHTTPRequestHandler):
         a,lib,player=self.server.accounts,self.server.library,self.server.player
         if native_http.dispatch(self,path):return
         if path=='/health': return self.json({'status':'ok','build':build_identity(),'catalog_tracks':len(lib.tracks),'refresh_error':lib.refresh_error,'last_refresh_success':lib.last_refresh_success,'active_streams':len(self.server.active_streams.snapshot()['items'])})
+        if path=='/api/v1/branding':return self.json(self.server.branding.status())
+        if path=='/api/v1/branding/icon':return self.send(200,self.server.branding.image(),'image/png')
         if path=='/api/v1/setup':
             return self.json({'needed':a.needs_setup(),'allowed':self.setup_allowed()})
         if not path.startswith('/api/'):
             if path=='/.well-known/apple-app-site-association':
                 app_ids=[x.strip() for x in os.environ.get('ARRIFY_IOS_APP_IDS','').split(',') if re.fullmatch(r'[A-Z0-9]{10}\.[A-Za-z0-9.-]+',x.strip())]
                 return self.json({'applinks':{'details':[{'appIDs':app_ids,'components':[{'/':'/party/join'}]}] if app_ids else []}})
-            assets={'/privacy':'privacy.html','/buffer-status.js':'buffer-status.js','/device-buffer-worker.js':'device-buffer-worker.js','/party':'party.html','/party-display':'party.html','/party-guest.js':'party-guest.js','/party-host.js':'party-host.js','/party.css':'party.css','/metadata.js':'metadata.js','/browse.js':'browse.js','/connections.js':'connections.js','/apple-music.js':'apple-music.js','/spotify.js':'spotify.js','/listening.js':'listening.js','/api.js':'api.js','/navigation.js':'navigation.js','/gapless.js':'gapless.js','/':'index.html','/app.js':'app.js','/player.js':'player.js','/playback.js':'playback.js','/install.js':'install.js','/sw.js':'sw.js','/offline.html':'offline.html','/manifest.webmanifest':'manifest.webmanifest','/style.css':'style.css','/brand.css':'brand.css','/recover':'recover.html','/recover.js':'recover.js','/output.js':'output.js','/timeline.js':'timeline.js'}
+            assets={'/branding.js':'branding.js','/privacy':'privacy.html','/buffer-status.js':'buffer-status.js','/device-buffer-worker.js':'device-buffer-worker.js','/party':'party.html','/party-display':'party.html','/party-guest.js':'party-guest.js','/party-host.js':'party-host.js','/party.css':'party.css','/metadata.js':'metadata.js','/browse.js':'browse.js','/connections.js':'connections.js','/apple-music.js':'apple-music.js','/spotify.js':'spotify.js','/listening.js':'listening.js','/api.js':'api.js','/navigation.js':'navigation.js','/gapless.js':'gapless.js','/':'index.html','/app.js':'app.js','/player.js':'player.js','/playback.js':'playback.js','/install.js':'install.js','/sw.js':'sw.js','/offline.html':'offline.html','/manifest.webmanifest':'manifest.webmanifest','/style.css':'style.css','/brand.css':'brand.css','/recover':'recover.html','/recover.js':'recover.js','/output.js':'output.js','/timeline.js':'timeline.js'}
             if re.fullmatch(r'/assets/fonts/(outfit|dm-sans)-latin-wght-normal\.woff2',path):
                 return self.send(200,(WEB/path.lstrip('/')).read_bytes(),'font/woff2',{'Cache-Control':'public, max-age=86400'})
             if re.fullmatch(r'/assets/channels/(80s-on-8|the-bridge|the-blend|1st-wave|the-pulse|classic-rewind|the-spectrum)\.svg',path):
@@ -449,6 +452,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self):
         path=urlparse(self.path).path
+        if path=='/api/v1/admin/branding':
+            user=self.identity(write=True)
+            if not user['admin']:raise Error(403,'Administrator access required.')
+            self.server.accounts.rate_limit(('branding',user['id']),12,900)
+            return self.json(self.server.branding.update(user,self.body(maximum=1400000)))
         data=self.body(); a,lib,p=self.server.accounts,self.server.library,self.server.player
         if native_http.dispatch(self,path,data):return
         if party_http.public_post(self,path,data):return
@@ -752,6 +760,7 @@ def main():
     server.listening_events=ListeningEvents();server.event_slots=threading.BoundedSemaphore(8)
     server.listening=Listening(server.player,events=server.listening_events)
     server.avatars=Avatars(accounts)
+    server.branding=Branding(DATA,WEB/'assets/icon-512.png')
     server.diagnostics=Diagnostics(DATA)
     server.active_streams=ActiveStreams()
     server.stream_grants=StreamGrants(accounts,server.player,Path(DATA)/'secrets')

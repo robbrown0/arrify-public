@@ -133,6 +133,13 @@ extension NowPlayingArtworkTests {
         XCTAssertEqual(metadata.first { $0.identifier == .commonIdentifierArtwork }?.dataValue, jpeg)
         XCTAssertFalse(ReceiverMetadata.make(track: track, artwork: nil).contains { $0.identifier == .commonIdentifierArtwork })
     }
+    @MainActor func testArtworkResizesToReceiverBoundsWithoutDistortingAspect() {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 200, height: 100)).image { context in
+            UIColor.green.setFill(); context.fill(CGRect(x: 0, y: 0, width: 200, height: 100))
+        }
+        let artwork = NowPlayingArtwork.make(image: image)
+        XCTAssertEqual(artwork.image(at: CGSize(width: 80, height: 80))?.size, CGSize(width: 80, height: 40))
+    }
     @MainActor func testBrowsingAndRefreshPopulateUnfilteredLibrary() async {
         let api = APIClient(transport: UITestTransport(), store: UITestStore())
         try? await api.login(endpoint: "https://fixture.invalid", username: "test", password: "test", deviceName: "test")

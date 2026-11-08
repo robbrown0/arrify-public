@@ -15,6 +15,8 @@ import ArrifyCore
     private var receiverArtwork: Data?
     private var systemArtwork: MPMediaItemArtwork?
     private var artworkTask: Task<Void, Never>?
+    var outputName = "iPhone"
+    var progress: Double { duration.isFinite && duration > 0 && position.isFinite ? min(1, max(0, position / duration)) : 0 }
     var position = 0.0
     var duration = 0.0
     var busy = false
@@ -45,6 +47,7 @@ import ArrifyCore
     init(api: APIClient, audioSession: any PlaybackAudioSession = SystemPlaybackAudioSession()) {
         self.api = api
         self.audioSession = audioSession
+        self.outputName = audioSession.outputName
         let key = "arrify.native.device-id"
         deviceId = UserDefaults.standard.string(forKey: key) ?? UUID().uuidString.lowercased()
         UserDefaults.standard.set(deviceId, forKey: key)
@@ -83,6 +86,9 @@ import ArrifyCore
             }
         }
         observe(AVAudioSession.routeChangeNotification) { owner, note in
+            owner.outputName = owner.audioSession.outputName
+            owner.updateReceiverMetadata()
+            owner.publishNowPlaying()
             let reason = note.routeReason
             if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue {
                 owner.player.pause(); owner.permission.userPause()
@@ -217,7 +223,9 @@ import ArrifyCore
                     artworkTask = Task { [weak self, api] in
                         let bytes = try? await api.artwork(id)
                         guard let self, !Task.isCancelled, self.state?.currentTrackId == id else { return }
-                        self.artwork = bytes.flatMap { ArtworkDecoder.image($0, pixels: 1200) }
+                        let decoded = await Task.detached(priority: .utility) { bytes.flatMap { ArtworkDecoder.image($0, pixels: 2048) } }.value
+                        guard !Task.isCancelled, self.state?.currentTrackId == id else { return }
+                        self.artwork = decoded
                         self.systemArtwork = self.artwork.map { NowPlayingArtwork.make(image: $0) }
                         self.receiverArtwork = self.artwork?.jpegData(compressionQuality: 0.9)
                         self.updateReceiverMetadata()
