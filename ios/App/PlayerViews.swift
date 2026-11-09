@@ -20,7 +20,7 @@ struct MiniPlayerView: View {
                             }
                             Spacer(minLength: 0)
                         }.contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)")
+                    }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
                     AirPlayPicker().frame(width: 44, height: 44).accessibilityIdentifier("miniAirPlay")
                     Button { Task { await playback.send(playback.showsPauseControl ? "pause" : "resume") } } label: {
                         Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill")
@@ -35,7 +35,7 @@ struct MiniPlayerView: View {
                         Rectangle().fill(.white).frame(width: proxy.size.width * playback.progress)
                     }
                 }.frame(height: 2).accessibilityHidden(true)
-            }.foregroundStyle(.white).accessibilityIdentifier("miniPlayer")
+            }.foregroundStyle(.white)
         }
     }
 }
@@ -308,7 +308,7 @@ struct TabletPlayerBar: View {
                             Text(playback.contextName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)")
+                }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
                 VStack(spacing: 8) {
                     HStack(spacing: 16) {
                         Button { Task { await playback.send("previous") } } label: { Image(systemName: "backward.end.fill").frame(width: 44, height: 44) }.accessibilityLabel("Previous song")
@@ -327,7 +327,6 @@ struct TabletPlayerBar: View {
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")
             }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
                 .padding(.horizontal, 16).padding(.vertical, 8).foregroundStyle(.white)
-                .accessibilityIdentifier("miniPlayer")
                 .sheet(isPresented: $showQueue) { UpNextView(playback: playback) }
         }
     }
