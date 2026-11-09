@@ -284,6 +284,10 @@ import ArrifyCore
         let previous = state
         state = PlaybackState.merging(update, into: state)
         guard let metadataState = state else { return }
+        if previous?.upcomingTrackIds != metadataState.upcomingTrackIds {
+            // A remote queue edit must not wait for an obsolete read-ahead download.
+            aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil
+        }
         if permission.enabled, !permission.interrupted, let previous,
            !previous.playing, metadataState.playing, metadataState.intent > previous.intent {
             permission.userPlay()
