@@ -348,9 +348,15 @@ struct HomeScreen: View {
                     }
                     if filter == "All" {
                         HStack(spacing: 20) {
-                            NavigationLink("Songs") { BrowserScreen(model: model, title: "Songs", kind: "tracks") }
-                            NavigationLink("Albums") { BrowserScreen(model: model, title: "Albums", kind: "albums") }
-                            NavigationLink("Artists") { BrowserScreen(model: model, title: "Artists", kind: "artists") }
+                            NavigationLink { BrowserScreen(model: model, title: "Songs", kind: "tracks") } label: {
+                                Text("Songs").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            }
+                            NavigationLink { BrowserScreen(model: model, title: "Albums", kind: "albums") } label: {
+                                Text("Albums").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            }
+                            NavigationLink { BrowserScreen(model: model, title: "Artists", kind: "artists") } label: {
+                                Text("Artists").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            }
                         }.font(.subheadline.weight(.semibold))
                     }
                     if let overview = model.library.overview {
