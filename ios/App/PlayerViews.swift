@@ -70,11 +70,11 @@ struct NowPlayingView: View {
                                 controls.frame(maxWidth: 480)
                             }
                         } else {
-                            cover.frame(maxWidth: min(440, max(180, proxy.size.height * 0.43)))
+                            cover.frame(maxWidth: min(440, max(160, proxy.size.height * 0.33)))
                                 .padding(.bottom, 12)
                             controls.frame(maxWidth: 520)
                         }
-                    }.padding(.horizontal, 24).padding(.bottom, 24)
+                    }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 24)
                         .frame(maxWidth: .infinity)
                 }
             }.foregroundStyle(.white).tint(.white)
