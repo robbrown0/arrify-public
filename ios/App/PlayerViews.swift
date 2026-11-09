@@ -47,6 +47,7 @@ struct NowPlayingView: View {
     @State private var seekPosition = 0.0
     @State private var showQueue = false
     @State private var showArtwork = false
+    @State private var controlsHeight: CGFloat = 360
     var body: some View {
         GeometryReader { proxy in
             let landscape = proxy.size.width > proxy.size.height
@@ -71,9 +72,10 @@ struct NowPlayingView: View {
                                 controls.frame(maxWidth: 480)
                             }
                         } else {
-                            cover.frame(maxWidth: tablet ? min(proxy.size.width * 0.68, proxy.size.height * 0.48) : min(proxy.size.width - 48, max(160, proxy.size.height - 420)))
+                            cover.frame(maxWidth: min(tablet ? proxy.size.width * 0.68 : proxy.size.width - 48, max(160, proxy.size.height - controlsHeight - 132)))
                                 .padding(.bottom, 12)
                             controls.frame(maxWidth: tablet ? 640 : 520)
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
                         }
                     }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 24)
                         .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .top)

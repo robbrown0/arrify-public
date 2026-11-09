@@ -11,7 +11,7 @@ import ArrifyCore
     let cache = AudioCache()
     // Retain the receiver-owned volume control across full-screen presentations.
     // A newly created slider must not substitute the phone's local volume.
-    @ObservationIgnored let expandedVolumeView: MPVolumeView = {
+    @ObservationIgnored lazy var expandedVolumeView: MPVolumeView = {
         let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
         view.showsRouteButton = false; view.tintColor = .white
         return view

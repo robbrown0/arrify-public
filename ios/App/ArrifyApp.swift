@@ -116,7 +116,8 @@ struct MainView: View {
                         miniPlayer.background(.regularMaterial)
                     }
                 }
-            } else if #available(iOS 26.0, *) { tabs.tabViewBottomAccessory { miniPlayer } }
+            } else if #available(iOS 26.1, *) { tabs.tabViewBottomAccessory(isEnabled: model.playback.track != nil) { miniPlayer } }
+            else if #available(iOS 26.0, *) { tabs.tabViewBottomAccessory { miniPlayer } }
             else { tabs }
         }.task { await model.refreshBranding() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(playback: model.playback) }
     }
@@ -125,7 +126,6 @@ struct MainView: View {
             Tab("Home", systemImage: "house") { withPlayer(HomeScreen(model: model)) }
             Tab("Library", systemImage: "square.stack") { withPlayer(LibraryHome(model: model)) }
             Tab("Channels", systemImage: "antenna.radiowaves.left.and.right") { withPlayer(NavigationStack { CollectionScreen(model: model, section: "channels", title: "Channels") }) }
-            Tab("Moods", systemImage: "sparkles") { withPlayer(MoodScreen(model: model)) }
             Tab("Search", systemImage: "magnifyingglass", role: .search) { withPlayer(SearchScreen(model: model)) }
             Tab("Settings", systemImage: "gearshape") { withPlayer(SettingsView(model: model)) }
         }

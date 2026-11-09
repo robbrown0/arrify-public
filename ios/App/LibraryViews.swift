@@ -53,6 +53,7 @@ struct LibraryHome: View {
                     NavigationLink { BrowserScreen(model: model, title: "Albums", kind: "albums") } label: { Label("Albums", systemImage: "square.stack") }
                     NavigationLink { BrowserScreen(model: model, title: "Artists", kind: "artists") } label: { Label("Artists", systemImage: "music.mic") }
                     NavigationLink { CollectionScreen(model: model, section: "playlists", title: "Playlists") } label: { Label("Playlists", systemImage: "music.note.list") }
+                    NavigationLink { MoodScreen(model: model) } label: { Label("Moods", systemImage: "sparkles") }
                 }.font(.title3).listRowBackground(Color.white.opacity(0.04))
                 if let overview = model.library.overview {
                     let featured = Array(overview.items.filter { $0.section == "playlists" }.prefix(8))
