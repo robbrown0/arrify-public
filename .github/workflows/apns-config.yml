@@ -1,0 +1,22 @@
+name: Prepare encrypted APNs configuration
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: testflight
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Encrypt configuration for the Arrify server
+        env:
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
+        run: python3 tools/prepare_apns_config.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: encrypted-apns-configuration
+          path: build/apns-config.cms
+          retention-days: 1

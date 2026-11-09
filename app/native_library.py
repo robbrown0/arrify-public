@@ -37,6 +37,13 @@ def overview(library, accounts, uid):
 
 
 def selection(library, accounts, uid, kind, key):
+    if kind == 'favorites' and key == 'liked':
+        with accounts.lock:
+            ids = [r[0] for r in accounts.db.execute('SELECT track_id FROM favorites WHERE user_id=? ORDER BY rowid DESC', (uid,))]
+        with library.index_lock:
+            ids = [i for i in ids if i in library.tracks]
+        return {'id': 'liked', 'kind': 'favorites', 'name': 'Liked songs', 'subtitle': 'Your saved songs',
+                'section': 'personal', 'artwork': '/api/v1/artwork/' + str(ids[0]) if ids else None, 'track_count': len(ids)}, ids
     if kind in ('albums', 'artists'):
         with library.index_lock:
             row = getattr(library, kind).get(key)
@@ -103,3 +110,20 @@ def expand_playback(library, accounts, uid, data):
         if data.get('shuffle'): random.SystemRandom().shuffle(ids)
         command['ids'] = ids
     return command
+
+
+def favorites(library, accounts, uid, data=None):
+    if data is not None:
+        if set(data) != {'track_id', 'liked'} or type(data['track_id']) is not int or type(data['liked']) is not bool:
+            raise NativeError(400, 'invalid_request', 'Choose a song and whether to save it.')
+        tid = data['track_id']
+        with library.index_lock:
+            if tid not in library.tracks:
+                raise NativeError(404, 'not_found', 'Song no longer available.')
+        with accounts.lock, accounts.db:
+            if data['liked']:
+                accounts.db.execute('INSERT OR IGNORE INTO favorites VALUES (?,?)', (uid, tid))
+            else:
+                accounts.db.execute('DELETE FROM favorites WHERE user_id=? AND track_id=?', (uid, tid))
+    _, ids = selection(library, accounts, uid, 'favorites', 'liked')
+    return {'track_ids': ids}

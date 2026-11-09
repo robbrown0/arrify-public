@@ -54,3 +54,24 @@ class NativeLibraryTests(unittest.TestCase):
         source=(Path(__file__).resolve().parents[1]/'web/app.js').read_text().split('const moodGroups=')[1].split(';')[0]
         source=re.sub(r'(\w+):',r'"\1":',source).replace("'",'"')
         self.assertEqual(MOOD_GROUPS,json.loads(source))
+
+class FavoriteLibraryTests(NativeLibraryTests):
+    def test_favorites_share_web_storage_and_are_account_scoped(self):
+        import sqlite3
+        from app.native_library import favorites
+        db = sqlite3.connect(':memory:')
+        self.addCleanup(db.close)
+        db.execute('CREATE TABLE favorites(user_id INTEGER,track_id INTEGER,PRIMARY KEY(user_id,track_id))')
+        a = SimpleNamespace(db=db, lock=contextlib.nullcontext())
+        self.assertEqual(favorites(self.lib,a,1,{'track_id':2,'liked':True})['track_ids'],[2])
+        self.assertEqual(favorites(self.lib,a,2)['track_ids'],[])
+        db.execute('INSERT INTO favorites VALUES(1,3)') # web write appears natively
+        result = detail(self.lib,a,1,'/detail?kind=favorites&id=liked')
+        self.assertEqual([t['id'] for t in result['items']],[3,2])
+        command = expand_playback(self.lib,a,1,{'action':'play','source':{'kind':'favorites','id':'liked'}})
+        self.assertEqual(command['ids'],[3,2])
+        self.assertEqual(command['playback_context']['name'],'Liked songs')
+        favorites(self.lib,a,1,{'track_id':2,'liked':False})
+        self.assertEqual(db.execute('SELECT track_id FROM favorites WHERE user_id=1').fetchall(),[(3,)])
+        for data in ({'track_id':True,'liked':True},{'track_id':1,'liked':'true'},{'track_id':999,'liked':True},{'track_id':1,'liked':True,'user_id':2}):
+            with self.assertRaises(NativeError):favorites(self.lib,a,1,data)

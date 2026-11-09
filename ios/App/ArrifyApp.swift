@@ -6,6 +6,7 @@ import AVKit
     let api: APIClient
     let playback: PlaybackCoordinator
     let library: LibraryStore
+    let favorites: FavoritesStore
     let artwork: ArtworkStore
     var brandIcon: UIImage?
     var signedIn = false
@@ -27,19 +28,20 @@ import AVKit
         #else
         playback = PlaybackCoordinator(api: api)
         #endif
+        favorites = FavoritesStore(api: api)
         library = LibraryStore(api: api)
         artwork = ArtworkStore(api: api)
     }
     func restore() async {
         defer { restoring = false }
         do {
-            if let saved = try await api.restore() { endpoint = saved; signedIn = true; playback.start() }
+            if let saved = try await api.restore() { endpoint = saved; signedIn = true; await playback.remoteActivity.clearRestoredActivities(); playback.start() }
         } catch { self.error = error.localizedDescription }
     }
     func login(username: String, password: String) async {
         do {
             try await api.login(endpoint: endpoint, username: username, password: password, deviceName: UIDevice.current.model)
-            signedIn = true; error = nil; playback.start()
+            signedIn = true; error = nil; await playback.remoteActivity.clearRestoredActivities(); playback.start()
         } catch { self.error = error.localizedDescription }
     }
     func refreshBranding() async {
@@ -47,7 +49,7 @@ import AVKit
         guard signedIn else { return }
         brandIcon = data.flatMap { ArtworkDecoder.image($0, pixels: 192) }
     }
-    func logout() async { brandIcon = nil; playback.stop(); library.clear(); artwork.clear(); signedIn = false; await api.logout() }
+    func logout() async { await playback.remoteActivity.stop(); brandIcon = nil; playback.stop(); library.clear(); favorites.clear(); artwork.clear(); signedIn = false; await api.logout() }
 }
 
 @main struct ArrifyApp: App {
@@ -74,6 +76,7 @@ struct SignInView: View {
         NavigationStack {
             Form {
                 Section {
+                    Image("BrandLogo").resizable().scaledToFit().frame(height: 96).frame(maxWidth: .infinity).accessibilityHidden(true)
                     Text("Your music. Wherever you listen.").font(.title2.bold())
                     Text("Sign in with your Arrify account.").foregroundStyle(.secondary)
                 }
@@ -119,7 +122,8 @@ struct MainView: View {
             } else if #available(iOS 26.1, *) { tabs.tabViewBottomAccessory(isEnabled: model.playback.track != nil) { miniPlayer } }
             else if #available(iOS 26.0, *) { tabs.tabViewBottomAccessory { miniPlayer } }
             else { tabs }
-        }.task { await model.refreshBranding() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(playback: model.playback) }
+        }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
+        .task { await model.refreshBranding(); await model.favorites.refresh() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(playback: model.playback, favorites: model.favorites) }
     }
     private var tabs: some View {
         TabView {
@@ -140,6 +144,10 @@ struct MainView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 if model.playback.hasOtherOutput {
                     HStack { Text("Playing on another device").font(.footnote); Spacer(); Button("Play here") { Task { await model.playback.send("takeover") } } }.padding().background(.thinMaterial)
+                }
+                if model.playback.connectionInterrupted {
+                    Label("Reconnecting… Playback continues where possible.", systemImage: "wifi.exclamationmark")
+                        .font(.footnote).padding().frame(maxWidth: .infinity).background(.thinMaterial)
                 }
                 if let message = model.playback.message { Text(message).font(.footnote).padding().frame(maxWidth: .infinity).background(.thinMaterial) }
             }
@@ -167,6 +175,13 @@ struct SettingsView: View {
                         Text("Original").tag("original"); Text("AAC").tag("aac"); Text("MP3").tag("mp3")
                     }
                     Text("Applies to the next song.").font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("Lock Screen") {
+                    Text("Follow playback from another device on this account using a read-only Live Activity. Start it from that device’s player in Arrify.").font(.footnote)
+                    if model.playback.remoteActivity.active {
+                        Button("Stop Lock Screen status") { Task { await model.playback.remoteActivity.stop() } }
+                    }
+                    if let error = model.playback.remoteActivity.error { Text(error).font(.footnote).foregroundStyle(.orange) }
                 }
                 Section("Device cache") { CacheStatusView(cache: model.playback.cache) }
                 Section { Button("Sign out", role: .destructive) { Task { await model.logout() } } }

@@ -6,6 +6,7 @@ import ArrifyCore
 /// One app-lifetime owner of AVPlayer, system controls and server ownership.
 @MainActor @Observable final class PlaybackCoordinator {
     let api: APIClient
+    let remoteActivity: RemotePlaybackActivity
     private let audioSession: any PlaybackAudioSession
     let player = AVQueuePlayer()
     let cache = AudioCache()
@@ -22,7 +23,9 @@ import ArrifyCore
     private var queuedTracks: [ObjectIdentifier: Int] = [:]
     private var queuedEpoch = -1
     private var transitionTask: UIBackgroundTaskIdentifier = .invalid
-    private var lastNowPlayingUpdate = Date.distantPast
+    private var nowPlayingGate = NowPlayingUpdateGate()
+    private var artworkRevision = 0
+    private var receiverMetadataKey: String?
     var contextName: String { state?.context?.name ?? "Queue" }
     let deviceId: String
     var state: PlaybackState?
@@ -43,6 +46,8 @@ import ArrifyCore
     var duration = 0.0
     var busy = false
     var message: String?
+    var connectionInterrupted = false
+    private var connectionFailures = 0
     var profile = "original"
     var isPlaying: Bool { player.timeControlStatus == .playing }
     var ownsOutput: Bool { state?.ownerDeviceId == deviceId }
@@ -72,6 +77,7 @@ import ArrifyCore
 
     init(api: APIClient, audioSession: any PlaybackAudioSession = SystemPlaybackAudioSession()) {
         self.api = api
+        self.remoteActivity = RemotePlaybackActivity(api: api)
         self.audioSession = audioSession
         self.outputName = audioSession.outputName
         let key = "arrify.native.device-id"
@@ -89,9 +95,7 @@ import ArrifyCore
                 self.position = time.seconds.isFinite ? time.seconds : 0
                 let seconds = self.player.currentItem?.duration.seconds ?? 0
                 self.duration = seconds.isFinite ? seconds : 0
-                if Date().timeIntervalSince(self.lastNowPlayingUpdate) >= 5 {
-                    self.publishNowPlaying(); self.lastNowPlayingUpdate = Date()
-                }
+                self.publishNowPlaying()
                 if self.player.currentItem?.status == .failed { self.message = "Playback stopped. Tap Retry to reconnect." }
             }
         }
@@ -182,7 +186,7 @@ import ArrifyCore
         }
     }
     func stop() {
-        sessionGeneration = UUID(); permission = PlaybackPermission()
+        sessionGeneration = UUID(); permission = PlaybackPermission(); connectionInterrupted = false; connectionFailures = 0; message = nil
         aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil; cache.reset(); finishBackgroundTransition()
         eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false; liveConnected = false
         pollTask?.cancel(); pollTask = nil; prepareTask?.cancel(); prepareTask = nil
@@ -190,6 +194,7 @@ import ArrifyCore
         artworkTask?.cancel(); artworkTask = nil; artwork = nil; receiverArtwork = nil; systemArtwork = nil
         loadedKey = nil; desiredKey = nil; state = nil; track = nil; position = 0; duration = 0; busy = false
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        nowPlayingGate = NowPlayingUpdateGate()
         try? audioSession.deactivate()
     }
     private func liveUpdate() async {
@@ -225,7 +230,12 @@ import ArrifyCore
                 guard generation == sessionGeneration else { return }
                 state = PlaybackState.merging(ack, into: state)
             }
-        } catch { if generation == sessionGeneration { message = "Connection interrupted. Playback will continue where possible." } }
+            connectionFailures = 0; connectionInterrupted = false
+        } catch is CancellationError {} catch {
+            guard generation == sessionGeneration, !Task.isCancelled else { return }
+            connectionFailures += 1
+            connectionInterrupted = connectionFailures >= 2
+        }
     }
     func play(_ track: Track, in tracks: [Track]) async {
         let ids = Array(tracks.drop(while: { $0.id != track.id }).prefix(1000).map(\.id))
@@ -283,7 +293,7 @@ import ArrifyCore
             }
             let update = try await api.command(command)
             guard generation == sessionGeneration else { return }
-            message = nil
+            message = nil; connectionFailures = 0; connectionInterrupted = false
             await apply(update)
         } catch {
             guard generation == sessionGeneration else { return }
@@ -322,6 +332,7 @@ import ArrifyCore
                         let decoded = await Task.detached(priority: .utility) { bytes.flatMap { ArtworkDecoder.image($0, pixels: 2048) } }.value
                         guard !Task.isCancelled, self.state?.currentTrackId == id else { return }
                         self.artwork = decoded
+                        self.artworkRevision += 1
                         self.systemArtwork = self.artwork.map { NowPlayingArtwork.make(image: $0) }
                         self.receiverArtwork = self.artwork?.jpegData(compressionQuality: 0.9)
                         self.updateReceiverMetadata()
@@ -331,12 +342,16 @@ import ArrifyCore
             }
         }
         guard let state = self.state else { return }
+        Task { [remoteActivity, track, displayOutputName, ownsOutput] in
+            await remoteActivity.update(state: state, track: track, destination: displayOutputName, ownsOutput: ownsOutput)
+        }
         if hasOtherOutput { position = state.positionSeconds; duration = state.durationSeconds ?? 0 }
         guard ownsOutput, permission.enabled, let id = state.currentTrackId else {
             aheadTask?.cancel(); aheadTask = nil
             prepareTask?.cancel(); prepareTask = nil; player.pause(); player.removeAllItems(); queuedTracks = [:]
             loadedKey = nil; desiredKey = nil; busy = false
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            nowPlayingGate = NowPlayingUpdateGate()
             return
         }
         let key = "\(id):\(state.ownerEpoch):\(state.playId)"
@@ -455,10 +470,17 @@ import ArrifyCore
     }
     private func updateReceiverMetadata() {
         guard let track, track.id == state?.currentTrackId else { return }
-        player.currentItem?.externalMetadata = ReceiverMetadata.make(track: track, artwork: receiverArtwork)
+        guard let item = player.currentItem else { return }
+        let key = "\(ObjectIdentifier(item)):\(track.id):\(artworkRevision)"
+        guard receiverMetadataKey != key else { return }
+        receiverMetadataKey = key
+        item.externalMetadata = ReceiverMetadata.make(track: track, artwork: receiverArtwork)
     }
     private func publishNowPlaying() {
         guard ownsOutput, permission.enabled, loadedKey != nil, let track else { return }
+        let signature = "\(track.id):\(artworkRevision):\(Int(duration)):\(state?.playId ?? 0)"
+        guard nowPlayingGate.shouldPublish(signature: signature, position: position,
+                                          rate: isPlaying ? 1 : 0, now: ProcessInfo.processInfo.systemUptime) else { return }
         var info: [String: Any] = [MPMediaItemPropertyTitle: track.title,
             MPMediaItemPropertyArtist: track.artist, MPMediaItemPropertyAlbumTitle: track.album,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,

@@ -122,3 +122,23 @@ extension LaunchTests {
         app.buttons["Close artwork"].tap()
     }
 }
+
+extension LaunchTests {
+    @MainActor func testLikedSongsCanBeSavedAndRemoved() {
+        let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Songs"].waitForExistence(timeout: 10)); app.buttons["Songs"].tap()
+        let addSong = app.buttons["Add to Liked songs: Just Like a Pill"]
+        XCTAssertTrue(addSong.waitForExistence(timeout: 10)); addSong.tap()
+        XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
+        app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Liked songs"].waitForExistence(timeout: 5)); app.buttons["Liked songs"].tap()
+        XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Liked songs"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["Remove from Liked songs: Just Like a Pill"].tap()
+        XCTAssertTrue(app.staticTexts["A place for the keepers"].waitForExistence(timeout: 10))
+    }
+}

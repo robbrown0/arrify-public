@@ -116,3 +116,45 @@ uploading alone does not make a build externally available.
 
 ### Review readiness
 The bundled icon is Arrify's original audio-bar mark, reproducible with `tools/generate_brand.py`. Public privacy information is available before login and from Settings at `https://arrify.robnets.com/privacy`. The isolated review service uses six original demo instrumentals (see `tools/demo/README.md`); it has no production media or account mounts. External submission verifies the exact demo titles and artist before sending Apple reviewer credentials.
+
+### Remote Lock Screen status
+
+The optional WidgetKit/ActivityKit extension displays another device's playback
+from the same signed-in account. The user explicitly starts it in the expanded
+player. It is read-only: tapping opens Arrify, without issuing a playback command.
+It does not broaden account permissions or claim that Wi-Fi membership proves
+control authorization. Local-only interactive controls require a separately
+verified device-pairing design before being added.
+
+The server accepts ActivityKit update tokens through the authenticated
+`/api/v1/native/live-activity` endpoint. Subscriptions are tied to the native
+session family, limited to four per account, and expire after seven hours.
+Revocation cascades to subscriptions. Updates are coalesced; unchanged playback
+refreshes at most once a minute, with low APNs priority and a 90-second stale date.
+The card ends when playback moves to another owner or the playing device goes
+silent for two minutes. No silent audio or persistent background SSE is used.
+
+Server provisioning (private data mount; never commit these files):
+
+- `/data/secrets/apns.p8`: APNs EC private key, readable only by the runtime owner.
+- `/data/secrets/apns.json`: `team_id`, `key_id`, `environment` (`production` for
+  TestFlight, `sandbox` for development). The topic is fixed to
+  `com.robnets.arrify.push-type.liveactivity`.
+- Enable Push Notifications for the main app identifier. The widget identifier is
+  `com.robnets.arrify.liveactivity`; Xcode automatic signing provisions it.
+
+`Prepare encrypted APNs configuration` accepts `APNS_KEY_ID` and
+`APNS_PRIVATE_KEY` Actions secrets and creates only a CMS-encrypted artifact for
+an operator-held recipient key. The checked-in recipient certificate is public;
+the matching private key is kept outside the repository. Rotate that certificate
+before using the transfer after its expiry. The server needs outbound HTTPS to
+APNs, curl with HTTP/2, and OpenSSL. Missing configuration leaves the feature
+unavailable without affecting audio playback.
+
+Artwork assets: the app icon is the owner's supplied image. The transparent
+`web/assets/arrify-logo.png` was extracted with the built-in image-generation tool
+using: “Remove only the white background including inner openings; preserve the
+metallic A/music note, gold cutlass, lighting, proportions and details; true alpha
+PNG, no redesign or text.” `tools/generate_brand.py` exports deterministic icon
+sizes from `web/assets/arrify-icon-source.jpg`. Server custom icons remain in the
+server's private data mount and do not alter another server's branding.

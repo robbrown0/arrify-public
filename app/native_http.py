@@ -20,7 +20,7 @@ def dispatch(handler, path, data=None):
         if path == PREFIX + 'capabilities' and data is None:
             result = service.capabilities()
             if getattr(handler.server, 'native_media', None):
-                result['features'] += ['native_media_manifest_v1', 'native_catalog_v1', 'native_playback_v1', 'native_library_v1', 'native_queue_v1']
+                result['features'] += ['native_media_manifest_v1', 'native_catalog_v1', 'native_playback_v1', 'native_library_v1', 'native_queue_v1', 'native_favorites_v1']
                 result['media_profiles'] = ['original', 'aac', 'mp3']
                 result['media_leveling_modes'] = ['off']
                 result['native_prefetch_tracks'] = 3
@@ -40,7 +40,7 @@ def dispatch(handler, path, data=None):
                         headers['Retry-After'] = '1'
                         raise NativeError(503, 'sign_in_busy', 'Sign-in is busy. Try again.') from None
                     raise NativeError(401, 'invalid_credentials', 'Invalid credentials.') from None
-        elif path in (PREFIX + 'sessions', PREFIX + 'sessions/revoke', PREFIX + 'playback/manifest', PREFIX + 'catalog', PREFIX + 'playback', PREFIX + 'playback/queue', PREFIX + 'library', PREFIX + 'library/detail'):
+        elif path in (PREFIX + 'sessions', PREFIX + 'sessions/revoke', PREFIX + 'playback/manifest', PREFIX + 'catalog', PREFIX + 'playback', PREFIX + 'playback/queue', PREFIX + 'library', PREFIX + 'library/detail', PREFIX + 'favorites', PREFIX + 'live-activity'):
             token, kind = handler.token()
             if kind != 'native':
                 raise NativeError(401, 'unauthenticated', 'A bearer token is required.')
@@ -48,7 +48,15 @@ def dispatch(handler, path, data=None):
                 user = a.identity(token, kind)
             except PermissionError:
                 raise NativeError(401, 'unauthenticated', 'Sign in again.') from None
-            if path == PREFIX + 'catalog' and data is None:
+            if path == PREFIX + 'live-activity':
+                try:a.rate_limit(('native-live-activity', user['id']), 30, 60)
+                except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
+                result = handler.server.live_activities.dispatch(user['id'], token, data)
+            elif path == PREFIX + 'favorites':
+                try:a.rate_limit(('native-favorites', user['id']), 120, 60)
+                except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
+                result = native_library.favorites(handler.server.library, a, user['id'], data)
+            elif path == PREFIX + 'catalog' and data is None:
                 try:a.rate_limit(('native-catalog', user['id']), 180, 60)
                 except ValueError:
                     headers['Retry-After'] = '60'

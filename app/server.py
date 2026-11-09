@@ -772,6 +772,8 @@ def main():
     server.prepare_slots=threading.BoundedSemaphore(1)
     server.render_cache=RenderCache(DATA)
     server.native_media=NativeMedia(server)
+    from .live_activity import LiveActivities
+    server.live_activities=LiveActivities(accounts,server.listening,DATA)
     from .request_progress import RequestProgress
     server.request_progress=RequestProgress(accounts,lib)
     server.apple_music=AppleMusic(accounts,ORIGIN)
@@ -781,6 +783,6 @@ def main():
     threading.Thread(target=server.request_progress.background,daemon=True).start()
     threading.Thread(target=lib.background_refresh,daemon=True).start()
     try:server.serve_forever()
-    finally:server.native_media.close();server.server_close()
+    finally:server.live_activities.close();server.native_media.close();server.server_close()
 
 if __name__=='__main__': main()
