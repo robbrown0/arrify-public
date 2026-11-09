@@ -483,6 +483,9 @@
           },
           "429": {
             "description": "Retry shortly"
+          },
+          "404": {
+            "description": "Song no longer available"
           }
         },
         "requestBody": {

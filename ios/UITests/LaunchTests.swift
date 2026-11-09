@@ -43,9 +43,16 @@ final class LaunchTests: XCTestCase {
         let closeSearch = app.buttons["Close"].exists ? app.buttons["Close"] : app.buttons["Cancel"]
         closeSearch.tap()
         app.buttons["Settings"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["Sign out"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["privacyPolicy"].firstMatch.exists)
-        app.buttons["Sign out"].tap()
+        let signOut = app.buttons["Sign out"]
+        for _ in 0..<5 {
+            if signOut.exists && signOut.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(signOut.waitForExistence(timeout: 5))
+        XCTAssertTrue(signOut.isHittable)
+        signOut.tap()
         XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 5))
     }
 }

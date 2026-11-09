@@ -62,9 +62,11 @@ class APNs:
                        'apns-push-type: liveactivity', 'apns-priority: 5', 'apns-expiration: ' + str(now + 90),
                        'apns-collapse-id: ' + activity, 'content-type: application/json']:
             lines.append('header = ' + json.dumps(header))
-        result = subprocess.run(['curl', '--http2', '--silent', '--max-time', '10', '--output', '/dev/null', '--write-out', '%{http_code}', '--config', '-'],
+        result = subprocess.run(['curl', '--http2', '--silent', '--max-time', '10', '--max-filesize', '4096', '--write-out', '\n%{http_code}', '--config', '-'],
                                 input='\n'.join(lines).encode(), capture_output=True, timeout=12, check=True)
-        return int(result.stdout)
+        body, code = result.stdout.rsplit(b'\n', 1)
+        response = json.loads(body) if body else {}
+        return int(code), response.get('reason', '')
 
 
 class LiveActivities:
@@ -141,17 +143,20 @@ class LiveActivities:
             if not ended and previous and previous[0] == fingerprint and now - previous[1] < 60: continue
             aps = {'timestamp': now, 'event': 'end' if ended else 'update', 'content-state': content, 'stale-date': now + 90}
             if ended: aps['dismissal-date'] = now
-            try: code = self.sender.send(row['token'], {'aps': aps}, row['activity'])
+            try: code, reason = self.sender.send(row['token'], {'aps': aps}, row['activity'])
             except (OSError, ValueError, subprocess.SubprocessError):
                 self.retry_after = now + 30; return
-            if code in (200, 400, 410):
-                if ended or code != 200:
+            invalid_token = code == 410 or (code == 400 and reason in ('BadDeviceToken', 'DeviceTokenNotForTopic'))
+            if code == 200 or invalid_token:
+                if ended or invalid_token:
                     with self.a.lock:self.a.db.execute('DELETE FROM live_activities WHERE family=? AND activity=?', key)
                     self.sent.pop(key, None)
                 else:self.sent[key] = (fingerprint, now)
-            elif code in (401, 403, 429) or code >= 500:
+            else:
+                # BadTopic and other provider errors are not invalid device tokens.
+                # Keep subscriptions so correcting configuration can restore updates.
                 logging.getLogger(__name__).warning('APNs update deferred (HTTP %s).', code)
-                self.retry_after = now + (300 if code in (401, 403) else 30); return
+                self.retry_after = now + (30 if code == 429 or code >= 500 else 300); return
 
     def background(self):
         while not self.stopped.wait(5):

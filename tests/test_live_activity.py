@@ -16,9 +16,9 @@ class LiveActivityTests(unittest.TestCase):
         self.uid = self.a.identity(self.login['access_token'],'native')['id']
         self.state = {'track':{'title':'Song','artist':'Artist'},'listening':{'owner':'player','playing':True,'seen':int(time.time()),'output':'Office'}}
         self.calls = []
-        self.code = 200
+        self.code = 200; self.reason = ""
         self.service = LiveActivities(self.a, SimpleNamespace(state=lambda uid:self.state), self.tmp.name,
-            sender=SimpleNamespace(send=lambda *args:self.calls.append(args) or self.code), start_worker=False)
+            sender=SimpleNamespace(send=lambda *args:self.calls.append(args) or (self.code, self.reason)), start_worker=False)
         self.addCleanup(self.service.close)
     def register(self, activity='first', token='a'*64, owner='player'):
         return self.service.dispatch(self.uid,self.login['access_token'],{'action':'register','activity_id':activity,'token':token,'owner_device_id':owner})
@@ -57,3 +57,9 @@ class LiveActivityTests(unittest.TestCase):
         with self.assertLogs('app.live_activity',level='WARNING'):
             disabled=LiveActivities(self.a,self.service.listening,self.tmp.name,start_worker=False)
         self.assertFalse(disabled.enabled)
+
+    def test_provider_errors_back_off_without_losing_subscription(self):
+        self.register(); self.code=400; self.reason='BadTopic'
+        self.service.tick(); self.service.tick()
+        self.assertEqual(len(self.calls),1)
+        self.assertEqual(self.a.db.execute('SELECT count(*) FROM live_activities').fetchone()[0],1)

@@ -15,7 +15,7 @@ import WidgetKit
                 }
                 Spacer(minLength: 0)
                 Image(systemName: context.state.playing ? "waveform" : "pause.fill").accessibilityLabel(context.state.playing ? "Playing" : "Paused")
-            }.padding().activityBackgroundTint(.black).activitySystemActionForegroundColor(.white)
+            }.padding().foregroundStyle(.white).activityBackgroundTint(.black).activitySystemActionForegroundColor(.white)
                 .widgetURL(URL(string: "arrify://player"))
         } dynamicIsland: { context in
             DynamicIsland {
