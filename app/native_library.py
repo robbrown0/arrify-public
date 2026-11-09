@@ -96,6 +96,7 @@ def expand_playback(library, accounts, uid, data):
         raise NativeError(409, 'catalog_changed', 'That song is no longer in this list.')
     if type(data.get('shuffle', False)) is not bool: raise NativeError(400, 'invalid_request', 'Invalid shuffle setting.')
     command = {k: v for k, v in data.items() if k not in ('source', 'shuffle')}
+    command['playback_context'] = {'kind': source['kind'], 'name': str(item.get('name') or item.get('title') or 'Library')[:200]}
     if source['kind'] == 'channels':
         command['channel'] = source['id']
     else:

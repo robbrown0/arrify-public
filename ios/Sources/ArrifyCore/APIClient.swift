@@ -141,6 +141,11 @@ public actor APIClient {
         guard response.status == 200, response.data.count <= 10 * 1024 * 1024 else { return nil }
         return response.data
     }
+    public func queue(offset: Int = 0, revision: Int? = nil) async throws -> QueuePage {
+        var path = "/api/v1/native/playback/queue?offset=\(offset)&limit=100"
+        if let revision { path += "&revision=\(revision)" }
+        return try await call(path)
+    }
     public func state() async throws -> PlaybackState { try await call("/api/v1/native/playback") }
     public func command(_ command: PlaybackCommand) async throws -> PlaybackState {
         try await call("/api/v1/native/playback", method: "POST", body: Self.encoder().encode(command))

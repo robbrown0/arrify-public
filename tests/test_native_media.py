@@ -177,6 +177,24 @@ class NativeMediaHTTPTests(unittest.TestCase):
         self.assertEqual(self.api('playback', {'action':'play','source':{'kind':'playlists','id':str(private)},
             'device_id':'a'*32,'expected_revision':started['queue_revision']})[0],404)
 
+    def test_native_queue_paging_duplicate_occurrences_and_stale_edits(self):
+        _, state = self.api('playback')
+        code, state = self.api('playback', {'action':'play','ids':[1,2,3,2,1], 'device_id':'a'*32, 'expected_revision':state['queue_revision']})
+        self.assertEqual(code,200)
+        code,page=self.api('playback/queue?limit=2')
+        self.assertEqual(code,200);self.assertEqual(page['total'],4)
+        self.assertEqual([x['track']['id'] for x in page['items']],[2,3])
+        self.assertEqual(self.api('playback/queue?offset=2')[0],409)
+        code,tail=self.api('playback/queue?offset=2&revision='+str(page['revision']))
+        self.assertEqual([x['index'] for x in tail['items']],[2,3])
+        code,moved=self.api('playback',{'action':'reorder','from':2,'to':0,'device_id':'a'*32,'expected_revision':page['revision']})
+        self.assertEqual(code,200)
+        self.assertEqual(self.api('playback',{'action':'remove','index':0,'device_id':'a'*32,'expected_revision':page['revision']})[0],409)
+        self.assertEqual(self.api('playback/queue?offset=2&revision='+str(page['revision']))[0],409)
+        code,jumped=self.api('playback',{'action':'queue_jump','index':2,'device_id':'a'*32,'expected_revision':moved['queue_revision']})
+        self.assertEqual(code,200);self.assertEqual(jumped['current_track_id'],3)
+        self.assertEqual(jumped['upcoming_track_ids'],[1]);self.assertTrue(jumped['playing'])
+
     def test_native_playback_snapshot_conflict_and_duplicate_next(self):
         status, state = self.api('playback')
         self.assertEqual(status, 200); self.assertEqual(state['upcoming_track_ids'], [2,3])

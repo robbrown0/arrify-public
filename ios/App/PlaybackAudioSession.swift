@@ -12,13 +12,15 @@ extension PlaybackAudioSession { var outputName: String { "Native app" } }
 @MainActor struct SystemPlaybackAudioSession: PlaybackAudioSession {
     var outputName: String {
         let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
-        let names = outputs.map(\.portName).joined(separator: ", ")
+        let names = outputs.map(\.portName).filter { !$0.isEmpty }.joined(separator: ", ")
         let prefix = outputs.contains { $0.portType == .airPlay } ? "AirPlay · " : outputs.contains { $0.portType == .carAudio } ? "CarPlay · " : ""
-        return String((prefix + (names.isEmpty ? "Native app" : names)).prefix(80))
+        return String((names.lowercased() == "airplay" ? "AirPlay" : prefix + (names.isEmpty ? "Audio output" : names)).prefix(80))
     }
     func activate() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
+        if session.category != .playback || session.mode != .default || session.routeSharingPolicy != .longFormAudio {
+            try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
+        }
         try session.setActive(true)
     }
     func deactivate() throws {

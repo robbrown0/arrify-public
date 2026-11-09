@@ -57,7 +57,7 @@ struct NowPlayingView: View {
                         HStack {
                             Button("Close player", systemImage: "chevron.down") { dismiss() }
                                 .labelStyle(.iconOnly).frame(width: 44, height: 44)
-                            Spacer()
+                            Text(playback.contextName).font(.subheadline.weight(.semibold)).lineLimit(1).frame(maxWidth: .infinity)
                             Menu {
                                 Button("Show artwork", systemImage: "photo") { showArtwork = true }
                                 Button("Up next", systemImage: "list.bullet") { showQueue = true }
@@ -137,7 +137,7 @@ struct NowPlayingView: View {
                 }.accessibilityLabel("Repeat").accessibilityValue(playback.state?.repeatMode ?? "off")
                     .disabled(playback.state?.queueControlsAvailable != true)
             }.buttonStyle(.plain)
-            SystemVolumeSlider().frame(height: 32).padding(.top, 6)
+            SystemVolumeSlider().id(playback.outputName).frame(height: 32).padding(.top, 6)
             HStack {
                 Button { showArtwork = true } label: { Image(systemName: "photo").frame(width: 44, height: 44) }
                     .accessibilityLabel("Show artwork").accessibilityIdentifier("artworkDisplayButton")
@@ -179,38 +179,69 @@ struct PlayerBackdrop: View {
 struct UpNextView: View {
     @Bindable var playback: PlaybackCoordinator
     @Environment(\.dismiss) private var dismiss
-    @State private var tracks: [Track] = []
-    @State private var loading = true
-    @State private var failed = false
+    @State private var entries: [QueueEntry] = []
+    @State private var revision: Int?
+    @State private var nextOffset: Int?
+    @State private var total = 0
+    @State private var loading = false
+    @State private var error: String?
     var body: some View {
         NavigationStack {
             List {
                 if let track = playback.track {
-                    Section("Playing") { row(track) }
+                    Section(playback.contextName) { trackRow(track) }
                 }
-                Section("Next songs") {
+                Section("Up Next · \(total)") {
+                    if let error { Text(error).foregroundStyle(.orange) }
+                    ForEach(entries) { entry in
+                        Button { Task { await change("queue_jump", index: entry.index) } } label: {
+                            HStack { trackRow(entry.track); Spacer(); Image(systemName: "play.fill").font(.caption) }
+                        }.buttonStyle(.plain).accessibilityLabel("Play queued \(entry.track.title)")
+                            .contextMenu {
+                                Button("Play now", systemImage: "play.fill") { Task { await change("queue_jump", index: entry.index) } }
+                                if playback.state?.queueControlsAvailable == true {
+                                    Button("Play next", systemImage: "text.line.first.and.arrowtriangle.forward") { Task { await change("reorder", from: entry.index, to: 0) } }
+                                    Button("Remove", systemImage: "minus.circle", role: .destructive) { Task { await change("remove", index: entry.index) } }
+                                }
+                            }
+                    }.onDelete { offsets in
+                        guard let first = offsets.first, entries.indices.contains(first) else { return }
+                        Task { await change("remove", index: entries[first].index) }
+                    }.onMove { offsets, destination in
+                        guard let first = offsets.first, entries.indices.contains(first) else { return }
+                        let target = destination > first ? destination - 1 : destination
+                        guard entries.indices.contains(target) else { return }
+                        Task { await change("reorder", from: entries[first].index, to: entries[target].index) }
+                    }.deleteDisabled(playback.state?.queueControlsAvailable != true)
+                        .moveDisabled(playback.state?.queueControlsAvailable != true)
                     if loading { ProgressView() }
-                    else if failed { Text("Could not load the next songs.").foregroundStyle(.secondary) }
-                    else if tracks.isEmpty { Text("Nothing queued.").foregroundStyle(.secondary) }
-                    ForEach(Array(tracks.enumerated()), id: \.offset) { _, track in row(track) }
+                    else if let nextOffset { Button("Load more songs") { Task { await load(offset: nextOffset) } } }
+                    else if entries.isEmpty { Text("Nothing queued.").foregroundStyle(.secondary) }
                 }
-            }.navigationTitle("Up Next").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-                .task(id: playback.state?.upcomingTrackIds ?? []) {
-                    loading = true; failed = false; tracks = []
-                    var loaded: [Track] = []
-                    do {
-                        // The native snapshot advertises the next two songs, not an editable full queue.
-                        for id in (playback.state?.upcomingTrackIds ?? []).prefix(2) {
-                            loaded.append(try await playback.api.track(id)); try Task.checkCancellation()
-                        }
-                        tracks = loaded; loading = false
-                    } catch { if !Task.isCancelled { failed = true; loading = false } }
+            }.navigationTitle("Queue").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) { if playback.state?.queueControlsAvailable == true { EditButton() } }
+                    ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 }
-        }.presentationDetents([.medium, .large])
+                .task { await load() }
+                .refreshable { await load() }
+        }.presentationDetents([.large])
     }
-    private func row(_ track: Track) -> some View {
-        VStack(alignment: .leading, spacing: 4) { Text(track.title); Text(track.artist).font(.subheadline).foregroundStyle(.secondary) }
+    private func trackRow(_ track: Track) -> some View {
+        VStack(alignment: .leading, spacing: 4) { Text(track.title).lineLimit(2); Text(track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
+    }
+    private func load(offset: Int = 0) async {
+        guard !loading else { return }; loading = true; error = nil
+        defer { loading = false }
+        do {
+            let page = try await playback.api.queue(offset: offset, revision: offset == 0 ? nil : revision)
+            if offset == 0 { entries = page.items } else { entries += page.items }
+            revision = page.revision; nextOffset = page.nextOffset; total = page.total
+        } catch { self.error = "Queue changed or unavailable. Pull to refresh." }
+    }
+    private func change(_ action: String, index: Int? = nil, from: Int? = nil, to: Int? = nil) async {
+        await playback.send(action, index: index, from: from, to: to, revision: revision)
+        await load()
     }
 }
 
@@ -247,4 +278,63 @@ struct SystemVolumeSlider: UIViewRepresentable {
         return view
     }
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+}
+
+struct TabletPlayerBar: View {
+    @Bindable var playback: PlaybackCoordinator
+    let expand: () -> Void
+    @State private var showQueue = false
+    var body: some View {
+        if let track = playback.track {
+            HStack(spacing: 20) {
+                Button(action: expand) {
+                    HStack(spacing: 12) {
+                        ArtworkView(image: playback.artwork).frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 9))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(track.title).font(.headline).lineLimit(1)
+                            Text(track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                            Text(playback.contextName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)")
+                VStack(spacing: 8) {
+                    HStack(spacing: 16) {
+                        Button { Task { await playback.send("previous") } } label: { Image(systemName: "backward.end.fill").frame(width: 44, height: 44) }.accessibilityLabel("Previous song")
+                        Button { Task { await playback.send(playback.showsPauseControl ? "pause" : "resume") } } label: {
+                            Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill").font(.title2).frame(width: 48, height: 48).background(.white.opacity(0.08), in: Circle())
+                        }.accessibilityLabel(playback.showsPauseControl ? "Pause" : "Play")
+                        Button { Task { await playback.send("next") } } label: { Image(systemName: "forward.end.fill").frame(width: 44, height: 44) }.accessibilityLabel("Next song")
+                    }
+                    ProgressView(value: playback.progress).tint(.white).accessibilityLabel("Song progress")
+                }.frame(width: 180)
+                VStack(spacing: 2) {
+                    SystemVolumeSlider().id(playback.outputName).frame(height: 28)
+                    Text(playback.outputName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }.frame(width: 150)
+                AirPlayPicker().frame(width: 44, height: 44)
+                Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")
+            }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .padding(.horizontal, 16).padding(.vertical, 8).foregroundStyle(.white)
+                .accessibilityIdentifier("miniPlayer")
+                .sheet(isPresented: $showQueue) { UpNextView(playback: playback) }
+        }
+    }
+}
+
+struct CacheStatusView: View {
+    @Bindable var cache: AudioCache
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("\(ByteCountFormatter.string(fromByteCount: Int64(cache.downloadedBytes), countStyle: .file)) cached").font(.headline)
+            ForEach(Array(cache.items.enumerated()), id: \.element.id) { offset, item in
+                HStack {
+                    Text(offset == 0 ? "Current song" : "Next \(offset)")
+                    Spacer()
+                    Text(item.state == "ready" ? "Ready" : item.state == "downloading" ? "Downloading…" : item.state.capitalized).foregroundStyle(.secondary)
+                    if item.state == "ready" { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                }.font(.subheadline)
+            }
+            Text("Temporary read-ahead for the current song and next two, up to 512 MB total and 256 MB per song. Cleared on sign-out. Downloads may use cellular data.").font(.footnote).foregroundStyle(.secondary)
+        }.accessibilityIdentifier("cacheStatus")
+    }
 }
