@@ -9,10 +9,10 @@ struct MiniPlayerView: View {
     var body: some View {
         if let track = playback.track {
             VStack(spacing: 0) {
-                HStack(spacing: 2) {
+                HStack(spacing: 8) {
                     Button(action: expand) {
                         HStack(spacing: 10) {
-                            ArtworkView(image: playback.artwork).frame(width: 42, height: 42)
+                            ArtworkView(image: playback.artwork).frame(width: 40, height: 40)
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(track.title).font(.subheadline.weight(.semibold)).lineLimit(1)
