@@ -86,7 +86,7 @@ extension LaunchTests {
         app.buttons["Songs"].tap()
         let play = app.buttons["Play Just Like a Pill by P!nk"]
         XCTAssertTrue(play.waitForExistence(timeout: 10)); play.tap()
-        let nowPlaying = app.buttons["Now playing, Just Like a Pill, P!nk"]
+        let nowPlaying = app.buttons["expandPlayer"]
         XCTAssertTrue(nowPlaying.waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["Channels"].firstMatch.tap()
         let last = app.buttons["Play Station 12"]
@@ -98,9 +98,10 @@ extension LaunchTests {
         XCTAssertLessThan(last.frame.maxY, nowPlaying.frame.minY)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Last channel above player"; shot.lifetime = .keepAlways; add(shot)
         nowPlaying.tap()
-        app.scrollViews.firstMatch.swipeUp()
-        XCTAssertTrue(app.buttons["Shuffle upcoming songs"].waitForExistence(timeout: 5))
         let repeatButton = app.buttons["Repeat"]
+        XCTAssertTrue(repeatButton.waitForExistence(timeout: 10), app.debugDescription)
+        if !repeatButton.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(app.buttons["Shuffle upcoming songs"].exists)
         XCTAssertEqual(repeatButton.value as? String, "off")
         repeatButton.tap()
         expectation(for: NSPredicate(format: "value == 'all'"), evaluatedWith: repeatButton)
