@@ -230,6 +230,7 @@ import ArrifyCore
                 guard generation == sessionGeneration else { return }
                 state = PlaybackState.merging(ack, into: state)
             }
+            if ownsOutput { refreshOutput() }
             connectionFailures = 0; connectionInterrupted = false
         } catch is CancellationError {} catch {
             guard generation == sessionGeneration, !Task.isCancelled else { return }

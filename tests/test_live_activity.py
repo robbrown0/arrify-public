@@ -50,3 +50,10 @@ class LiveActivityTests(unittest.TestCase):
         disabled=LiveActivities(self.a,self.service.listening,self.tmp.name,start_worker=False)
         self.assertFalse(disabled.dispatch(self.uid,self.login['access_token'],None)['available'])
         with self.assertRaises(NativeError):disabled.dispatch(self.uid,self.login['access_token'],{'action':'register','activity_id':'x','token':'a'*64,'owner_device_id':'player'})
+    def test_invalid_optional_config_does_not_break_playback_startup(self):
+        from pathlib import Path
+        path = Path(self.tmp.name) / 'secrets';path.mkdir()
+        (path / 'apns.json').write_text('{broken')
+        with self.assertLogs('app.live_activity',level='WARNING'):
+            disabled=LiveActivities(self.a,self.service.listening,self.tmp.name,start_worker=False)
+        self.assertFalse(disabled.enabled)

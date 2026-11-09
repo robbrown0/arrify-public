@@ -20,7 +20,7 @@ def dispatch(handler, path, data=None):
         if path == PREFIX + 'capabilities' and data is None:
             result = service.capabilities()
             if getattr(handler.server, 'native_media', None):
-                result['features'] += ['native_media_manifest_v1', 'native_catalog_v1', 'native_playback_v1', 'native_library_v1', 'native_queue_v1', 'native_favorites_v1']
+                result['features'] += ['native_media_manifest_v1', 'native_catalog_v1', 'native_playback_v1', 'native_library_v1', 'native_queue_v1', 'native_favorites_v1', 'native_live_activity_v1']
                 result['media_profiles'] = ['original', 'aac', 'mp3']
                 result['media_leveling_modes'] = ['off']
                 result['native_prefetch_tracks'] = 3

@@ -5,6 +5,7 @@ APNs keys stay in the private data mount. Unconfigured servers do not send pushe
 """
 import base64
 import json
+import logging
 from pathlib import Path
 import re
 import subprocess
@@ -68,8 +69,11 @@ class APNs:
 class LiveActivities:
     def __init__(self, accounts, listening, directory, sender=None, start_worker=True):
         self.a, self.listening = accounts, listening
-        self.sender = sender if sender is not None else APNs(directory)
-        self.enabled = sender is not None or self.sender.config is not None
+        try:self.sender = sender if sender is not None else APNs(directory)
+        except (OSError, ValueError, TypeError):
+            logging.getLogger(__name__).warning('APNs configuration is invalid; remote Lock Screen updates are disabled.')
+            self.sender = None
+        self.enabled = self.sender is not None and (sender is not None or self.sender.config is not None)
         self.stopped = threading.Event(); self.sent = {}; self.retry_after = 0
         with self.a.lock:
             self.a.db.execute('''CREATE TABLE IF NOT EXISTS live_activities(
@@ -143,6 +147,7 @@ class LiveActivities:
                     self.sent.pop(key, None)
                 else:self.sent[key] = (fingerprint, now)
             elif code in (401, 403, 429) or code >= 500:
+                logging.getLogger(__name__).warning('APNs update deferred (HTTP %s).', code)
                 self.retry_after = now + (300 if code in (401, 403) else 30); return
 
     def background(self):
