@@ -87,6 +87,8 @@ class LiveActivities:
         if data is None: return {'available': self.enabled, 'read_only': True}
         if not isinstance(data, dict) or data.get('action') not in ('register', 'stop'):
             raise NativeError(400, 'invalid_request', 'Choose a Live Activity action.')
+        fields = {'action', 'activity_id'} if data['action'] == 'stop' else {'action', 'activity_id', 'token', 'owner_device_id'}
+        if set(data) != fields: raise NativeError(400, 'invalid_request', 'Invalid activity fields.')
         activity = data.get('activity_id', '')
         if not isinstance(activity, str) or not re.fullmatch(r'[A-Za-z0-9-]{1,64}', activity):
             raise NativeError(400, 'invalid_request', 'Invalid activity identifier.')

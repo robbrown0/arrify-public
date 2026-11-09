@@ -1,8 +1,8 @@
 import ActivityKit
 import Foundation
 
-struct PlaybackActivityAttributes: ActivityAttributes {
-    struct ContentState: Codable, Hashable {
+struct PlaybackActivityAttributes: ActivityAttributes, Sendable {
+    struct ContentState: Codable, Hashable, Sendable {
         let title: String
         let artist: String
         let destination: String

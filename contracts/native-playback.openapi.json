@@ -420,6 +420,179 @@
           }
         }
       }
+    },
+    "/api/v1/native/favorites": {
+      "get": {
+        "summary": "Saved song IDs for the signed-in account",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Favorites"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Sign in again"
+          },
+          "403": {
+            "description": "Account unavailable"
+          },
+          "429": {
+            "description": "Retry shortly"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set whether a song is saved; shares web favorites",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Favorites"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Sign in again"
+          },
+          "403": {
+            "description": "Account unavailable"
+          },
+          "429": {
+            "description": "Retry shortly"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteChange"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/native/live-activity": {
+      "get": {
+        "summary": "Whether remote read-only Lock Screen updates are configured",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveActivityAvailability"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Sign in again"
+          },
+          "403": {
+            "description": "Account unavailable"
+          },
+          "429": {
+            "description": "Retry shortly"
+          }
+        }
+      },
+      "post": {
+        "summary": "Register or stop an account/session-scoped ActivityKit update token",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Sign in again"
+          },
+          "403": {
+            "description": "Account unavailable"
+          },
+          "429": {
+            "description": "Retry shortly"
+          },
+          "409": {
+            "description": "Playback moved or token belongs to another session"
+          },
+          "503": {
+            "description": "Push updates not configured"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/LiveActivityRegistration"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LiveActivityStop"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -978,7 +1151,8 @@
               "artists",
               "collections",
               "channels",
-              "playlists"
+              "playlists",
+              "favorites"
             ]
           },
           "id": {
@@ -1165,6 +1339,100 @@
             }
           }
         }
+      },
+      "Favorites": {
+        "type": "object",
+        "required": [
+          "track_ids"
+        ],
+        "properties": {
+          "track_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "FavoriteChange": {
+        "type": "object",
+        "required": [
+          "track_id",
+          "liked"
+        ],
+        "properties": {
+          "track_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "liked": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LiveActivityAvailability": {
+        "type": "object",
+        "required": [
+          "available",
+          "read_only"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "LiveActivityRegistration": {
+        "type": "object",
+        "required": [
+          "action",
+          "activity_id",
+          "token",
+          "owner_device_id"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "register"
+          },
+          "activity_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "token": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64,512}$"
+          },
+          "owner_device_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LiveActivityStop": {
+        "type": "object",
+        "required": [
+          "action",
+          "activity_id"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "stop"
+          },
+          "activity_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "responses": {

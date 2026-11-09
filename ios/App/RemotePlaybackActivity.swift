@@ -1,4 +1,6 @@
-import ActivityKit
+// ActivityKit activity handles have incomplete Swift 6 isolation annotations.
+// All handle ownership and mutations stay in this main-actor coordinator.
+@preconcurrency import ActivityKit
 import SwiftUI
 import ArrifyCore
 
