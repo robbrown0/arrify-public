@@ -119,6 +119,26 @@ public actor APIClient {
         if let revision { c.queryItems?.append(.init(name: "revision", value: revision)) }
         return try await call(c.string!)
     }
+    public func favorites() async throws -> FavoriteSongs { try await call("/api/v1/native/favorites") }
+    public func setFavorite(_ id: Int, liked: Bool) async throws -> FavoriteSongs {
+        struct Input: Encodable { let trackId: Int; let liked: Bool }
+        return try await call("/api/v1/native/favorites", method: "POST", body: Self.encoder().encode(Input(trackId: id, liked: liked)))
+    }
+    public func liveActivityAvailable() async throws -> Bool {
+        struct Status: Decodable { let available: Bool }
+        let status: Status = try await call("/api/v1/native/live-activity")
+        return status.available
+    }
+    public func registerLiveActivity(id: String, token: String, owner: String) async throws {
+        struct Input: Encodable { let action = "register"; let activityId: String; let token: String; let ownerDeviceId: String }
+        struct Result: Decodable { let ok: Bool }
+        let _: Result = try await call("/api/v1/native/live-activity", method: "POST", body: Self.encoder().encode(Input(activityId: id, token: token, ownerDeviceId: owner)))
+    }
+    public func stopLiveActivity(id: String) async throws {
+        struct Input: Encodable { let action = "stop"; let activityId: String }
+        struct Result: Decodable { let ok: Bool }
+        let _: Result = try await call("/api/v1/native/live-activity", method: "POST", body: Self.encoder().encode(Input(activityId: id)))
+    }
     public func library() async throws -> LibraryOverview { try await call("/api/v1/native/library") }
     public func entities(kind: String, query: String, offset: Int = 0, revision: String? = nil) async throws -> EntityPage {
         guard ["albums", "artists"].contains(kind) else { throw APIError.invalidResponse }

@@ -43,3 +43,5 @@ public struct LibraryDetail: Codable, Sendable {
     public let total: Int
     public let nextOffset: Int?
 }
+
+public struct FavoriteSongs: Codable, Sendable { public let trackIds: [Int] }

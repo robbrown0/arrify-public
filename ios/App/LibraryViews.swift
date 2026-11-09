@@ -48,7 +48,8 @@ struct LibraryHome: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
+                Section("Your library") {
+                    NavigationLink { LikedSongsView(model: model) } label: { Label("Liked songs", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
                     NavigationLink { BrowserScreen(model: model, title: "Songs", kind: "tracks") } label: { Label("Songs", systemImage: "music.note") }
                     NavigationLink { BrowserScreen(model: model, title: "Albums", kind: "albums") } label: { Label("Albums", systemImage: "square.stack") }
                     NavigationLink { BrowserScreen(model: model, title: "Artists", kind: "artists") } label: { Label("Artists", systemImage: "music.mic") }
@@ -222,7 +223,7 @@ struct BrowserScreen: View {
         List {
             Section { RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error) }
             if browser.kind == "tracks" {
-                ForEach(browser.tracks) { track in SongRow(track: track, artwork: model.artwork) { Task { await model.playback.play(track, in: browser.tracks) } } }
+                ForEach(browser.tracks) { track in SongRow(track: track, artwork: model.artwork, favorites: model.favorites) { Task { await model.playback.play(track, in: browser.tracks) } } }
             } else {
                 ForEach(browser.entries, id: \.identity) { item in
                     NavigationLink { DetailScreen(model: model, entry: item) } label: { EntryRow(item: item, artwork: model.artwork) }
@@ -247,8 +248,10 @@ struct BrowserScreen: View {
 struct SongRow: View {
     let track: Track
     let artwork: ArtworkStore
+    let favorites: FavoritesStore
     let play: () -> Void
     var body: some View {
+        HStack(spacing: 0) {
         Button(action: play) {
             HStack(spacing: 12) {
                 RemoteCover(path: track.artwork ?? "/api/v1/artwork/\(track.id)", title: "", artwork: artwork).frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
@@ -260,6 +263,8 @@ struct SongRow: View {
                 Image(systemName: "play.fill").font(.caption).foregroundStyle(.green)
             }.frame(minHeight: 48).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel("Play \(track.title) by \(track.artist)")
+        FavoriteButton(favorites: favorites, track: track)
+        }
     }
 }
 
@@ -291,7 +296,7 @@ struct DetailScreen: View {
             Section {
                 RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
                 ForEach(Array(browser.tracks.enumerated()), id: \.offset) { _, track in
-                    SongRow(track: track, artwork: model.artwork) { Task { await model.playback.play(source: item.source, trackId: track.id) } }
+                    SongRow(track: track, artwork: model.artwork, favorites: model.favorites) { Task { await model.playback.play(source: item.source, trackId: track.id) } }
                 }
                 if browser.nextOffset != nil { Button("Load more songs") { Task { await browser.load(more: true) } }.disabled(browser.loading) }
                 if browser.error != nil { Button("Retry") { Task { await browser.load() } } }

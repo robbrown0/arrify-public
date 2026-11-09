@@ -9,10 +9,10 @@ struct MiniPlayerView: View {
     var body: some View {
         if let track = playback.track {
             VStack(spacing: 0) {
-                HStack(spacing: 2) {
+                HStack(spacing: 8) {
                     Button(action: expand) {
                         HStack(spacing: 10) {
-                            ArtworkView(image: playback.artwork).frame(width: 42, height: 42)
+                            ArtworkView(image: playback.artwork).frame(width: 40, height: 40)
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(track.title).font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -30,11 +30,6 @@ struct MiniPlayerView: View {
                         Image(systemName: "forward.end.fill").font(.system(size: 19)).frame(width: 44, height: 44)
                     }.accessibilityLabel("Next song")
                 }.padding(.horizontal, 10).padding(.vertical, 8)
-                GeometryReader { proxy in
-                    Rectangle().fill(.white.opacity(0.16)).overlay(alignment: .leading) {
-                        Rectangle().fill(.white).frame(width: proxy.size.width * playback.progress)
-                    }
-                }.frame(height: 2).accessibilityHidden(true)
             }.foregroundStyle(.white)
         }
     }
@@ -42,6 +37,7 @@ struct MiniPlayerView: View {
 
 struct NowPlayingView: View {
     @Bindable var playback: PlaybackCoordinator
+    let favorites: FavoritesStore
     @Environment(\.dismiss) private var dismiss
     @State private var seeking = false
     @State private var seekPosition = 0.0
@@ -93,14 +89,30 @@ struct NowPlayingView: View {
     }
     private var controls: some View {
         VStack(spacing: 18) {
+            HStack {
             VStack(alignment: .leading, spacing: 5) {
                 Text(playback.track?.title ?? "Nothing playing").font(.title2.bold()).lineLimit(2)
                 Text(playback.track?.artist ?? "").font(.title3).foregroundStyle(.white.opacity(0.65)).lineLimit(2)
             }.frame(maxWidth: .infinity, alignment: .leading)
+            if let track = playback.track { FavoriteButton(favorites: favorites, track: track) }
+            }
+            if let error = favorites.error { Text(error).font(.caption).foregroundStyle(.orange) }
             if let message = playback.message {
                 HStack { Text(message).font(.caption); Button("Retry") { playback.retry() } }
             }
-            if playback.hasOtherOutput { Button("Play here") { Task { await playback.send("takeover") } } }
+            if playback.hasOtherOutput {
+                HStack {
+                    Button("Play here") { Task { await playback.send("takeover") } }
+                    Spacer()
+                    Button(playback.remoteActivity.active ? "Stop Lock Screen status" : "Show on Lock Screen", systemImage: "lock.rectangle") {
+                        Task {
+                            if playback.remoteActivity.active { await playback.remoteActivity.stop() }
+                            else { await playback.remoteActivity.start(state: playback.state, track: playback.track, destination: playback.displayOutputName) }
+                        }
+                    }
+                }.font(.footnote)
+                if let error = playback.remoteActivity.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            }
             VStack(spacing: 4) {
                 Slider(value: Binding(get: { seeking ? seekPosition : min(playback.position, max(1, playback.duration)) }, set: { seekPosition = $0 }), in: 0...max(1, playback.duration)) { editing in
                     if editing { seekPosition = playback.position }
@@ -331,7 +343,6 @@ struct TabletPlayerBar: View {
                         }.accessibilityLabel(playback.showsPauseControl ? "Pause" : "Play")
                         Button { Task { await playback.send("next") } } label: { Image(systemName: "forward.end.fill").frame(width: 44, height: 44) }.accessibilityLabel("Next song")
                     }
-                    ProgressView(value: playback.progress).tint(.white).accessibilityLabel("Song progress")
                 }.frame(width: 180)
                 VStack(spacing: 2) {
                     SystemVolumeSlider().frame(height: 28)

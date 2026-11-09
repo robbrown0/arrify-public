@@ -98,6 +98,8 @@ private struct ArtworkRequest: @unchecked Sendable {
 
 private actor RestoredOwnerTransport: HTTPTransport {
     private var owner = ""
+    private var networkFailure = false
+    func setNetworkFailure(_ value: Bool) { networkFailure = value }
     private var current = 1
     private(set) var waitingForMetadata = false
     private var metadataContinuation: CheckedContinuation<Void, Never>?
@@ -109,6 +111,7 @@ private actor RestoredOwnerTransport: HTTPTransport {
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
         if path.hasSuffix("/native/playback") {
+            if networkFailure { throw URLError(.networkConnectionLost) }
             if request.httpMethod == "POST", let body = request.httpBody,
                let value = try JSONSerialization.jsonObject(with: body) as? [String: Any],
                let action = value["action"] as? String { commands.append(action) }
@@ -302,6 +305,28 @@ extension NowPlayingArtworkTests {
         await transport.releaseMetadata()
         await update.value
         XCTAssertEqual(coordinator.track?.id, 2)
+        coordinator.stop()
+    }
+}
+
+extension NowPlayingArtworkTests {
+    @MainActor func testTransportRecoveryClearsBannerWithoutSkippingSong() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://example.test", username: "listener", password: "fixture", deviceName: "iPhone")
+        let coordinator = PlaybackCoordinator(api: api, audioSession: TestAudioSession())
+        await transport.setOwner("other-device")
+        await transport.setNetworkFailure(true)
+        await coordinator.reconcile(report: false)
+        XCTAssertFalse(coordinator.connectionInterrupted)
+        await coordinator.reconcile(report: false)
+        XCTAssertTrue(coordinator.connectionInterrupted)
+        coordinator.message = "An unrelated playback error"
+        await transport.setNetworkFailure(false)
+        await coordinator.reconcile(report: false)
+        XCTAssertFalse(coordinator.connectionInterrupted)
+        XCTAssertEqual(coordinator.track?.id, 1)
+        XCTAssertEqual(coordinator.message, "An unrelated playback error")
         coordinator.stop()
     }
 }

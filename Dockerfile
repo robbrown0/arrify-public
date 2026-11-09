@@ -3,7 +3,7 @@ FROM python:3.13-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652a
 ARG DEBIAN_SNAPSHOT=20261104T212339Z
 RUN sed -i "s|http://deb.debian.org/debian-security|https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}|; s|http://deb.debian.org/debian$|https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}|" /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Check-Valid-Until=false update \
-    && apt-get install -y --no-install-recommends ffmpeg openssl \
+    && apt-get install -y --no-install-recommends ffmpeg openssl curl \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \

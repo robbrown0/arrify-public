@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Artwork-led Home, full-screen iPad player, live cross-device controls, editable queue, device cache reporting, and background playback improvements. Test next-song transitions while locked, remote control responsiveness, and AirPlay volume on iPhone and iPad. Apple TV full-screen artwork remains under investigation.'}
+    attrs = {'whatsNew': 'New Arrify icon, Liked songs shared with the website, save/remove buttons, and a cleaner compact player with circular progress. Connection warnings recover automatically; unchanged receiver artwork updates are suppressed. Optional read-only Lock Screen status follows another device when the server has push notifications configured. Please test saving songs, background playback, and Samsung/Apple TV artwork stability. Generic AirPlay speaker names and Apple TV full-screen artwork remain under investigation.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:
