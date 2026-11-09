@@ -137,7 +137,7 @@ struct NowPlayingView: View {
                 }.accessibilityLabel("Repeat").accessibilityValue(playback.state?.repeatMode ?? "off")
                     .disabled(playback.state?.queueControlsAvailable != true)
             }.buttonStyle(.plain)
-            SystemVolumeSlider().id(playback.outputName).frame(height: 32).padding(.top, 6)
+            SystemVolumeSlider().frame(height: 32).padding(.top, 6)
             HStack {
                 Button { showArtwork = true } label: { Image(systemName: "photo").frame(width: 44, height: 44) }
                     .accessibilityLabel("Show artwork").accessibilityIdentifier("artworkDisplayButton")
@@ -183,7 +183,9 @@ struct UpNextView: View {
     @State private var revision: Int?
     @State private var nextOffset: Int?
     @State private var total = 0
+    @State private var editing = false
     @State private var loading = false
+    @State private var loadGeneration = UUID()
     @State private var error: String?
     var body: some View {
         NavigationStack {
@@ -223,23 +225,30 @@ struct UpNextView: View {
                     ToolbarItem(placement: .topBarLeading) { if playback.state?.queueControlsAvailable == true { EditButton() } }
                     ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 }
-                .task { await load() }
+                .task(id: playback.state?.queueRevision) { await load() }
                 .refreshable { await load() }
+                .disabled(editing)
         }.presentationDetents([.large])
     }
     private func trackRow(_ track: Track) -> some View {
         VStack(alignment: .leading, spacing: 4) { Text(track.title).lineLimit(2); Text(track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
     }
     private func load(offset: Int = 0) async {
-        guard !loading else { return }; loading = true; error = nil
-        defer { loading = false }
+        guard offset == 0 || !loading else { return }
+        let generation = UUID(); loadGeneration = generation; loading = true; error = nil
+        defer { if loadGeneration == generation { loading = false } }
         do {
             let page = try await playback.api.queue(offset: offset, revision: offset == 0 ? nil : revision)
+            guard loadGeneration == generation, !Task.isCancelled else { return }
             if offset == 0 { entries = page.items } else { entries += page.items }
             revision = page.revision; nextOffset = page.nextOffset; total = page.total
-        } catch { self.error = "Queue changed or unavailable. Pull to refresh." }
+        } catch {
+            if loadGeneration == generation, !Task.isCancelled { self.error = "Queue changed or unavailable. Pull to refresh." }
+        }
     }
     private func change(_ action: String, index: Int? = nil, from: Int? = nil, to: Int? = nil) async {
+        guard !editing else { return }; editing = true
+        defer { editing = false }
         await playback.send(action, index: index, from: from, to: to, revision: revision)
         await load()
     }
@@ -272,6 +281,9 @@ struct AirPlayPicker: UIViewRepresentable {
     }
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }
+// Keep the native control's identity stable during route-name and playback updates.
+// MediaPlayer owns receiver-volume synchronization; never seed it from the phone's
+// outputVolume or write a remembered value when this view appears.
 struct SystemVolumeSlider: UIViewRepresentable {
     func makeUIView(context: Context) -> MPVolumeView {
         let view = MPVolumeView(); view.showsRouteButton = false; view.tintColor = .white
@@ -308,7 +320,7 @@ struct TabletPlayerBar: View {
                     ProgressView(value: playback.progress).tint(.white).accessibilityLabel("Song progress")
                 }.frame(width: 180)
                 VStack(spacing: 2) {
-                    SystemVolumeSlider().id(playback.outputName).frame(height: 28)
+                    SystemVolumeSlider().frame(height: 28)
                     Text(playback.outputName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }.frame(width: 150)
                 AirPlayPicker().frame(width: 44, height: 44)

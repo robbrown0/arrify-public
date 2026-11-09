@@ -11,6 +11,7 @@ import ArrifyCore
     let cache = AudioCache()
     private var aheadTask: Task<Void, Never>?
     private var aheadGeneration = UUID()
+    private var aheadCompletedRevision: Int?
     private var queuedTracks: [ObjectIdentifier: Int] = [:]
     private var queuedEpoch = -1
     private var transitionTask: UIBackgroundTaskIdentifier = .invalid
@@ -78,7 +79,8 @@ import ArrifyCore
         }
         observe(AVPlayerItem.didPlayToEndTimeNotification) { owner, note in
             guard let identity = note.itemId, let ended = owner.queuedTracks[identity],
-                  ended == owner.state?.currentTrackId, !owner.endedInFlight else { return }
+                  ended == owner.state?.currentTrackId, !owner.endedInFlight,
+                  owner.permission.allowsPlayback(ownsOutput: owner.ownsOutput, serverPlaying: owner.state?.playing == true, mediaReady: true) else { return }
             owner.queuedTracks.removeValue(forKey: identity)
             owner.endedInFlight = true
             owner.transitionTask = UIApplication.shared.beginBackgroundTask(withName: "Finish song transition") { [weak owner] in
@@ -89,17 +91,17 @@ import ArrifyCore
                 // Never drop an end event just because a user command is finishing.
                 for attempt in 0..<3 {
                     while owner.commandInFlight { try? await Task.sleep(for: .milliseconds(100)) }
-                    guard owner.ownsOutput, owner.state?.currentTrackId == ended, owner.state?.playId == playID else { break }
+                    guard owner.permission.allowsPlayback(ownsOutput: owner.ownsOutput, serverPlaying: owner.state?.playing == true, mediaReady: true), owner.state?.currentTrackId == ended, owner.state?.playId == playID else { break }
                     await owner.send("next", automatic: true)
                     if owner.state?.playId != playID { break }
                     try? await Task.sleep(for: .seconds(attempt + 1))
                 }
-                if owner.state?.playId == playID {
+                if owner.state?.playId == playID, owner.showsPauseControl {
                     owner.player.pause(); owner.player.removeAllItems(); owner.queuedTracks = [:]
                     owner.loadedKey = nil; owner.desiredKey = nil
                     owner.message = "Connection interrupted at the next song. Reconnecting…"
                 }
-                owner.endedInFlight = false; owner.finishBackgroundTransition()
+                owner.endedInFlight = false; owner.finishBackgroundTransition(); owner.startReadAhead()
             }
         }
         observe(AVAudioSession.interruptionNotification) { owner, note in
@@ -151,7 +153,7 @@ import ArrifyCore
     }
     func stop() {
         sessionGeneration = UUID(); permission = PlaybackPermission()
-        aheadTask?.cancel(); aheadTask = nil; cache.reset(); finishBackgroundTransition()
+        aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil; cache.reset(); finishBackgroundTransition()
         pollTask?.cancel(); pollTask = nil; prepareTask?.cancel(); prepareTask = nil
         player.pause(); player.removeAllItems(); queuedTracks = [:]
         artworkTask?.cancel(); artworkTask = nil; artwork = nil; receiverArtwork = nil; systemArtwork = nil
@@ -292,7 +294,7 @@ import ArrifyCore
             busy = false; message = nil; updateReceiverMetadata()
         }
         if desiredKey != key {
-            desiredKey = key; prepareTask?.cancel(); aheadTask?.cancel(); aheadTask = nil
+            desiredKey = key; prepareTask?.cancel(); aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil
             player.pause(); player.removeAllItems(); queuedTracks = [:]; loadedKey = nil; busy = true
             prepareTask = Task { [weak self] in await self?.prepare(key: key, id: id, epoch: state.ownerEpoch) }
         }
@@ -300,9 +302,9 @@ import ArrifyCore
             seekIntent = state.seekIntent
             player.seek(to: CMTime(seconds: max(0, state.seekTargetSeconds), preferredTimescale: 600), completionHandler: { _ in })
         }
-        if !state.playing { player.pause() } else { playIfAllowed() }
+        if !state.playing { player.pause(); aheadTask?.cancel(); aheadTask = nil } else { playIfAllowed() }
         synchronizeQueuedItems()
-        if loadedKey != nil { startReadAhead() }
+        if loadedKey != nil, state.playing { startReadAhead() }
         publishNowPlaying()
     }
     private func prepare(key: String, id: Int, epoch: Int) async {
@@ -362,18 +364,18 @@ import ArrifyCore
         }
     }
     private func startReadAhead() {
-        guard aheadTask == nil, ownsOutput, permission.enabled else { return }
+        guard aheadTask == nil, !endedInFlight, ownsOutput, permission.enabled, state?.playing == true, aheadCompletedRevision != state?.queueRevision else { return }
         let generation = UUID(); aheadGeneration = generation
         aheadTask = Task { [weak self] in
             guard let self else { return }
             defer { if self.aheadGeneration == generation { self.aheadTask = nil } }
-            while !Task.isCancelled, self.ownsOutput, let state = self.state {
+            while !Task.isCancelled, self.ownsOutput, let state = self.state, state.playing {
                 do {
                     let manifest = try await self.api.manifest(deviceId: self.deviceId, epoch: state.ownerEpoch, profile: self.loadedProfile)
-                    guard !Task.isCancelled, self.state?.ownerEpoch == manifest.ownerEpoch else { return }
+                    guard !Task.isCancelled, !self.endedInFlight, self.state?.ownerEpoch == manifest.ownerEpoch, self.state?.queueRevision == manifest.queueRevision else { return }
                     try await self.enqueueAhead(manifest)
                     await self.cache.fill(manifest, api: self.api)
-                    guard !Task.isCancelled, self.state?.ownerEpoch == manifest.ownerEpoch else { return }
+                    guard !Task.isCancelled, !self.endedInFlight, self.state?.ownerEpoch == manifest.ownerEpoch, self.state?.queueRevision == manifest.queueRevision else { return }
                     // Replace only future items with verified local files; never interrupt current audio.
                     for queued in self.player.items().dropFirst() {
                         if let id = self.queuedTracks[ObjectIdentifier(queued)],
@@ -383,6 +385,10 @@ import ArrifyCore
                         }
                     }
                     try await self.enqueueAhead(manifest)
+                    if self.cache.items.allSatisfy({ ["ready", "oversized", "budget"].contains($0.state) }) {
+                        self.aheadCompletedRevision = manifest.queueRevision
+                        return
+                    }
                 } catch { /* Streaming remains available; bounded retries on the next pass. */ }
                 do { try await Task.sleep(for: .seconds(10)) } catch { return }
             }
