@@ -3,10 +3,15 @@ on:
   workflow_dispatch:
     inputs:
       build_number:
-        description: Unique App Store build number (continue after 6)
+        description: Unique App Store build number (continue after 7)
         required: true
-        default: '7'
+        default: '8'
         type: string
+      internal_only:
+        description: Restrict this build to internal testers; never submit external review
+        required: true
+        default: true
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -35,4 +40,14 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
           BUILD_NUMBER: ${{ inputs.build_number }}
+          INTERNAL_ONLY: ${{ inputs.internal_only }}
         run: bash ios/tools/testflight.sh
+      - name: Assign processed build to internal groups only
+        if: inputs.internal_only
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          APP_VERSION: '0.3.0'
+        run: python3 tools/testflight_internal.py

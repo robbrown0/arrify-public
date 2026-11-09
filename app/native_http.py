@@ -2,7 +2,7 @@
 import secrets
 from .native_auth import NativeError, NativeSessions
 from .native_catalog import page as catalog_page
-from .native_playback import playback, snapshot
+from .native_playback import playback, snapshot, queue_page
 from . import native_library
 from .library import PlaybackConflict
 
@@ -20,7 +20,7 @@ def dispatch(handler, path, data=None):
         if path == PREFIX + 'capabilities' and data is None:
             result = service.capabilities()
             if getattr(handler.server, 'native_media', None):
-                result['features'] += ['native_media_manifest_v1', 'native_catalog_v1', 'native_playback_v1', 'native_library_v1']
+                result['features'] += ['native_media_manifest_v1', 'native_catalog_v1', 'native_playback_v1', 'native_library_v1', 'native_queue_v1']
                 result['media_profiles'] = ['original', 'aac', 'mp3']
                 result['media_leveling_modes'] = ['off']
                 result['native_prefetch_tracks'] = 3
@@ -40,7 +40,7 @@ def dispatch(handler, path, data=None):
                         headers['Retry-After'] = '1'
                         raise NativeError(503, 'sign_in_busy', 'Sign-in is busy. Try again.') from None
                     raise NativeError(401, 'invalid_credentials', 'Invalid credentials.') from None
-        elif path in (PREFIX + 'sessions', PREFIX + 'sessions/revoke', PREFIX + 'playback/manifest', PREFIX + 'catalog', PREFIX + 'playback', PREFIX + 'library', PREFIX + 'library/detail'):
+        elif path in (PREFIX + 'sessions', PREFIX + 'sessions/revoke', PREFIX + 'playback/manifest', PREFIX + 'catalog', PREFIX + 'playback', PREFIX + 'playback/queue', PREFIX + 'library', PREFIX + 'library/detail'):
             token, kind = handler.token()
             if kind != 'native':
                 raise NativeError(401, 'unauthenticated', 'A bearer token is required.')
@@ -61,6 +61,10 @@ def dispatch(handler, path, data=None):
                     result = native_library.detail(handler.server.library, a, user['id'], handler.path)
                 else:
                     result = native_library.overview(handler.server.library, a, user['id'])
+            elif path == PREFIX + 'playback/queue' and data is None:
+                try:a.rate_limit(('native-queue', user['id']), 180, 60)
+                except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
+                result = queue_page(handler.server.listening, user['id'], handler.path)
             elif path == PREFIX + 'playback':
                 if data is not None and data.get('action') == 'play' and 'source' in data:
                     data = native_library.expand_playback(handler.server.library, a, user['id'], data)

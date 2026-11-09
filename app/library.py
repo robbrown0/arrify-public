@@ -457,7 +457,7 @@ class Player:
             if 'expected_current' in data and data['expected_current']!=s['current']:
                 if action=='position':return self.public(s)
                 raise PlaybackConflict('Playback changed. Refresh the queue before advancing.')
-            if action in ('repeat','queue_edit') and s.get('party_id'):
+            if action in ('repeat','queue_edit','queue_jump') and s.get('party_id'):
                 raise ValueError('Use PartyQueue controls while hosting.')
             parties=getattr(self,'parties',None)
             if parties:data=parties.before_command(uid,data,s)
@@ -504,9 +504,13 @@ class Player:
                 selected=int(data.get('track_id') or ids[0])
                 if selected not in ids: raise ValueError('Track is outside this selection.')
                 ix=ids.index(selected)
-                s.update(current=selected,upcoming=ids[ix+1:],channel=channel,station=station,position=0)
+                s.update(current=selected,upcoming=ids[ix+1:],channel=channel,station=station,position=0,playback_context=data.get('playback_context'))
                 if channel or data.get('party_id') or station and station.get('mode')!='mix':s['repeat']='off'
                 if station and station.get('mode')=='mix':s['shuffle']=False
+            elif action=='queue_jump':
+                index=data.get('index')
+                if type(index) is not int or not 0<=index<len(s['upcoming']):raise ValueError('Queue item unavailable.')
+                s['current']=s['upcoming'][index];s['upcoming']=s['upcoming'][index+1:];s['position']=0
             elif action=='repeat':
                 mode=data.get('mode')
                 if mode not in ('off','all','one'):raise ValueError('Invalid repeat mode.')
@@ -564,10 +568,10 @@ class Player:
                 if not 0<=pos<=86400: raise ValueError('Invalid position.')
                 s['position']=pos
             else: raise ValueError('Unknown playback action.')
-            if action in ('play','next') and previous and not (action=='next' and data.get('automatic') and s.get('repeat')=='one' and not s.get('party_id')):
+            if action in ('play','next','queue_jump') and previous and not (action=='next' and data.get('automatic') and s.get('repeat')=='one' and not s.get('party_id')):
                 s['history']=(s['history']+[previous])[-250:]
             if parties:parties.after_command(uid,data,s)
-            if record_history and action in ('play','next','previous') and s['current']:
+            if record_history and action in ('play','next','previous','queue_jump') and s['current']:
                 self.a.db.execute('INSERT INTO history(user_id,track_id,played_at) VALUES(?,?,?)',(uid,s['current'],int(time.time())))
             self.save(uid,s)
             return self.public(s)

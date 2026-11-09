@@ -25,7 +25,7 @@ with (root/'ExportOptions.plist').open('wb') as f:
     plistlib.dump({'method':'app-store-connect','destination':'upload',
                   'teamID':'VW3VH2HPTV','signingStyle':'automatic',
                   'manageAppVersionAndBuildNumber':False,'uploadSymbols':True,
-                  'testFlightInternalTestingOnly':False},f)
+                  'testFlightInternalTestingOnly':os.environ.get('INTERNAL_ONLY', 'true') == 'true'},f)
 PY
 openssl pkey -in "$SIGNING_DIR/AuthKey.p8" -check -noout >/dev/null
 unset ASC_PRIVATE_KEY

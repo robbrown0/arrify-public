@@ -59,6 +59,22 @@ final class NowPlayingArtworkTests: XCTestCase {
         XCTAssertFalse(coordinator.showsPauseControl)
         coordinator.stop()
     }
+    @MainActor func testRemoteControlsDoNotActivateOrTakeOverLocalAudio() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let audio = TestAudioSession()
+        let coordinator = PlaybackCoordinator(api: api, audioSession: audio)
+        await transport.setOwner("web-device")
+        await coordinator.reconcile()
+        await coordinator.send("next")
+        XCTAssertTrue(coordinator.hasOtherOutput)
+        XCTAssertEqual(audio.activationAttempts, 0)
+        XCTAssertNil(coordinator.player.currentItem)
+        let commands = await transport.commands
+        XCTAssertEqual(commands, ["next"])
+        coordinator.stop()
+    }
     @MainActor func testSystemCanRequestArtworkFromBackgroundQueue() async {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32)).image { context in
             UIColor.green.setFill()
@@ -157,5 +173,99 @@ extension NowPlayingArtworkTests {
         XCTAssertEqual(library.overview?.items.first?.kind, "channels")
         library.clear()
         XCTAssertNil(library.overview)
+    }
+}
+
+
+extension NowPlayingArtworkTests {
+    @MainActor func testCacheOnlyReportsVerifiedCompleteFilesAndClearsOnLogout() async throws {
+        let api = APIClient(transport: RestoredOwnerTransport(), store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let cache = AudioCache(download: { url in
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try Data([1,2,3,4]).write(to: file)
+            return (file, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        })
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let manifest = try decoder.decode(Manifest.self, from: Data(#"{"owner_epoch":1,"queue_revision":1,"retry_after_seconds":2,"items":[{"track_id":1,"source_revision":"v1","profile":"original","state":"ready","size_bytes":4,"mime_type":"audio/flac","url":"/api/v1/stream/1?native_grant=fixture"}]}"#.utf8))
+        await cache.fill(manifest, api: api)
+        XCTAssertEqual(cache.items.first?.state, "ready")
+        XCTAssertEqual(cache.downloadedBytes, 4)
+        let file = try XCTUnwrap(cache.file(for: manifest.items[0]))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        cache.reset()
+        XCTAssertEqual(cache.downloadedBytes, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+    @MainActor func testIncompleteDownloadIsNotReportedAsCached() async throws {
+        let api = APIClient(transport: RestoredOwnerTransport(), store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let cache = AudioCache(download: { url in
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try Data([1]).write(to: file)
+            return (file, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        })
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let manifest = try decoder.decode(Manifest.self, from: Data(#"{"owner_epoch":1,"queue_revision":1,"retry_after_seconds":2,"items":[{"track_id":1,"source_revision":"v1","profile":"original","state":"ready","size_bytes":4,"url":"/api/v1/stream/1?native_grant=fixture"}]}"#.utf8))
+        await cache.fill(manifest, api: api)
+        XCTAssertEqual(cache.items.first?.state, "retrying")
+        XCTAssertEqual(cache.downloadedBytes, 0)
+        XCTAssertNil(cache.file(for: manifest.items[0]))
+        cache.reset()
+    }
+}
+
+extension NowPlayingArtworkTests {
+    @MainActor func testEndOfSongRecoversLostTransitionResponseWithoutSkippingAgain() async throws {
+        let transport = TransitionTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let coordinator = PlaybackCoordinator(api: api, audioSession: TestAudioSession())
+        await coordinator.send("resume")
+        for _ in 0..<100 where coordinator.player.currentItem == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let ended = try XCTUnwrap(coordinator.player.currentItem)
+        // The server advances, but its response is lost. Retrying must reconcile
+        // that committed play ID instead of sending another next command.
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: ended)
+        for _ in 0..<150 where coordinator.state?.currentTrackId != 2 {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(coordinator.state?.currentTrackId, 2)
+        let transitions = await transport.transitions
+        XCTAssertEqual(transitions, 1)
+        coordinator.stop()
+    }
+}
+
+private actor TransitionTransport: HTTPTransport {
+    private let fallback = UITestTransport()
+    private var owner = ""
+    private var current = 1
+    private(set) var transitions = 0
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        let path = request.url!.path
+        var value: [String: Any]
+        if path.hasSuffix("/native/playback") {
+            if request.httpMethod == "POST", let data = request.httpBody,
+               let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                owner = body["device_id"] as? String ?? owner
+                if body["action"] as? String == "next" {
+                    transitions += 1; current = 2
+                    throw URLError(.networkConnectionLost)
+                }
+            }
+            value = ["partial": false, "current_track_id": current,
+                "position_seconds": 0, "server_time": 1, "queue_revision": current,
+                "owner_device_id": owner, "owner_epoch": 1, "intent": current,
+                "playing": true, "observed": "playing", "seek_target_seconds": 0,
+                "seek_intent": 0, "play_id": current, "upcoming_track_ids": current == 1 ? [2] : []]
+        } else if path.hasSuffix("/manifest") {
+            value = ["owner_epoch": 1, "queue_revision": current, "retry_after_seconds": 5,
+                "items": [["track_id": current, "profile": "original", "state": "ready",
+                           "url": "/api/v1/stream/\(current)?native_grant=fixture"]]]
+        } else { return try await fallback.send(request) }
+        return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: value))
     }
 }

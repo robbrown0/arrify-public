@@ -121,13 +121,13 @@ class Listening:
                 else:d['playing']=True
                 d['action']=action;d['intent']+=1;d['revision']+=1
             else:
-                if action not in ('play','next','previous','queue','remove','reorder','clear','shuffle','repeat','queue_edit'):raise ValueError('Unknown listening action.')
+                if action not in ('play','next','previous','queue','remove','reorder','clear','shuffle','repeat','queue_edit','queue_jump'):raise ValueError('Unknown listening action.')
                 if not d['owner'] and action in ('next','previous'):raise ValueError('Start playback on a device first.')
                 # Existing channel rotation, history and transition-id rules remain authoritative.
                 s['listening']=d;self.p.save(uid,s)
                 result=self.p.command(uid,{**data,'action':action},record_history=False);s=self.p.load(uid);d=self.session(s)
                 d['revision']+=1
-                if action in ('play','next','previous'):
+                if action in ('play','next','previous','queue_jump'):
                     d.update(action='play',playing=bool(s['current']),duration=0,quality='',seek_target=s['position']);d['seek_intent']+=1;d['intent']+=1;d['play_id']+=1
             self.p.save(uid,s);return self.public(s)
 

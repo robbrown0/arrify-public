@@ -109,7 +109,13 @@ struct MainView: View {
     var body: some View {
         Group {
             if UIDevice.current.userInterfaceIdiom == .pad {
-                VStack(spacing: 0) { tabs; miniPlayer.background(.regularMaterial) }
+                VStack(spacing: 0) {
+                    tabs
+                    ViewThatFits(in: .horizontal) {
+                        TabletPlayerBar(playback: model.playback) { showPlayer = true }.frame(minWidth: 760)
+                        miniPlayer.background(.regularMaterial)
+                    }
+                }
             } else if #available(iOS 26.0, *) { tabs.tabViewBottomAccessory { miniPlayer } }
             else { tabs }
         }.task { await model.refreshBranding() }.sheet(isPresented: $showPlayer) { NowPlayingView(playback: model.playback).presentationDetents([.large]).presentationDragIndicator(.visible) }
@@ -161,6 +167,7 @@ struct SettingsView: View {
                     }
                     Text("Applies to the next song.").font(.footnote).foregroundStyle(.secondary)
                 }
+                Section("Device cache") { CacheStatusView(cache: model.playback.cache) }
                 Section { Button("Sign out", role: .destructive) { Task { await model.logout() } } }
                 Section { Text("Arrify • 0.3.0").foregroundStyle(.secondary) }
             }.navigationTitle("Settings").task { await model.refreshBranding() }

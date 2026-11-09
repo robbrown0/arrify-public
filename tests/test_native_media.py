@@ -133,7 +133,7 @@ class NativeMediaHTTPTests(unittest.TestCase):
         c.request(method, '/api/v1/native/'+path, json.dumps(data) if data is not None else None,
                   {'Content-Type':'application/json','Authorization':'Bearer '+self.pair['access_token']})
         r = c.getresponse(); result = r.status, json.loads(r.read()); c.close()
-        name = 'Error' if result[0] != 200 else 'CatalogPage' if path.startswith('catalog') else 'LibraryDetail' if path.startswith('library/detail') else 'LibraryOverview' if path == 'library' else 'Playback'
+        name = 'Error' if result[0] != 200 else 'QueuePage' if path.startswith('playback/queue') else 'CatalogPage' if path.startswith('catalog') else 'LibraryDetail' if path.startswith('library/detail') else 'LibraryOverview' if path == 'library' else 'Playback'
         with patch.object(contract_test, 'CONTRACT', CONTRACT):
             contract_test.validate(self, result[1], {'$ref':'#/components/schemas/'+name})
         return result
@@ -176,6 +176,70 @@ class NativeMediaHTTPTests(unittest.TestCase):
         self.assertEqual(self.api('library/detail?kind=playlists&id='+str(private))[0],404)
         self.assertEqual(self.api('playback', {'action':'play','source':{'kind':'playlists','id':str(private)},
             'device_id':'a'*32,'expected_revision':started['queue_revision']})[0],404)
+
+    def test_native_cache_report_reaches_server_listening_status(self):
+        _,state=self.api('playback')
+        report={'state':'active','storage':'disk','worker_version':'ios-cache-v1','limit_bytes':512*1024*1024,
+                'player_seconds':12,'sample_age_seconds':0,
+                'items':[{'id':1,'loaded_bytes':19,'total_bytes':19,'state':'ready'}]}
+        code,_=self.api('playback',{'action':'heartbeat','device_id':'a'*32,
+            'owner_epoch':state['owner_epoch'],'expected_current':1,'intent':state['intent'],
+            'position':1,'duration':100,'observed':'playing','report_seq':1,'buffer':report})
+        self.assertEqual(code,200)
+        status=json.loads(self.a.db.execute('SELECT status FROM listening_status WHERE user_id=?',(self.uid,)).fetchone()[0])
+        self.assertEqual(status['buffer']['downloaded_bytes'],19)
+        self.assertEqual(status['buffer']['storage'],'disk')
+        self.assertEqual(status['buffer']['worker_version'],'ios-cache-v1')
+
+    def test_native_events_and_remote_commands_share_web_owner(self):
+        from app.listening_events import ListeningEvents
+        self.s.listening_events = ListeningEvents()
+        self.s.event_slots = threading.BoundedSemaphore(8)
+        self.s.listening.events = self.s.listening_events
+        c = http.client.HTTPConnection('127.0.0.1', self.s.server_port, timeout=5)
+        c.request('GET', '/api/v1/listening/events', headers={'Authorization':'Bearer '+self.pair['access_token']})
+        response = c.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader('Content-Type'), 'text/event-stream')
+        def event():
+            for _ in range(12):
+                line = response.readline()
+                if line.startswith(b'data: '): return int(line[6:])
+            self.fail('No session event')
+        first = event()
+        _, state = self.api('playback')
+        code, advanced = self.api('playback', {'action':'next','device_id':'b'*32,
+            'expected_revision':state['queue_revision'],'transition_id':'remote-next',
+            'expected_current':1,'expected_next':2})
+        self.assertEqual(code, 200)
+        self.assertEqual(advanced['owner_device_id'], 'a'*32)
+        self.assertEqual(advanced['current_track_id'], 2)
+        self.assertGreater(event(), first)
+        response.close(); c.close()
+        for _ in range(30):
+            if not self.s.listening_events.clients: break
+            # Wake the fixture's account without waiting for the production keepalive.
+            for uid in list(self.s.listening_events.clients): self.s.listening_events.publish(uid)
+            time.sleep(0.05)
+        self.assertFalse(self.s.listening_events.clients)
+
+    def test_native_queue_paging_duplicate_occurrences_and_stale_edits(self):
+        _, state = self.api('playback')
+        code, state = self.api('playback', {'action':'play','ids':[1,2,3,2,1], 'device_id':'a'*32, 'expected_revision':state['queue_revision']})
+        self.assertEqual(code,200)
+        code,page=self.api('playback/queue?limit=2')
+        self.assertEqual(code,200);self.assertEqual(page['total'],4)
+        self.assertEqual([x['track']['id'] for x in page['items']],[2,3])
+        self.assertEqual(self.api('playback/queue?offset=2')[0],409)
+        code,tail=self.api('playback/queue?offset=2&revision='+str(page['revision']))
+        self.assertEqual([x['index'] for x in tail['items']],[2,3])
+        code,moved=self.api('playback',{'action':'reorder','from':2,'to':0,'device_id':'a'*32,'expected_revision':page['revision']})
+        self.assertEqual(code,200)
+        self.assertEqual(self.api('playback',{'action':'remove','index':0,'device_id':'a'*32,'expected_revision':page['revision']})[0],409)
+        self.assertEqual(self.api('playback/queue?offset=2&revision='+str(page['revision']))[0],409)
+        code,jumped=self.api('playback',{'action':'queue_jump','index':2,'device_id':'a'*32,'expected_revision':moved['queue_revision']})
+        self.assertEqual(code,200);self.assertEqual(jumped['current_track_id'],3)
+        self.assertEqual(jumped['upcoming_track_ids'],[1]);self.assertTrue(jumped['playing'])
 
     def test_native_playback_snapshot_conflict_and_duplicate_next(self):
         status, state = self.api('playback')

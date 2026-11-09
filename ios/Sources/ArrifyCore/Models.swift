@@ -51,6 +51,9 @@ public struct PlaybackState: Codable, Sendable {
     public var upcomingTrackIds: [Int]?
     public var repeatMode: String?
     public var queueControlsAvailable: Bool?
+    public var context: PlaybackContext?
+    public var durationSeconds: Double?
+    public var output: String?
 
     public static func merging(_ update: Self, into current: Self?) -> Self {
         guard let current else { return update }
@@ -58,6 +61,7 @@ public struct PlaybackState: Codable, Sendable {
         guard update.intent >= current.intent, update.serverTime >= current.serverTime else { return current }
         var merged = update
         if update.partial {
+            merged.context = update.context ?? current.context
             merged.repeatMode = update.repeatMode ?? current.repeatMode
             merged.queueControlsAvailable = update.queueControlsAvailable ?? current.queueControlsAvailable
         }
@@ -90,6 +94,10 @@ public struct PlaybackCommand: Encodable, Sendable {
     public var quality: String?
     public var output: String?
     public var playing: Bool?
+    public var index: Int?
+    public var from: Int?
+    public var to: Int?
+    public var buffer: BufferReport?
     public init(action: String, deviceId: String) { self.action = action; self.deviceId = deviceId }
 }
 public struct MediaItem: Codable, Sendable {
@@ -100,6 +108,8 @@ public struct MediaItem: Codable, Sendable {
     public let state: String
     public let url: String?
     public let urlExpires: Int?
+    public let sizeBytes: Int?
+    public let mimeType: String?
 }
 public struct Manifest: Codable, Sendable {
     public let ownerEpoch: Int
@@ -137,4 +147,36 @@ public struct Endpoint: Sendable {
               candidate.standardized.path.hasPrefix("/api/v1/stream/") else { throw APIError.invalidEndpoint }
         return candidate
     }
+}
+
+public struct PlaybackContext: Codable, Sendable { public let kind: String; public let name: String }
+public struct QueueEntry: Codable, Identifiable, Sendable {
+    public let index: Int
+    public let track: Track
+    public var id: Int { index }
+}
+public struct QueuePage: Codable, Sendable {
+    public let revision: Int
+    public let total: Int
+    public let items: [QueueEntry]
+    public let nextOffset: Int?
+}
+public struct BufferEntry: Codable, Sendable, Identifiable {
+    public let id: Int
+    public var loadedBytes: Int
+    public var totalBytes: Int
+    public var state: String
+    public init(id: Int, loadedBytes: Int, totalBytes: Int, state: String) {
+        self.id = id; self.loadedBytes = loadedBytes; self.totalBytes = totalBytes; self.state = state
+    }
+}
+public struct BufferReport: Encodable, Sendable {
+    public let state = "active"
+    public let storage = "disk"
+    public let workerVersion = "ios-cache-v1"
+    public let limitBytes = 512 * 1024 * 1024
+    public var items: [BufferEntry]
+    public var playerSeconds: Int
+    public let sampleAgeSeconds = 0
+    public init(items: [BufferEntry], playerSeconds: Int) { self.items = items; self.playerSeconds = playerSeconds }
 }

@@ -59,6 +59,25 @@ struct LibraryHome: View {
                     Section {
                         Text("\(overview.tracks.formatted()) songs · \(overview.albums.formatted()) albums · \(overview.artists.formatted()) artists").font(.footnote).foregroundStyle(.secondary)
                     }
+                    let featured = Array(overview.items.filter { $0.section == "playlists" }.prefix(8))
+                    if !featured.isEmpty {
+                        Section("Made for listening") {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                LazyHStack(alignment: .top, spacing: 18) {
+                                    ForEach(featured, id: \.identity) { item in
+                                        NavigationLink { DetailScreen(model: model, entry: item) } label: {
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                RemoteCover(path: item.artwork, title: item.name, artwork: model.artwork)
+                                                    .frame(width: 160, height: 160).clipShape(RoundedRectangle(cornerRadius: 12))
+                                                Text(item.name).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
+                                                Text("\(item.trackCount) songs").font(.caption).foregroundStyle(.secondary)
+                                            }.frame(width: 160, alignment: .leading)
+                                        }.buttonStyle(.plain)
+                                    }
+                                }.padding(.vertical, 8)
+                            }
+                        }.listRowBackground(Color.clear)
+                    }
                     let personal = overview.items.filter { $0.section == "personal" }
                     if !personal.isEmpty {
                         Section("Your playlists") {
