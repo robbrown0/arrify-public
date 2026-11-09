@@ -87,6 +87,20 @@ def resource(kind, attributes, identifier=None, relationships=None):
 def relation(kind, identifier):
     return {'data': {'type': kind, 'id': identifier}}
 
+def ensure_no_other_review(api, app, build):
+    # Check all current review states before changing metadata or group access.
+    reviews = api('/v1/builds?' + urllib.parse.urlencode({'filter[app]': app, 'limit': 200, 'include': 'betaAppReviewSubmission'}))
+    if reviews.get('links', {}).get('next'):
+        raise RuntimeError('Review history requires pagination before another submission')
+    states = {x['id']: x['attributes']['betaReviewState'] for x in reviews.get('included', []) if x['type'] == 'betaAppReviewSubmissions'}
+    for candidate in reviews['data']:
+        reference = candidate.get('relationships', {}).get('betaAppReviewSubmission', {}).get('data')
+        review_state = states.get(reference['id']) if reference else None
+        if review_state:
+            print('Existing build', candidate['attributes']['version'], 'review state:', review_state)
+        if candidate['id'] != build and review_state in ('WAITING_FOR_REVIEW', 'IN_REVIEW'):
+            raise RuntimeError('Another build is awaiting beta review; withdraw it in App Store Connect before submitting this build')
+
 def main():
     number = os.environ['BUILD_NUMBER']; version = os.environ['APP_VERSION']
     if not re.fullmatch(r'[1-9][0-9]*', number) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
@@ -120,6 +134,7 @@ def main():
     build = builds[0]['id']
     if builds[0]['attributes'].get('buildAudienceType') == 'INTERNAL_ONLY':
         raise RuntimeError('Selected build only supports internal testing')
+    ensure_no_other_review(api, app, build)
     detail = api(f'/v1/apps/{app}/betaAppReviewDetail')['data']
     notes = ('Review server: '+DEMO+'. On the sign-in screen replace the Server address with this URL, then use the supplied review login. '
              'Open Library > Songs and play First Light by Arrify Studio. The isolated server contains six original synthesized instrumentals across Daylight and Afterglow albums, original artwork, two demo channels, and Feel Good / Unwind mood playlists. No commercial recordings or external music services are used on the demo server. '
@@ -136,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Redesigned compact and full-screen players with AirPlay, Up Next, system volume, an artwork presentation view, the Aurora icon, and custom server branding. Check background playback, lock-screen controls, and receiver artwork.'}
+    attrs = {'whatsNew': 'Artwork-led Home, full-screen iPad player, live cross-device controls, editable queue, device cache reporting, and background playback improvements. Test next-song transitions while locked, remote control responsiveness, and AirPlay volume on iPhone and iPad. Apple TV full-screen artwork remains under investigation.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:
@@ -146,6 +161,8 @@ def main():
     if len(external) != 1:
         raise RuntimeError('Expected the existing Friends & Family external group')
     for group in [g for g in groups if g['attributes']['isInternalGroup']] + external:
+        if group['attributes']['isInternalGroup'] and group['attributes'].get('hasAccessToAllBuilds'):
+            continue
         linked = api(f"/v1/betaGroups/{group['id']}/relationships/builds?limit=200")['data']
         if not any(item['id'] == build for item in linked):
             api(f"/v1/betaGroups/{group['id']}/relationships/builds", 'POST', {'data':[{'type':'builds','id':build}]})

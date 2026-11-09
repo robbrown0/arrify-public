@@ -25,8 +25,10 @@ final class LaunchTests: XCTestCase {
         password.tap(); password.typeText("fixture")
         app.buttons["signIn"].tap()
         XCTAssertTrue(app.buttons["Songs"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["On the record."].waitForExistence(timeout: 5))
+        let homeShot = XCTAttachment(screenshot: app.screenshot()); homeShot.name = "Artwork-led Home"; homeShot.lifetime = .keepAlways; add(homeShot)
         app.buttons["refreshLibrary"].tap()
-        XCTAssertTrue(app.staticTexts["Library updated"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Library updated"].exists)
         app.buttons["Songs"].tap()
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
         let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -67,6 +69,7 @@ extension LaunchTests {
         app.buttons["Channels"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Play 80s on 8"].waitForExistence(timeout: 10))
         let channels = XCTAttachment(screenshot: app.screenshot()); channels.name = "Channels"; channels.lifetime = .keepAlways; add(channels)
+        app.buttons["Library"].firstMatch.tap()
         app.buttons["Moods"].firstMatch.tap()
         XCTAssertTrue(app.buttons["mood-feel-good"].waitForExistence(timeout: 10))
         app.buttons["mood-feel-good"].tap()
@@ -98,6 +101,9 @@ extension LaunchTests {
         XCTAssertLessThan(last.frame.maxY, nowPlaying.frame.minY)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Last channel above player"; shot.lifetime = .keepAlways; add(shot)
         nowPlaying.tap()
+        let close = app.buttons["Close player"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        XCTAssertLessThan(close.frame.minY, app.frame.height * 0.15, "Expanded player must occupy the full screen")
         let repeatButton = app.buttons["Repeat"]
         XCTAssertTrue(repeatButton.waitForExistence(timeout: 10), app.debugDescription)
         if !repeatButton.isHittable { app.scrollViews.firstMatch.swipeUp() }
@@ -106,6 +112,7 @@ extension LaunchTests {
         repeatButton.tap()
         expectation(for: NSPredicate(format: "value == 'all'"), evaluatedWith: repeatButton)
         waitForExpectations(timeout: 5)
+        XCTAssertLessThan(app.buttons["upNext"].frame.maxY, app.frame.maxY - 12, "Footer must fit above the home indicator")
         let playerShot = XCTAttachment(screenshot: app.screenshot()); playerShot.name = "Redesigned player"; playerShot.lifetime = .keepAlways; add(playerShot)
         app.buttons["upNext"].tap()
         XCTAssertTrue(app.staticTexts["Family Portrait"].waitForExistence(timeout: 5))

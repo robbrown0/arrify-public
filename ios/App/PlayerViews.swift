@@ -21,7 +21,7 @@ struct MiniPlayerView: View {
                             Spacer(minLength: 0)
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
-                    AirPlayPicker().frame(width: 44, height: 44).accessibilityIdentifier("miniAirPlay")
+                    AirPlayPicker(onDismiss: { playback.refreshOutput() }).frame(width: 44, height: 44).accessibilityIdentifier("miniAirPlay")
                     Button { Task { await playback.send(playback.showsPauseControl ? "pause" : "resume") } } label: {
                         Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill")
                             .font(.system(size: 21, weight: .semibold)).frame(width: 44, height: 44).overlay { PlaybackProgressRing(progress: playback.progress).padding(3) }
@@ -47,9 +47,11 @@ struct NowPlayingView: View {
     @State private var seekPosition = 0.0
     @State private var showQueue = false
     @State private var showArtwork = false
+    @State private var controlsHeight: CGFloat = 360
     var body: some View {
         GeometryReader { proxy in
             let landscape = proxy.size.width > proxy.size.height
+            let tablet = UIDevice.current.userInterfaceIdiom == .pad
             ZStack {
                 PlayerBackdrop(image: playback.artwork)
                 ScrollView {
@@ -70,14 +72,15 @@ struct NowPlayingView: View {
                                 controls.frame(maxWidth: 480)
                             }
                         } else {
-                            cover.frame(maxWidth: min(440, max(160, proxy.size.height * 0.33)))
+                            cover.frame(maxWidth: min(tablet ? proxy.size.width * 0.68 : proxy.size.width - 48, max(160, proxy.size.height - controlsHeight - 132)))
                                 .padding(.bottom, 12)
-                            controls.frame(maxWidth: 520)
+                            controls.frame(maxWidth: tablet ? 640 : 520)
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
                         }
                     }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 24)
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .top)
                 }
-            }.foregroundStyle(.white).tint(.white)
+            }.accessibilityIdentifier("fullScreenPlayer").foregroundStyle(.white).tint(.white)
         }.sheet(isPresented: $showQueue) { UpNextView(playback: playback) }
             .fullScreenCover(isPresented: $showArtwork) { ArtworkPresentationView(playback: playback) }
     }
@@ -137,14 +140,14 @@ struct NowPlayingView: View {
                 }.accessibilityLabel("Repeat").accessibilityValue(playback.state?.repeatMode ?? "off")
                     .disabled(playback.state?.queueControlsAvailable != true)
             }.buttonStyle(.plain)
-            SystemVolumeSlider().frame(height: 32).padding(.top, 6)
+            SystemVolumeSlider(retainedView: playback.expandedVolumeView).frame(height: 44).padding(.top, 6)
             HStack {
                 Button { showArtwork = true } label: { Image(systemName: "photo").frame(width: 44, height: 44) }
                     .accessibilityLabel("Show artwork").accessibilityIdentifier("artworkDisplayButton")
                 Spacer()
                 VStack(spacing: 0) {
-                    AirPlayPicker().frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")
-                    Text(playback.displayOutputName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    AirPlayPicker(onDismiss: { playback.refreshOutput() }).frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")
+                    Text(playback.routeDescription).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }
@@ -274,22 +277,33 @@ struct ArtworkPresentationView: View {
 }
 
 struct AirPlayPicker: UIViewRepresentable {
+    var onDismiss: () -> Void = {}
+    func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss) }
+    final class Coordinator: NSObject, AVRoutePickerViewDelegate {
+        var onDismiss: () -> Void
+        init(onDismiss: @escaping () -> Void) { self.onDismiss = onDismiss }
+        func routePickerViewDidEndPresentingRoutes(_ routePickerView: AVRoutePickerView) { onDismiss() }
+    }
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView(); view.tintColor = .white; view.activeTintColor = .systemGreen
-        view.prioritizesVideoDevices = false
+        view.prioritizesVideoDevices = false; view.delegate = context.coordinator
         return view
     }
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) { context.coordinator.onDismiss = onDismiss }
 }
 // Keep the native control's identity stable during route-name and playback updates.
 // MediaPlayer owns receiver-volume synchronization; never seed it from the phone's
 // outputVolume or write a remembered value when this view appears.
 struct SystemVolumeSlider: UIViewRepresentable {
+    var retainedView: MPVolumeView? = nil
     func makeUIView(context: Context) -> MPVolumeView {
-        let view = MPVolumeView(); view.showsRouteButton = false; view.tintColor = .white
+        let view = retainedView ?? MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44)); view.showsRouteButton = false; view.tintColor = .white
         return view
     }
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: MPVolumeView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 300, height: proposal.height ?? 44)
+    }
 }
 
 struct TabletPlayerBar: View {
@@ -321,9 +335,9 @@ struct TabletPlayerBar: View {
                 }.frame(width: 180)
                 VStack(spacing: 2) {
                     SystemVolumeSlider().frame(height: 28)
-                    Text(playback.displayOutputName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(playback.routeDescription).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }.frame(width: 150)
-                AirPlayPicker().frame(width: 44, height: 44)
+                AirPlayPicker(onDismiss: { playback.refreshOutput() }).frame(width: 44, height: 44)
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")
             }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
                 .padding(.horizontal, 16).padding(.vertical, 8).foregroundStyle(.white)

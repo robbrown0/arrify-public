@@ -46,3 +46,19 @@ class BetaReviewTests(unittest.TestCase):
         self.assertTrue(all(method=='PATCH' for _,method,_ in writes))
         self.assertIn('WAITING_FOR_REVIEW',output.getvalue());self.assertNotIn('test-only',output.getvalue())
         self.assertEqual(writes[0][2]['data']['attributes']['demoAccountName'],'review')
+
+
+class PendingReviewTests(unittest.TestCase):
+    def test_other_pending_review_stops_before_mutations(self):
+        calls = []
+        def api(path, method='GET', payload=None):
+            calls.append(method)
+            return {'data': [{'id': 'old', 'attributes': {'version': '7'}, 'relationships': {'betaAppReviewSubmission': {'data': {'id': 'review'}}}}], 'included': [{'id': 'review', 'type': 'betaAppReviewSubmissions', 'attributes': {'betaReviewState': 'WAITING_FOR_REVIEW'}}]}
+        with self.assertRaisesRegex(RuntimeError, 'Another build'):
+            review.ensure_no_other_review(api, 'app', 'new')
+        self.assertEqual(calls, ['GET'])
+
+    def test_selected_review_is_idempotent(self):
+        def api(path):
+            return {'data': [{'id': 'selected', 'attributes': {'version': '9'}, 'relationships': {'betaAppReviewSubmission': {'data': {'id': 'review'}}}}], 'included': [{'id': 'review', 'type': 'betaAppReviewSubmissions', 'attributes': {'betaReviewState': 'WAITING_FOR_REVIEW'}}]}
+        review.ensure_no_other_review(api, 'app', 'selected')
