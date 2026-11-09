@@ -198,3 +198,58 @@ extension NowPlayingArtworkTests {
         cache.reset()
     }
 }
+
+extension NowPlayingArtworkTests {
+    @MainActor func testEndOfSongRecoversLostTransitionResponseWithoutSkippingAgain() async throws {
+        let transport = TransitionTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let coordinator = PlaybackCoordinator(api: api, audioSession: TestAudioSession())
+        await coordinator.send("resume")
+        for _ in 0..<100 where coordinator.player.currentItem == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let ended = try XCTUnwrap(coordinator.player.currentItem)
+        // The server advances, but its response is lost. Retrying must reconcile
+        // that committed play ID instead of sending another next command.
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: ended)
+        for _ in 0..<150 where coordinator.state?.currentTrackId != 2 {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(coordinator.state?.currentTrackId, 2)
+        let transitions = await transport.transitions
+        XCTAssertEqual(transitions, 1)
+        coordinator.stop()
+    }
+}
+
+private actor TransitionTransport: HTTPTransport {
+    private let fallback = UITestTransport()
+    private var owner = ""
+    private var current = 1
+    private(set) var transitions = 0
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        let path = request.url!.path
+        var value: [String: Any]
+        if path.hasSuffix("/native/playback") {
+            if request.httpMethod == "POST", let data = request.httpBody,
+               let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                owner = body["device_id"] as? String ?? owner
+                if body["action"] as? String == "next" {
+                    transitions += 1; current = 2
+                    throw URLError(.networkConnectionLost)
+                }
+            }
+            value = ["partial": false, "current_track_id": current,
+                "position_seconds": 0, "server_time": 1, "queue_revision": current,
+                "owner_device_id": owner, "owner_epoch": 1, "intent": current,
+                "playing": true, "observed": "playing", "seek_target_seconds": 0,
+                "seek_intent": 0, "play_id": current, "upcoming_track_ids": current == 1 ? [2] : []]
+        } else if path.hasSuffix("/manifest") {
+            value = ["owner_epoch": 1, "queue_revision": current, "retry_after_seconds": 5,
+                "items": [["track_id": current, "profile": "original", "state": "ready",
+                           "url": "/api/v1/stream/\(current)?native_grant=fixture"]]]
+        } else { return try await fallback.send(request) }
+        return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: value))
+    }
+}
