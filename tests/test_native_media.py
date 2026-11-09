@@ -133,7 +133,7 @@ class NativeMediaHTTPTests(unittest.TestCase):
         c.request(method, '/api/v1/native/'+path, json.dumps(data) if data is not None else None,
                   {'Content-Type':'application/json','Authorization':'Bearer '+self.pair['access_token']})
         r = c.getresponse(); result = r.status, json.loads(r.read()); c.close()
-        name = 'Error' if result[0] != 200 else 'CatalogPage' if path.startswith('catalog') else 'LibraryDetail' if path.startswith('library/detail') else 'LibraryOverview' if path == 'library' else 'Playback'
+        name = 'Error' if result[0] != 200 else 'QueuePage' if path.startswith('playback/queue') else 'CatalogPage' if path.startswith('catalog') else 'LibraryDetail' if path.startswith('library/detail') else 'LibraryOverview' if path == 'library' else 'Playback'
         with patch.object(contract_test, 'CONTRACT', CONTRACT):
             contract_test.validate(self, result[1], {'$ref':'#/components/schemas/'+name})
         return result
@@ -176,6 +176,20 @@ class NativeMediaHTTPTests(unittest.TestCase):
         self.assertEqual(self.api('library/detail?kind=playlists&id='+str(private))[0],404)
         self.assertEqual(self.api('playback', {'action':'play','source':{'kind':'playlists','id':str(private)},
             'device_id':'a'*32,'expected_revision':started['queue_revision']})[0],404)
+
+    def test_native_cache_report_reaches_server_listening_status(self):
+        _,state=self.api('playback')
+        report={'state':'active','storage':'disk','worker_version':'ios-cache-v1','limit_bytes':512*1024*1024,
+                'player_seconds':12,'sample_age_seconds':0,
+                'items':[{'id':1,'loaded_bytes':19,'total_bytes':19,'state':'ready'}]}
+        code,_=self.api('playback',{'action':'heartbeat','device_id':'a'*32,
+            'owner_epoch':state['owner_epoch'],'expected_current':1,'intent':state['intent'],
+            'position':1,'duration':100,'observed':'playing','report_seq':1,'buffer':report})
+        self.assertEqual(code,200)
+        status=json.loads(self.a.db.execute('SELECT status FROM listening_status WHERE user_id=?',(self.uid,)).fetchone()[0])
+        self.assertEqual(status['buffer']['downloaded_bytes'],19)
+        self.assertEqual(status['buffer']['storage'],'disk')
+        self.assertEqual(status['buffer']['worker_version'],'ios-cache-v1')
 
     def test_native_queue_paging_duplicate_occurrences_and_stale_edits(self):
         _, state = self.api('playback')

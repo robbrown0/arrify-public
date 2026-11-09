@@ -84,10 +84,21 @@ import ArrifyCore
             owner.transitionTask = UIApplication.shared.beginBackgroundTask(withName: "Finish song transition") { [weak owner] in
                 Task { @MainActor in owner?.finishBackgroundTransition() }
             }
+            let playID = owner.state?.playId
             Task {
                 // Never drop an end event just because a user command is finishing.
-                while owner.commandInFlight { try? await Task.sleep(for: .milliseconds(100)) }
-                if owner.state?.currentTrackId == ended { await owner.send("next", automatic: true) }
+                for attempt in 0..<3 {
+                    while owner.commandInFlight { try? await Task.sleep(for: .milliseconds(100)) }
+                    guard owner.ownsOutput, owner.state?.currentTrackId == ended, owner.state?.playId == playID else { break }
+                    await owner.send("next", automatic: true)
+                    if owner.state?.playId != playID { break }
+                    try? await Task.sleep(for: .seconds(attempt + 1))
+                }
+                if owner.state?.playId == playID {
+                    owner.player.pause(); owner.player.removeAllItems(); owner.queuedTracks = [:]
+                    owner.loadedKey = nil; owner.desiredKey = nil
+                    owner.message = "Connection interrupted at the next song. Reconnecting…"
+                }
                 owner.endedInFlight = false; owner.finishBackgroundTransition()
             }
         }
@@ -190,6 +201,7 @@ import ArrifyCore
         guard !commandInFlight else { return }
         if action == "pause" { player.pause(); permission.userPause() }
         let endedTrack = state?.currentTrackId
+        let endedPlay = state?.playId
         let explicitPlayback = !automatic && ["play", "resume", "takeover", "next", "previous", "queue_jump"].contains(action)
         commandInFlight = true
         defer { commandInFlight = false }
@@ -212,7 +224,7 @@ import ArrifyCore
             let fresh = try await api.state()
             guard generation == sessionGeneration else { return }
             state = PlaybackState.merging(fresh, into: state)
-            if automatic && (state?.currentTrackId != endedTrack || !ownsOutput) { return }
+            if automatic && (state?.currentTrackId != endedTrack || state?.playId != endedPlay || !ownsOutput) { await apply(fresh); return }
             var command = PlaybackCommand(action: action, deviceId: deviceId)
             command.deviceName = UIDevice.current.model
             command.expectedRevision = revision ?? state?.queueRevision; command.ownerEpoch = state?.ownerEpoch
@@ -273,7 +285,7 @@ import ArrifyCore
             return
         }
         let key = "\(id):\(state.ownerEpoch):\(state.playId)"
-        if desiredKey != key, endedInFlight, queuedEpoch == state.ownerEpoch,
+        if desiredKey != key, endedInFlight, profile == loadedProfile, queuedEpoch == state.ownerEpoch,
            let current = player.currentItem, queuedTracks[ObjectIdentifier(current)] == id {
             // AVQueuePlayer has already advanced. Adopt it without restarting audio.
             desiredKey = key; loadedKey = key; seekIntent = state.seekIntent

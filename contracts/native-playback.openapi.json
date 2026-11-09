@@ -340,6 +340,55 @@
           }
         ]
       }
+    },
+    "/api/v1/native/playback/queue": {
+      "get": {
+        "operationId": "nativeQueue",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Pages queue occurrences by index. Send revision on subsequent pages; stale pages return 409. Edits carry expected_revision.",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Queue page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuePage"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Queue changed"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -696,6 +745,22 @@
           "queue_controls_available": {
             "type": "boolean",
             "nullable": true
+          },
+          "context": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "name"
+            ]
           }
         },
         "required": [
@@ -731,7 +796,12 @@
               "takeover",
               "reattach",
               "shuffle",
-              "repeat"
+              "repeat",
+              "queue_jump",
+              "queue_edit",
+              "queue",
+              "remove",
+              "reorder"
             ]
           },
           "device_id": {
@@ -836,6 +906,22 @@
               "all",
               "one"
             ]
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "from": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "to": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "buffer": {
+            "type": "object",
+            "description": "Bounded device cache observations; same validated buffer-report format as the web client. Never used to authorize playback."
           }
         },
         "required": [
@@ -1002,6 +1088,45 @@
           "total",
           "next_offset"
         ]
+      },
+      "QueuePage": {
+        "type": "object",
+        "required": [
+          "revision",
+          "total",
+          "items",
+          "next_offset"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "next_offset": {
+            "type": "integer",
+            "nullable": true
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "index",
+                "track"
+              ],
+              "properties": {
+                "index": {
+                  "type": "integer"
+                },
+                "track": {
+                  "$ref": "#/components/schemas/Track"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "responses": {

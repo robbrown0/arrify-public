@@ -24,7 +24,7 @@ struct MiniPlayerView: View {
                     AirPlayPicker().frame(width: 44, height: 44).accessibilityIdentifier("miniAirPlay")
                     Button { Task { await playback.send(playback.showsPauseControl ? "pause" : "resume") } } label: {
                         Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill")
-                            .font(.system(size: 21, weight: .semibold)).frame(width: 44, height: 44)
+                            .font(.system(size: 21, weight: .semibold)).frame(width: 44, height: 44).overlay { PlaybackProgressRing(progress: playback.progress).padding(3) }
                     }.accessibilityLabel(playback.showsPauseControl ? "Pause" : "Play")
                     Button { Task { await playback.send("next") } } label: {
                         Image(systemName: "forward.end.fill").font(.system(size: 19)).frame(width: 44, height: 44)
@@ -123,7 +123,7 @@ struct NowPlayingView: View {
                         Circle().fill(.white)
                         if playback.busy { ProgressView().tint(.black) }
                         else { Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill").font(.system(size: 30, weight: .semibold)).foregroundStyle(.black) }
-                    }.frame(width: 68, height: 68)
+                    }.frame(width: 68, height: 68).padding(5).overlay { PlaybackProgressRing(progress: playback.progress) }
                 }.accessibilityLabel(playback.showsPauseControl ? "Pause" : "Play")
                 Spacer(minLength: 4)
                 Button { Task { await playback.send("next") } } label: {
@@ -301,7 +301,7 @@ struct TabletPlayerBar: View {
                     HStack(spacing: 16) {
                         Button { Task { await playback.send("previous") } } label: { Image(systemName: "backward.end.fill").frame(width: 44, height: 44) }.accessibilityLabel("Previous song")
                         Button { Task { await playback.send(playback.showsPauseControl ? "pause" : "resume") } } label: {
-                            Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill").font(.title2).frame(width: 48, height: 48).background(.white.opacity(0.08), in: Circle())
+                            Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill").font(.title2).frame(width: 48, height: 48).background(.white.opacity(0.08), in: Circle()).padding(4).overlay { PlaybackProgressRing(progress: playback.progress) }
                         }.accessibilityLabel(playback.showsPauseControl ? "Pause" : "Play")
                         Button { Task { await playback.send("next") } } label: { Image(systemName: "forward.end.fill").frame(width: 44, height: 44) }.accessibilityLabel("Next song")
                     }
@@ -336,5 +336,20 @@ struct CacheStatusView: View {
             }
             Text("Temporary read-ahead for the current song and next two, up to 512 MB total and 256 MB per song. Cleared on sign-out. Downloads may use cellular data.").font(.footnote).foregroundStyle(.secondary)
         }.accessibilityIdentifier("cacheStatus")
+    }
+}
+
+
+struct PlaybackProgressRing: View {
+    let progress: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        ZStack {
+            Circle().stroke(.white.opacity(0.15), lineWidth: 2)
+            Circle().trim(from: 0, to: min(1, max(0, progress)))
+                .stroke(.green, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(reduceMotion ? nil : .linear(duration: 0.25), value: progress)
+        }.allowsHitTesting(false).accessibilityHidden(true)
     }
 }

@@ -8,20 +8,23 @@ import ArrifyCore
     private struct Entry { let key: String; let url: URL; let bytes: Int }
     private var files: [Int: Entry] = [:]
     private let directory: URL
-    private let session: URLSession
+    private let download: @Sendable (URL) async throws -> (URL, URLResponse)
+    private static var didPrune = false
     private var generation = UUID()
     var items: [BufferEntry] = []
     var downloadedBytes: Int { items.reduce(0) { $0 + $1.loadedBytes } }
-    init() {
+    init(download: (@Sendable (URL) async throws -> (URL, URLResponse))? = nil) {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("arrify-audio-" + UUID().uuidString, isDirectory: true)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil; configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 180; configuration.httpMaximumConnectionsPerHost = 1
-        session = URLSession(configuration: configuration)
+        let session = URLSession(configuration: configuration)
+        self.download = download ?? { url in try await session.download(from: url) }
         // A force-quit may leave disposable files; never retain another session's audio.
-        if let old = try? FileManager.default.contentsOfDirectory(at: FileManager.default.temporaryDirectory, includingPropertiesForKeys: nil) {
+        if !Self.didPrune, let old = try? FileManager.default.contentsOfDirectory(at: FileManager.default.temporaryDirectory, includingPropertiesForKeys: nil) {
             for folder in old where folder.lastPathComponent.hasPrefix("arrify-audio-") { try? FileManager.default.removeItem(at: folder) }
         }
+        Self.didPrune = true
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
     private func key(_ item: MediaItem) -> String { "\(item.trackId):\(item.sourceRevision ?? ""):\(item.profile)" }
@@ -54,7 +57,7 @@ import ArrifyCore
             update(item.trackId, state: "downloading")
             do {
                 let remote = try await api.mediaURL(item)
-                let (temporary, response) = try await session.download(from: remote)
+                let (temporary, response) = try await download(remote)
                 defer { try? FileManager.default.removeItem(at: temporary) }
                 guard epoch == generation, !Task.isCancelled else { return }
                 guard let http = response as? HTTPURLResponse, http.statusCode == 200,

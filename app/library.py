@@ -457,7 +457,7 @@ class Player:
             if 'expected_current' in data and data['expected_current']!=s['current']:
                 if action=='position':return self.public(s)
                 raise PlaybackConflict('Playback changed. Refresh the queue before advancing.')
-            if action in ('repeat','queue_edit','queue_jump','remove','reorder') and s.get('party_id'):
+            if action in ('repeat','queue_edit','queue_jump') and s.get('party_id'):
                 raise ValueError('Use PartyQueue controls while hosting.')
             parties=getattr(self,'parties',None)
             if parties:data=parties.before_command(uid,data,s)

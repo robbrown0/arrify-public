@@ -159,3 +159,42 @@ extension NowPlayingArtworkTests {
         XCTAssertNil(library.overview)
     }
 }
+
+
+extension NowPlayingArtworkTests {
+    @MainActor func testCacheOnlyReportsVerifiedCompleteFilesAndClearsOnLogout() async throws {
+        let api = APIClient(transport: RestoredOwnerTransport(), store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let cache = AudioCache(download: { url in
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try Data([1,2,3,4]).write(to: file)
+            return (file, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        })
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let manifest = try decoder.decode(Manifest.self, from: Data(#"{"owner_epoch":1,"queue_revision":1,"retry_after_seconds":2,"items":[{"track_id":1,"source_revision":"v1","profile":"original","state":"ready","size_bytes":4,"mime_type":"audio/flac","url":"/api/v1/stream/1?native_grant=fixture"}]}"#.utf8))
+        await cache.fill(manifest, api: api)
+        XCTAssertEqual(cache.items.first?.state, "ready")
+        XCTAssertEqual(cache.downloadedBytes, 4)
+        let file = try XCTUnwrap(cache.file(for: manifest.items[0]))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        cache.reset()
+        XCTAssertEqual(cache.downloadedBytes, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+    @MainActor func testIncompleteDownloadIsNotReportedAsCached() async throws {
+        let api = APIClient(transport: RestoredOwnerTransport(), store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let cache = AudioCache(download: { url in
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try Data([1]).write(to: file)
+            return (file, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        })
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let manifest = try decoder.decode(Manifest.self, from: Data(#"{"owner_epoch":1,"queue_revision":1,"retry_after_seconds":2,"items":[{"track_id":1,"source_revision":"v1","profile":"original","state":"ready","size_bytes":4,"url":"/api/v1/stream/1?native_grant=fixture"}]}"#.utf8))
+        await cache.fill(manifest, api: api)
+        XCTAssertEqual(cache.items.first?.state, "retrying")
+        XCTAssertEqual(cache.downloadedBytes, 0)
+        XCTAssertNil(cache.file(for: manifest.items[0]))
+        cache.reset()
+    }
+}
