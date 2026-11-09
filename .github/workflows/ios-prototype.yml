@@ -40,7 +40,10 @@ jobs:
         if: always()
         run: |
           if [ -d build/UITests.xcresult ]; then
-            xcrun xcresulttool export attachments --path build/UITests.xcresult --output-path build/screenshots
+            xcrun xcresulttool export attachments --path build/UITests.xcresult --output-path build/screenshots/iphone
+          fi
+          if [ -d build/iPadTests.xcresult ]; then
+            xcrun xcresulttool export attachments --path build/iPadTests.xcresult --output-path build/screenshots/ipad
           fi
       - name: Preserve simulator build and test results
         if: always()
