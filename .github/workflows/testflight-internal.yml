@@ -1,0 +1,34 @@
+name: Assign existing internal TestFlight build
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: Already uploaded internal-only build number
+        required: true
+        type: string
+      app_version:
+        description: Exact version of the uploaded build
+        required: true
+        default: '0.3.0'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: arrify-testflight
+  cancel-in-progress: false
+jobs:
+  assign:
+    if: github.ref == 'refs/heads/main'
+    environment: testflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Assign existing build to internal groups only
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          APP_VERSION: ${{ inputs.app_version }}
+        run: python3 tools/testflight_internal.py
