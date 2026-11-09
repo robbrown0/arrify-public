@@ -59,6 +59,22 @@ final class NowPlayingArtworkTests: XCTestCase {
         XCTAssertFalse(coordinator.showsPauseControl)
         coordinator.stop()
     }
+    @MainActor func testRemoteControlsDoNotActivateOrTakeOverLocalAudio() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let audio = TestAudioSession()
+        let coordinator = PlaybackCoordinator(api: api, audioSession: audio)
+        await transport.setOwner("web-device")
+        await coordinator.reconcile()
+        await coordinator.send("next")
+        XCTAssertTrue(coordinator.hasOtherOutput)
+        XCTAssertEqual(audio.activationAttempts, 0)
+        XCTAssertNil(coordinator.player.currentItem)
+        let commands = await transport.commands
+        XCTAssertEqual(commands, ["next"])
+        coordinator.stop()
+    }
     @MainActor func testSystemCanRequestArtworkFromBackgroundQueue() async {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32)).image { context in
             UIColor.green.setFill()

@@ -191,6 +191,32 @@ class NativeMediaHTTPTests(unittest.TestCase):
         self.assertEqual(status['buffer']['storage'],'disk')
         self.assertEqual(status['buffer']['worker_version'],'ios-cache-v1')
 
+    def test_native_events_and_remote_commands_share_web_owner(self):
+        from app.listening_events import ListeningEvents
+        self.s.listening_events = ListeningEvents()
+        self.s.event_slots = threading.BoundedSemaphore(8)
+        self.s.listening.events = self.s.listening_events
+        c = http.client.HTTPConnection('127.0.0.1', self.s.server_port, timeout=5)
+        c.request('GET', '/api/v1/listening/events', headers={'Authorization':'Bearer '+self.pair['access_token']})
+        response = c.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader('Content-Type'), 'text/event-stream')
+        def event():
+            for _ in range(12):
+                line = response.readline()
+                if line.startswith(b'data: '): return int(line[6:])
+            self.fail('No session event')
+        first = event()
+        _, state = self.api('playback')
+        code, advanced = self.api('playback', {'action':'next','device_id':'b'*32,
+            'expected_revision':state['queue_revision'],'transition_id':'remote-next',
+            'expected_current':1,'expected_next':2})
+        self.assertEqual(code, 200)
+        self.assertEqual(advanced['owner_device_id'], 'a'*32)
+        self.assertEqual(advanced['current_track_id'], 2)
+        self.assertGreater(event(), first)
+        response.close(); c.close()
+
     def test_native_queue_paging_duplicate_occurrences_and_stale_edits(self):
         _, state = self.api('playback')
         code, state = self.api('playback', {'action':'play','ids':[1,2,3,2,1], 'device_id':'a'*32, 'expected_revision':state['queue_revision']})

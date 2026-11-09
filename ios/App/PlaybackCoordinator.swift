@@ -25,6 +25,7 @@ import ArrifyCore
     private var systemArtwork: MPMediaItemArtwork?
     private var artworkTask: Task<Void, Never>?
     var outputName = "iPhone"
+    var displayOutputName: String { hasOtherOutput ? (state?.output.flatMap { $0.isEmpty ? nil : $0 } ?? "Other device") : outputName }
     var progress: Double { duration.isFinite && duration > 0 && position.isFinite ? min(1, max(0, position / duration)) : 0 }
     var position = 0.0
     var duration = 0.0
@@ -39,6 +40,9 @@ import ArrifyCore
         return permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true)
     }
     private var pollTask: Task<Void, Never>?
+    private var eventsTask: Task<Void, Never>?
+    private var reconciling = false
+    private var liveUpdatePending = false
     private var prepareTask: Task<Void, Never>?
     private var loadedProfile = "original"
     private var retryPreparation = false
@@ -68,6 +72,7 @@ import ArrifyCore
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { @Sendable [weak self] time in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                guard self.ownsOutput else { return }
                 self.position = time.seconds.isFinite ? time.seconds : 0
                 let seconds = self.player.currentItem?.duration.seconds ?? 0
                 self.duration = seconds.isFinite ? seconds : 0
@@ -102,6 +107,7 @@ import ArrifyCore
                     owner.message = "Connection interrupted at the next song. Reconnecting…"
                 }
                 owner.endedInFlight = false; owner.finishBackgroundTransition(); owner.startReadAhead()
+                if owner.liveUpdatePending { await owner.reconcile(report: false) }
             }
         }
         observe(AVAudioSession.interruptionNotification) { owner, note in
@@ -143,6 +149,16 @@ import ArrifyCore
     }
     func start() {
         guard pollTask == nil else { return }
+        eventsTask = Task { [weak self, api] in
+            var failures = 0
+            while !Task.isCancelled {
+                do {
+                    try await api.listeningEvents { [weak self] in await self?.liveUpdate() }
+                    failures = 0
+                } catch { failures = min(failures + 1, 5) }
+                do { try await Task.sleep(for: .seconds(min(30, 1 << failures))) } catch { return }
+            }
+        }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -154,6 +170,7 @@ import ArrifyCore
     func stop() {
         sessionGeneration = UUID(); permission = PlaybackPermission()
         aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil; cache.reset(); finishBackgroundTransition()
+        eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false
         pollTask?.cancel(); pollTask = nil; prepareTask?.cancel(); prepareTask = nil
         player.pause(); player.removeAllItems(); queuedTracks = [:]
         artworkTask?.cancel(); artworkTask = nil; artwork = nil; receiverArtwork = nil; systemArtwork = nil
@@ -161,14 +178,23 @@ import ArrifyCore
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         try? audioSession.deactivate()
     }
-    func reconcile() async {
-        guard !endedInFlight, !commandInFlight else { return }
+    private func liveUpdate() async {
+        liveUpdatePending = true
+        await reconcile(report: false)
+    }
+    func reconcile(report: Bool = true) async {
+        guard !endedInFlight, !commandInFlight, !reconciling else { return }
+        reconciling = true; liveUpdatePending = false
+        defer {
+            reconciling = false
+            if liveUpdatePending { Task { [weak self] in await self?.reconcile(report: false) } }
+        }
         let generation = sessionGeneration
         do {
             let update = try await api.state()
             guard generation == sessionGeneration, !Task.isCancelled else { return }
             await apply(update)
-            if ownsOutput, permission.enabled, loadedKey != nil, !permission.interrupted {
+            if report, ownsOutput, permission.enabled, loadedKey != nil, !permission.interrupted {
                 var heartbeat = PlaybackCommand(action: "heartbeat", deviceId: deviceId)
                 heartbeat.ownerEpoch = state?.ownerEpoch; heartbeat.intent = state?.intent
                 heartbeat.expectedCurrent = state?.currentTrackId; heartbeat.position = position
@@ -206,9 +232,12 @@ import ArrifyCore
         let endedPlay = state?.playId
         let explicitPlayback = !automatic && ["play", "resume", "takeover", "next", "previous", "queue_jump"].contains(action)
         commandInFlight = true
-        defer { commandInFlight = false }
+        defer {
+            commandInFlight = false
+            if liveUpdatePending { Task { [weak self] in await self?.reconcile(report: false) } }
+        }
         let generation = sessionGeneration
-        if explicitPlayback {
+        if explicitPlayback && (!hasOtherOutput || action == "takeover") {
             do { try audioSession.activate() }
             catch {
                 player.pause(); permission.userPause()
@@ -279,6 +308,7 @@ import ArrifyCore
             }
         }
         guard let state = self.state else { return }
+        if hasOtherOutput { position = state.positionSeconds; duration = state.durationSeconds ?? 0 }
         guard ownsOutput, permission.enabled, let id = state.currentTrackId else {
             aheadTask?.cancel(); aheadTask = nil
             prepareTask?.cancel(); prepareTask = nil; player.pause(); player.removeAllItems(); queuedTracks = [:]

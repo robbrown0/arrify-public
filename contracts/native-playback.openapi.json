@@ -389,6 +389,37 @@
           }
         }
       }
+    },
+    "/api/v1/listening/events": {
+      "get": {
+        "summary": "Account-scoped playback invalidations shared with web clients",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE session events carry a monotonically increasing account event version. Fetch authoritative playback state; events are not commands. Reconnect with a current bearer token after closure.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Invalid or revoked session"
+          },
+          "429": {
+            "description": "Account connection limit; polling remains available"
+          },
+          "503": {
+            "description": "Live connections busy; polling remains available"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -761,6 +792,13 @@
               "kind",
               "name"
             ]
+          },
+          "duration_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "output": {
+            "type": "string"
           }
         },
         "required": [

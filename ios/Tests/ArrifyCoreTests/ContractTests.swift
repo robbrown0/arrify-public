@@ -108,3 +108,39 @@ extension ContractTests {
         XCTAssertNil(saved)
     }
 }
+
+
+extension ContractTests {
+    func testListeningInvalidationsIgnoreKeepalivesAndDuplicateVersions() {
+        var parser = ListeningEventParser()
+        XCTAssertFalse(parser.line("retry: 2000")); XCTAssertFalse(parser.line(""))
+        XCTAssertFalse(parser.line("event: session")); XCTAssertFalse(parser.line("data: 1"))
+        XCTAssertTrue(parser.line(""))
+        XCTAssertFalse(parser.line(": keepalive")); XCTAssertFalse(parser.line(""))
+        XCTAssertFalse(parser.line("event: session")); XCTAssertFalse(parser.line("data: 1"))
+        XCTAssertFalse(parser.line(""))
+        XCTAssertFalse(parser.line("event: session")); XCTAssertFalse(parser.line("data: 2"))
+        XCTAssertTrue(parser.line(""))
+        XCTAssertFalse(parser.line("event: other")); XCTAssertFalse(parser.line("data: 3"))
+        XCTAssertFalse(parser.line(""))
+    }
+    func testLiveUpdatesUseBearerHeaderAndRenewBeforeConnecting() async throws {
+        let transport = EventTransport()
+        let api = APIClient(transport: transport, store: MemoryStore())
+        try await api.login(endpoint: "https://example.com", username: "test", password: "test", deviceName: "test")
+        try await api.listeningEvents(changed: {})
+        let request = await transport.eventRequest
+        XCTAssertEqual(request?.url?.path, "/api/v1/listening/events")
+        XCTAssertNil(request?.url?.query)
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer rotated")
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "Accept"), "text/event-stream")
+    }
+}
+private actor EventTransport: HTTPTransport {
+    let base = FakeTransport()
+    var eventRequest: URLRequest?
+    func send(_ request: URLRequest) async throws -> HTTPResult { try await base.send(request) }
+    func listeningEvents(_ request: URLRequest, changed: @escaping @Sendable () async -> Void) async throws {
+        eventRequest = request; await changed()
+    }
+}

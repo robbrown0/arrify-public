@@ -146,6 +146,18 @@ public actor APIClient {
         if let revision { path += "&revision=\(revision)" }
         return try await call(path)
     }
+    public func listeningEvents(changed: @escaping @Sendable () async -> Void) async throws {
+        var saved = try await access()
+        for attempt in 0..<2 {
+            var request = try Self.request(endpoint: Endpoint(saved.endpoint), path: "/api/v1/listening/events", token: saved.tokens.accessToken)
+            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            do { try await transport.listeningEvents(request, changed: changed); return }
+            catch APIError.rejected(let status, _, _) where status == 401 || status == 403 {
+                guard attempt == 0 else { throw APIError.signInRequired }
+                saved = try await access(force: credential?.tokens.accessToken == saved.tokens.accessToken)
+            }
+        }
+    }
     public func state() async throws -> PlaybackState { try await call("/api/v1/native/playback") }
     public func command(_ command: PlaybackCommand) async throws -> PlaybackState {
         try await call("/api/v1/native/playback", method: "POST", body: Self.encoder().encode(command))

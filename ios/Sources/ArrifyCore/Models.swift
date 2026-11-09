@@ -52,6 +52,8 @@ public struct PlaybackState: Codable, Sendable {
     public var repeatMode: String?
     public var queueControlsAvailable: Bool?
     public var context: PlaybackContext?
+    public var durationSeconds: Double?
+    public var output: String?
 
     public static func merging(_ update: Self, into current: Self?) -> Self {
         guard let current else { return update }

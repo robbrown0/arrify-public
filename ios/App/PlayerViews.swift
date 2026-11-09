@@ -144,7 +144,7 @@ struct NowPlayingView: View {
                 Spacer()
                 VStack(spacing: 0) {
                     AirPlayPicker().frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")
-                    Text(playback.outputName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Text(playback.displayOutputName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }
@@ -321,7 +321,7 @@ struct TabletPlayerBar: View {
                 }.frame(width: 180)
                 VStack(spacing: 2) {
                     SystemVolumeSlider().frame(height: 28)
-                    Text(playback.outputName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(playback.displayOutputName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }.frame(width: 150)
                 AirPlayPicker().frame(width: 44, height: 44)
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")
