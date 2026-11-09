@@ -8,19 +8,25 @@ import ArrifyCore
 @MainActor @Observable final class RemotePlaybackActivity {
     let api: APIClient
     var active = false
+    private var starting = false
     var error: String?
     private var activity: Activity<PlaybackActivityAttributes>?
     private var tokenTask: Task<Void, Never>?
     private var generation = UUID()
     init(api: APIClient) { self.api = api }
     func start(state: PlaybackState?, track: Track?, destination: String) async {
-        guard let state, let owner = state.ownerDeviceId, let track else { return }
+        guard !starting, let state, let owner = state.ownerDeviceId, let track, track.id == state.currentTrackId else { return }
+        starting = true
+        defer { starting = false }
+        let requestedGeneration = generation
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { error = "Enable Live Activities for Arrify in Settings."; return }
         do {
             guard try await api.liveActivityAvailable() else {
                 error = "Lock Screen updates need Apple push notifications configured on your server."; return
             }
-            await stop()
+            guard requestedGeneration == generation, !Task.isCancelled else { return }
+            let stoppedGeneration = await stop()
+            guard stoppedGeneration == generation, !Task.isCancelled else { return }
             let content = content(state: state, track: track, destination: destination)
             let new = try Activity.request(attributes: PlaybackActivityAttributes(owner: owner), content: content, pushType: .token)
             activity = new; active = true; error = nil
@@ -43,6 +49,7 @@ import ArrifyCore
         guard let activity else { return }
         guard !ownsOutput, let state, let track, state.ownerDeviceId == activity.attributes.owner else { await stop(); return }
         if activity.activityState == .dismissed || activity.activityState == .ended { await stop(); return }
+        guard track.id == state.currentTrackId else { return }
         let next = content(state: state, track: track, destination: destination)
         let old = activity.content.state
         if old.title != next.state.title || old.artist != next.state.artist || old.destination != next.state.destination || old.playing != next.state.playing || Date().timeIntervalSince1970 - old.updatedAt >= 60 {
@@ -52,13 +59,14 @@ import ArrifyCore
     private func content(state: PlaybackState, track: Track, destination: String) -> ActivityContent<PlaybackActivityAttributes.ContentState> {
         ActivityContent(state: .init(title: track.title, artist: track.artist, destination: destination, playing: state.playing, updatedAt: Date().timeIntervalSince1970), staleDate: Date().addingTimeInterval(90))
     }
-    func stop() async {
-        generation = UUID(); tokenTask?.cancel(); tokenTask = nil
+    @discardableResult func stop() async -> UUID {
+        let nextGeneration = UUID(); generation = nextGeneration; tokenTask?.cancel(); tokenTask = nil
         let previous = activity; activity = nil; active = false
         if let previous {
             await previous.end(nil, dismissalPolicy: .immediate)
             try? await api.stopLiveActivity(id: previous.id)
         }
+        return nextGeneration
     }
     func clearRestoredActivities() async {
         for old in Activity<PlaybackActivityAttributes>.activities {

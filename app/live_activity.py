@@ -38,6 +38,7 @@ class APNs:
         path = Path(directory) / 'secrets/apns.json'
         if path.is_file():
             config = json.loads(path.read_text())
+            if not isinstance(config, dict): raise ValueError("Invalid APNs configuration")
             if not all(re.fullmatch(r'[A-Z0-9]{10}', config.get(k, '')) for k in ('team_id', 'key_id')):
                 raise ValueError('Invalid APNs configuration identifiers')
             if config.get('environment') not in ('production', 'sandbox'):
