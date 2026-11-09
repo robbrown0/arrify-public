@@ -118,10 +118,11 @@ struct MainView: View {
                 }
             } else if #available(iOS 26.0, *) { tabs.tabViewBottomAccessory { miniPlayer } }
             else { tabs }
-        }.task { await model.refreshBranding() }.sheet(isPresented: $showPlayer) { NowPlayingView(playback: model.playback).presentationDetents([.large]).presentationDragIndicator(.visible) }
+        }.task { await model.refreshBranding() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(playback: model.playback) }
     }
     private var tabs: some View {
         TabView {
+            Tab("Home", systemImage: "house") { withPlayer(HomeScreen(model: model)) }
             Tab("Library", systemImage: "square.stack") { withPlayer(LibraryHome(model: model)) }
             Tab("Channels", systemImage: "antenna.radiowaves.left.and.right") { withPlayer(NavigationStack { CollectionScreen(model: model, section: "channels", title: "Channels") }) }
             Tab("Moods", systemImage: "sparkles") { withPlayer(MoodScreen(model: model)) }

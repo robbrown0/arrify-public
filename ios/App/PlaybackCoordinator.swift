@@ -9,6 +9,13 @@ import ArrifyCore
     private let audioSession: any PlaybackAudioSession
     let player = AVQueuePlayer()
     let cache = AudioCache()
+    // Retain the receiver-owned volume control across full-screen presentations.
+    // A newly created slider must not substitute the phone's local volume.
+    @ObservationIgnored let expandedVolumeView: MPVolumeView = {
+        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        view.showsRouteButton = false; view.tintColor = .white
+        return view
+    }()
     private var aheadTask: Task<Void, Never>?
     private var aheadGeneration = UUID()
     private var aheadCompletedRevision: Int?
@@ -26,6 +33,11 @@ import ArrifyCore
     private var artworkTask: Task<Void, Never>?
     var outputName = "iPhone"
     var displayOutputName: String { hasOtherOutput ? (state?.output.flatMap { $0.isEmpty ? nil : $0 } ?? "Other device") : outputName }
+    var routeDescription: String {
+        let destination = displayOutputName.replacingOccurrences(of: "AirPlay · ", with: "").replacingOccurrences(of: "CarPlay · ", with: "")
+        return hasOtherOutput ? destination : "\(UIDevice.current.model) → \(destination)"
+    }
+    func refreshOutput() { outputName = audioSession.outputName }
     var progress: Double { duration.isFinite && duration > 0 && position.isFinite ? min(1, max(0, position / duration)) : 0 }
     var position = 0.0
     var duration = 0.0
@@ -293,12 +305,17 @@ import ArrifyCore
             permission.userPlay()
         }
         if track?.id != metadataState.currentTrackId {
-            track = nil; artwork = nil; receiverArtwork = nil; systemArtwork = nil; artworkTask?.cancel()
+            // Keep the visible player mounted while metadata is in flight. Clearing
+            // track here removes the accessory and relays out the entire tab view.
+            artworkTask?.cancel()
+            if metadataState.currentTrackId == nil {
+                track = nil; artwork = nil; receiverArtwork = nil; systemArtwork = nil
+            }
             player.currentItem?.externalMetadata = []
             if let id = metadataState.currentTrackId {
                 let metadata = try? await api.track(id)
                 if self.state?.currentTrackId == id {
-                    track = metadata
+                    if let metadata { track = metadata; receiverArtwork = nil; systemArtwork = nil }
                     artworkTask = Task { [weak self, api] in
                         let bytes = try? await api.artwork(id)
                         guard let self, !Task.isCancelled, self.state?.currentTrackId == id else { return }

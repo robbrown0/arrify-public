@@ -98,6 +98,11 @@ private struct ArtworkRequest: @unchecked Sendable {
 
 private actor RestoredOwnerTransport: HTTPTransport {
     private var owner = ""
+    private var current = 1
+    private(set) var waitingForMetadata = false
+    private var metadataContinuation: CheckedContinuation<Void, Never>?
+    func advanceWithDelayedMetadata() { current = 2 }
+    func releaseMetadata() { metadataContinuation?.resume(); metadataContinuation = nil }
     private(set) var commands: [String] = []
     private let fallback = UITestTransport()
     func setOwner(_ value: String) { owner = value }
@@ -107,7 +112,7 @@ private actor RestoredOwnerTransport: HTTPTransport {
             if request.httpMethod == "POST", let body = request.httpBody,
                let value = try JSONSerialization.jsonObject(with: body) as? [String: Any],
                let action = value["action"] as? String { commands.append(action) }
-            let value: [String: Any] = ["partial": false, "current_track_id": 1,
+            let value: [String: Any] = ["partial": false, "current_track_id": current,
                 "position_seconds": 30, "server_time": 1, "queue_revision": 1,
                 "owner_device_id": owner, "owner_epoch": 1, "intent": 1,
                 "playing": commands.last != "pause", "observed": "playing", "seek_target_seconds": 30,
@@ -116,6 +121,11 @@ private actor RestoredOwnerTransport: HTTPTransport {
         }
         if path.hasSuffix("/manifest") {
             return HTTPResult(status: 200, data: Data(#"{"owner_epoch":1,"queue_revision":1,"retry_after_seconds":5,"items":[{"track_id":1,"profile":"original","state":"queued"}]}"#.utf8))
+        }
+        if path.hasSuffix("/tracks/2") {
+            waitingForMetadata = true
+            await withCheckedContinuation { metadataContinuation = $0 }
+            return HTTPResult(status: 200, data: Data(#"{"track":{"id":2,"title":"Next song","artist":"Test artist","album":"Test album"}}"#.utf8))
         }
         if path.hasSuffix("/tracks/1") {
             return HTTPResult(status: 200, data: Data(#"{"track":{"id":1,"title":"Test song","artist":"Test artist","album":"Test album"}}"#.utf8))
@@ -267,5 +277,31 @@ private actor TransitionTransport: HTTPTransport {
                            "url": "/api/v1/stream/\(current)?native_grant=fixture"]]]
         } else { return try await fallback.send(request) }
         return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: value))
+    }
+}
+
+
+extension NowPlayingArtworkTests {
+    @MainActor func testRemoteTrackChangeKeepsPlayerMountedWhileMetadataLoads() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let coordinator = PlaybackCoordinator(api: api, audioSession: TestAudioSession())
+        await transport.setOwner("remote-device")
+        await coordinator.reconcile(report: false)
+        XCTAssertEqual(coordinator.track?.id, 1)
+        await transport.advanceWithDelayedMetadata()
+        let update = Task { await coordinator.reconcile(report: false) }
+        for _ in 0..<100 {
+            if await transport.waitingForMetadata { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let waiting = await transport.waitingForMetadata
+        XCTAssertTrue(waiting)
+        XCTAssertEqual(coordinator.track?.id, 1, "The mounted player must survive metadata latency")
+        await transport.releaseMetadata()
+        await update.value
+        XCTAssertEqual(coordinator.track?.id, 2)
+        coordinator.stop()
     }
 }

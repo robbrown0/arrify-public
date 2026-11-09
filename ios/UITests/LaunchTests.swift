@@ -25,6 +25,8 @@ final class LaunchTests: XCTestCase {
         password.tap(); password.typeText("fixture")
         app.buttons["signIn"].tap()
         XCTAssertTrue(app.buttons["Songs"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["On the record."].waitForExistence(timeout: 5))
+        let homeShot = XCTAttachment(screenshot: app.screenshot()); homeShot.name = "Artwork-led Home"; homeShot.lifetime = .keepAlways; add(homeShot)
         app.buttons["refreshLibrary"].tap()
         XCTAssertTrue(app.staticTexts["Library updated"].waitForExistence(timeout: 10))
         app.buttons["Songs"].tap()
@@ -98,6 +100,9 @@ extension LaunchTests {
         XCTAssertLessThan(last.frame.maxY, nowPlaying.frame.minY)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Last channel above player"; shot.lifetime = .keepAlways; add(shot)
         nowPlaying.tap()
+        let close = app.buttons["Close player"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        XCTAssertLessThan(close.frame.minY, app.frame.height * 0.15, "Expanded player must occupy the full screen")
         let repeatButton = app.buttons["Repeat"]
         XCTAssertTrue(repeatButton.waitForExistence(timeout: 10), app.debugDescription)
         if !repeatButton.isHittable { app.scrollViews.firstMatch.swipeUp() }

@@ -320,3 +320,93 @@ struct SearchScreen: View {
         }
     }
 }
+
+/// Home uses the same playable collections as the web, without duplicating catalog state.
+struct HomeScreen: View {
+    let model: AppModel
+    @State private var filter = "All"
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var cardWidth: CGFloat { sizeClass == .regular ? 210 : 165 }
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 28) {
+                    Text("On the record.").font(.largeTitle.bold())
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(["All", "Playlists", "Moods", "Channels"], id: \.self) { name in
+                                Button { filter = name } label: {
+                                    Text(name).font(.subheadline.weight(.semibold)).padding(.horizontal, 18).padding(.vertical, 12)
+                                        .background(filter == name ? Color.green : Color.white.opacity(0.07), in: Capsule())
+                                        .foregroundStyle(filter == name ? Color.black : Color.white)
+                                }.buttonStyle(.plain).accessibilityAddTraits(filter == name ? .isSelected : [])
+                                    .accessibilityIdentifier("homeFilter-" + name).accessibilityLabel("Show \(name) on Home")
+                            }
+                        }
+                    }
+                    if filter == "All" {
+                        HStack(spacing: 20) {
+                            NavigationLink("Songs") { BrowserScreen(model: model, title: "Songs", kind: "tracks") }
+                            NavigationLink("Albums") { BrowserScreen(model: model, title: "Albums", kind: "albums") }
+                            NavigationLink("Artists") { BrowserScreen(model: model, title: "Artists", kind: "artists") }
+                        }.font(.subheadline.weight(.semibold))
+                    }
+                    if let overview = model.library.overview {
+                        if filter == "All" || filter == "Playlists" {
+                            rail("Your playlists", items: overview.items.filter { $0.section == "personal" }, section: "playlists")
+                            rail("Made for listening", items: overview.items.filter { $0.section == "playlists" }, section: "playlists")
+                        }
+                        if filter == "All" || filter == "Moods" {
+                            if !overview.moods.isEmpty {
+                                VStack(alignment: .leading, spacing: 16) {
+                                    HStack {
+                                        Text("Set the mood").font(.title2.bold()); Spacer()
+                                        NavigationLink("View all") { MoodScreen(model: model) }.font(.subheadline)
+                                    }
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        LazyHStack(alignment: .top, spacing: 18) {
+                                            ForEach(overview.moods) { mood in
+                                                NavigationLink { CollectionScreen(model: model, section: "moods", title: mood.name, mood: mood) } label: {
+                                                    VStack(alignment: .leading, spacing: 10) {
+                                                        MoodCover(mood: mood).frame(width: cardWidth, height: cardWidth).clipShape(RoundedRectangle(cornerRadius: 12))
+                                                        Text(mood.name).font(.headline).foregroundStyle(.primary)
+                                                    }.frame(width: cardWidth, alignment: .leading)
+                                                }.buttonStyle(.plain)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if filter == "All" || filter == "Channels" {
+                            rail("Tune in", items: overview.items.filter { $0.kind == "channels" }, section: "channels")
+                        }
+                    }
+                    RefreshStatus(loading: model.library.loading, updated: model.library.updated, error: model.library.error)
+                }.padding(24)
+            }.background(Color.black).navigationTitle("Home").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) {
+                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.library.refresh() } }.accessibilityIdentifier("refreshLibrary")
+                } }
+                .task { if model.library.overview == nil { await model.library.refresh() } }
+                .refreshable { await model.library.refresh() }
+        }
+    }
+    @ViewBuilder private func rail(_ title: String, items: [LibraryEntry], section: String) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text(title).font(.title2.bold()); Spacer()
+                    NavigationLink("View all") { CollectionScreen(model: model, section: section, title: section.capitalized) }.font(.subheadline)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 18) {
+                        ForEach(Array(items.prefix(12)), id: \.identity) { item in
+                            CollectionCard(model: model, item: item).frame(width: cardWidth)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
