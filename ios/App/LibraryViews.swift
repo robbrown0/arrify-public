@@ -40,7 +40,6 @@ struct RefreshStatus: View {
     var body: some View {
         if let error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.orange).font(.footnote) }
         else if loading { ProgressView("Updating…").font(.footnote) }
-        else if updated != nil { Label("Library updated", systemImage: "checkmark").font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("libraryUpdated") }
     }
 }
 
@@ -56,9 +55,6 @@ struct LibraryHome: View {
                     NavigationLink { CollectionScreen(model: model, section: "playlists", title: "Playlists") } label: { Label("Playlists", systemImage: "music.note.list") }
                 }.font(.title3).listRowBackground(Color.white.opacity(0.04))
                 if let overview = model.library.overview {
-                    Section {
-                        Text("\(overview.tracks.formatted()) songs · \(overview.albums.formatted()) albums · \(overview.artists.formatted()) artists").font(.footnote).foregroundStyle(.secondary)
-                    }
                     let featured = Array(overview.items.filter { $0.section == "playlists" }.prefix(8))
                     if !featured.isEmpty {
                         Section("Made for listening") {

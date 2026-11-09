@@ -28,7 +28,7 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["On the record."].waitForExistence(timeout: 5))
         let homeShot = XCTAttachment(screenshot: app.screenshot()); homeShot.name = "Artwork-led Home"; homeShot.lifetime = .keepAlways; add(homeShot)
         app.buttons["refreshLibrary"].tap()
-        XCTAssertTrue(app.staticTexts["Library updated"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Library updated"].exists)
         app.buttons["Songs"].tap()
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
         let attachment = XCTAttachment(screenshot: app.screenshot())

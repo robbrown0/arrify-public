@@ -71,7 +71,7 @@ struct NowPlayingView: View {
                                 controls.frame(maxWidth: 480)
                             }
                         } else {
-                            cover.frame(maxWidth: tablet ? min(proxy.size.width * 0.68, proxy.size.height * 0.48) : min(440, max(160, proxy.size.height * 0.33)))
+                            cover.frame(maxWidth: tablet ? min(proxy.size.width * 0.68, proxy.size.height * 0.48) : min(proxy.size.width - 48, max(160, proxy.size.height - 420)))
                                 .padding(.bottom, 12)
                             controls.frame(maxWidth: tablet ? 640 : 520)
                         }
