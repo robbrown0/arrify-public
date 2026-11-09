@@ -43,6 +43,7 @@ import ArrifyCore
     private var eventsTask: Task<Void, Never>?
     private var reconciling = false
     private var liveUpdatePending = false
+    private var liveConnected = false
     private var prepareTask: Task<Void, Never>?
     private var loadedProfile = "original"
     private var retryPreparation = false
@@ -156,6 +157,7 @@ import ArrifyCore
                     try await api.listeningEvents { [weak self] in await self?.liveUpdate() }
                     failures = 0
                 } catch { failures = min(failures + 1, 5) }
+                self?.liveConnected = false
                 do { try await Task.sleep(for: .seconds(min(30, 1 << failures))) } catch { return }
             }
         }
@@ -163,14 +165,14 @@ import ArrifyCore
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.reconcile()
-                do { try await Task.sleep(for: .seconds(UIApplication.shared.applicationState == .active ? 5 : 15)) } catch { return }
+                do { try await Task.sleep(for: .seconds(self.liveConnected ? 10 : (UIApplication.shared.applicationState == .active ? 5 : 15))) } catch { return }
             }
         }
     }
     func stop() {
         sessionGeneration = UUID(); permission = PlaybackPermission()
         aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil; cache.reset(); finishBackgroundTransition()
-        eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false
+        eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false; liveConnected = false
         pollTask?.cancel(); pollTask = nil; prepareTask?.cancel(); prepareTask = nil
         player.pause(); player.removeAllItems(); queuedTracks = [:]
         artworkTask?.cancel(); artworkTask = nil; artwork = nil; receiverArtwork = nil; systemArtwork = nil
@@ -179,7 +181,7 @@ import ArrifyCore
         try? audioSession.deactivate()
     }
     private func liveUpdate() async {
-        liveUpdatePending = true
+        liveConnected = true; liveUpdatePending = true
         await reconcile(report: false)
     }
     func reconcile(report: Bool = true) async {

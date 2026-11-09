@@ -216,6 +216,12 @@ class NativeMediaHTTPTests(unittest.TestCase):
         self.assertEqual(advanced['current_track_id'], 2)
         self.assertGreater(event(), first)
         response.close(); c.close()
+        for _ in range(30):
+            if not self.s.listening_events.clients: break
+            # Wake the fixture's account without waiting for the production keepalive.
+            for uid in list(self.s.listening_events.clients): self.s.listening_events.publish(uid)
+            time.sleep(0.05)
+        self.assertFalse(self.s.listening_events.clients)
 
     def test_native_queue_paging_duplicate_occurrences_and_stale_edits(self):
         _, state = self.api('playback')
