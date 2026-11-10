@@ -570,8 +570,6 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({'ok':True},extra={'Set-Cookie':self.cookie('',True)})
         if path=='/api/v1/listening':
             result=self.server.listening.command(uid,data)
-            live=getattr(self.server,'live_activities',None)
-            if live:live.local_controls.observe(uid,data,result,self)
             return self.listening_result(result,user)
         if path=='/api/v1/player':
             with a.lock:

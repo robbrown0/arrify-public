@@ -7,6 +7,7 @@ import ArrifyCore
 @MainActor @Observable final class PlaybackCoordinator {
     let api: APIClient
     let remoteActivity: RemotePlaybackActivity
+    private let localPeer = LocalPeerVerification()
     private let audioSession: any PlaybackAudioSession
     let player = AVQueuePlayer()
     let cache = AudioCache()
@@ -205,6 +206,7 @@ import ArrifyCore
         }
     }
     func stop() {
+        localPeer.stop()
         outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
         sessionGeneration = UUID(); permission = PlaybackPermission(); connectionInterrupted = false; connectionFailures = 0; message = nil
         aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil; cache.reset(); finishBackgroundTransition()
@@ -363,7 +365,8 @@ import ArrifyCore
             }
         }
         guard let state = self.state else { return }
-        Task { [remoteActivity, track, displayOutputName, ownsOutput] in
+        Task { [remoteActivity, localPeer, api, track, displayOutputName, ownsOutput] in
+            await localPeer.update(api: api, state: state, ownsOutput: ownsOutput)
             await remoteActivity.update(state: state, track: track, destination: displayOutputName, ownsOutput: ownsOutput)
         }
         if hasOtherOutput { position = state.positionSeconds; duration = state.durationSeconds ?? 0 }

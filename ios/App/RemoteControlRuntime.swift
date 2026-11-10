@@ -17,8 +17,10 @@ import Foundation
                 api = client
             }
             guard try await client.sessionScope() == activity.attributes.sessionScope else { return }
+            let (nonce, proof) = try await LocalPeerVerification.proof(api: client, owner: activity.attributes.owner, epoch: activity.attributes.ownerEpoch, purpose: command)
+            try Task.checkCancellation()
             let state = try await client.liveActivityCommand(id: activityID, owner: activity.attributes.owner,
-                epoch: activity.attributes.ownerEpoch, command: command)
+                epoch: activity.attributes.ownerEpoch, command: command, nonce: nonce, proof: proof)
             guard let id = state.currentTrackId else { await activity.end(nil, dismissalPolicy: .immediate); return }
             let track = try await client.track(id)
             await activity.update(ActivityContent(state: .init(title: track.title, artist: track.artist,

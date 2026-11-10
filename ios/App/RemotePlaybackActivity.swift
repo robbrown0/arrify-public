@@ -31,8 +31,9 @@ import ArrifyCore
         let requestedGeneration = generation
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { error = "Enable Live Activities for Arrify in Settings."; return }
         do {
-            guard try await api.liveActivityControlsAvailable() else {
-                error = "Lock Screen controls need both devices on the same configured home network and server push notifications."; return
+            let (nonce, proof) = try await LocalPeerVerification.proof(api: api, owner: owner, epoch: state.ownerEpoch, purpose: "status")
+            guard try await api.verifyLocalPresence(owner: owner, epoch: state.ownerEpoch, nonce: nonce, proof: proof) else {
+                error = "Lock Screen controls need both devices on the same local network and server push notifications."; return
             }
             guard requestedGeneration == generation, !Task.isCancelled else { return }
             let stoppedGeneration = await stop()

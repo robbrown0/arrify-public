@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'iPad now has a persistent sidebar, stable search and tablet player, with Home focused on Another spin and Set the mood. Create playlists and add songs from their options menu. Removing a liked song keeps its row visible so it can be added back. Automatic remote Lock Screen controls require the same account, a server-configured local network and push notifications; please verify these on physical devices. Selected audio output diagnostics are available in Settings. Generic AirPlay names and Apple TV full-screen artwork remain under investigation.'}
+    attrs = {'whatsNew': 'iPad now has a persistent sidebar, stable search and tablet player, with Home focused on Another spin and Set the mood. Create playlists and add songs from their options menu. Removing a liked song keeps its row visible so it can be added back. Automatic remote Lock Screen controls require the same account, automatic local device verification and push notifications; please verify these on physical devices. Selected audio output diagnostics are available in Settings. Generic AirPlay names and Apple TV full-screen artwork remain under investigation.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:
