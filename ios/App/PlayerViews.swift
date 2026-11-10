@@ -21,7 +21,7 @@ struct MiniPlayerView: View {
                             Spacer(minLength: 0)
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
-                    AirPlayPicker(onDismiss: { playback.refreshOutput() }).frame(width: 44, height: 44).accessibilityIdentifier("miniAirPlay")
+                    AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44).accessibilityIdentifier("miniAirPlay")
                     Button { Task { await playback.send(playback.showsPauseControl ? "pause" : "resume") } } label: {
                         Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill")
                             .font(.system(size: 21, weight: .semibold)).frame(width: 44, height: 44).overlay { PlaybackProgressRing(progress: playback.progress).padding(3) }
@@ -158,7 +158,7 @@ struct NowPlayingView: View {
                     .accessibilityLabel("Show artwork").accessibilityIdentifier("artworkDisplayButton")
                 Spacer()
                 VStack(spacing: 0) {
-                    AirPlayPicker(onDismiss: { playback.refreshOutput() }).frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")
+                    AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")
                     Text(playback.routeDescription).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
@@ -290,10 +290,13 @@ struct ArtworkPresentationView: View {
 
 struct AirPlayPicker: UIViewRepresentable {
     var onDismiss: () -> Void = {}
-    func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss) }
+    var onPresent: () -> Void = {}
+    func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss, onPresent: onPresent) }
     final class Coordinator: NSObject, AVRoutePickerViewDelegate {
         var onDismiss: () -> Void
-        init(onDismiss: @escaping () -> Void) { self.onDismiss = onDismiss }
+        var onPresent: () -> Void
+        init(onDismiss: @escaping () -> Void, onPresent: @escaping () -> Void) { self.onDismiss = onDismiss; self.onPresent = onPresent }
+        func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) { onPresent() }
         func routePickerViewDidEndPresentingRoutes(_ routePickerView: AVRoutePickerView) { onDismiss() }
     }
     func makeUIView(context: Context) -> AVRoutePickerView {
@@ -301,7 +304,9 @@ struct AirPlayPicker: UIViewRepresentable {
         view.prioritizesVideoDevices = false; view.delegate = context.coordinator
         return view
     }
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) { context.coordinator.onDismiss = onDismiss }
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
+        context.coordinator.onDismiss = onDismiss; context.coordinator.onPresent = onPresent
+    }
 }
 // Keep the native control's identity stable during route-name and playback updates.
 // MediaPlayer owns receiver-volume synchronization; never seed it from the phone's
@@ -348,7 +353,7 @@ struct TabletPlayerBar: View {
                     SystemVolumeSlider().frame(height: 28)
                     Text(playback.routeDescription).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }.frame(width: 150)
-                AirPlayPicker(onDismiss: { playback.refreshOutput() }).frame(width: 44, height: 44)
+                AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44)
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")
             }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
                 .padding(.horizontal, 16).padding(.vertical, 8).foregroundStyle(.white)

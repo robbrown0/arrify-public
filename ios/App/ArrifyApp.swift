@@ -175,6 +175,7 @@ struct SettingsView: View {
                         Text("Original").tag("original"); Text("AAC").tag("aac"); Text("MP3").tag("mp3")
                     }
                     Text("Applies to the next song.").font(.footnote).foregroundStyle(.secondary)
+                    NavigationLink("Audio output diagnostics") { AudioRouteDiagnosticsView(playback: model.playback) }
                 }
                 Section("Lock Screen") {
                     Text("Follow playback from another device on this account using a read-only Live Activity. Start it from that device’s player in Arrify.").font(.footnote)
