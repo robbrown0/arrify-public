@@ -27,7 +27,7 @@ import Foundation
                 destination: String((state.output ?? activity.content.state.destination).prefix(80)), playing: state.playing,
                 updatedAt: Date().timeIntervalSince1970, artwork: activity.content.state.trackID == id ? activity.content.state.artwork : nil, trackID: id), staleDate: Date().addingTimeInterval(90)))
             let thumbnail = await ActivityThumbnail.load(api: client, trackID: id)
-            if activity.content.state.trackID == id, !Task.isCancelled {
+            if let thumbnail, activity.content.state.trackID == id, !Task.isCancelled {
                 var content = activity.content.state; content.artwork = thumbnail
                 await activity.update(ActivityContent(state: content, staleDate: activity.content.staleDate))
             }

@@ -86,7 +86,7 @@ import ArrifyCore
         requestThumbnail(track.id)
         let next = content(state: state, track: track, destination: destination)
         let old = activity.content.state
-        if old.artwork != next.state.artwork || old.title != next.state.title || old.artist != next.state.artist || old.destination != next.state.destination || old.playing != next.state.playing || Date().timeIntervalSince1970 - old.updatedAt >= 60 {
+        if old.trackID != next.state.trackID || old.artwork != next.state.artwork || old.title != next.state.title || old.artist != next.state.artist || old.destination != next.state.destination || old.playing != next.state.playing || Date().timeIntervalSince1970 - old.updatedAt >= 60 {
             await activity.update(next)
         }
     }
@@ -98,13 +98,13 @@ import ArrifyCore
             let value = await ActivityThumbnail.load(api: api, trackID: id)
             guard let self, !Task.isCancelled, self.generation == token, self.thumbnailID == id else { return }
             self.thumbnail = value
-            guard let activity = self.activity, activity.content.state.trackID == id else { return }
+            guard let value, let activity = self.activity, activity.content.state.trackID == id else { return }
             var state = activity.content.state; state.artwork = value
             await activity.update(ActivityContent(state: state, staleDate: activity.content.staleDate))
         }
     }
     private func content(state: PlaybackState, track: Track, destination: String) -> ActivityContent<PlaybackActivityAttributes.ContentState> {
-        ActivityContent(state: .init(title: String(track.title.prefix(100)), artist: String(track.artist.prefix(100)), destination: String(destination.prefix(80)), playing: state.playing, updatedAt: Date().timeIntervalSince1970, artwork: thumbnailID == track.id ? thumbnail : nil, trackID: track.id), staleDate: Date().addingTimeInterval(90))
+        ActivityContent(state: .init(title: String(track.title.prefix(100)), artist: String(track.artist.prefix(100)), destination: String(destination.prefix(80)), playing: state.playing, updatedAt: Date().timeIntervalSince1970, artwork: (thumbnailID == track.id ? thumbnail : nil) ?? (activity?.content.state.trackID == track.id ? activity?.content.state.artwork : nil), trackID: track.id), staleDate: Date().addingTimeInterval(90))
     }
     @discardableResult func stop() async -> UUID {
         let nextGeneration = UUID(); generation = nextGeneration; tokenTask?.cancel(); tokenTask = nil
