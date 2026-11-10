@@ -31,17 +31,18 @@ import AVKit
         favorites = FavoritesStore(api: api)
         library = LibraryStore(api: api)
         artwork = ArtworkStore(api: api)
+        RemoteControlRuntime.api = api
     }
     func restore() async {
         defer { restoring = false }
         do {
-            if let saved = try await api.restore() { endpoint = saved; signedIn = true; await playback.remoteActivity.clearRestoredActivities(); playback.start() }
+            if let saved = try await api.restore() { endpoint = saved; signedIn = true; await playback.remoteActivity.restoreForSession(); playback.start() }
         } catch { self.error = error.localizedDescription }
     }
     func login(username: String, password: String) async {
         do {
             try await api.login(endpoint: endpoint, username: username, password: password, deviceName: UIDevice.current.model)
-            signedIn = true; error = nil; await playback.remoteActivity.clearRestoredActivities(); playback.start()
+            signedIn = true; error = nil; await playback.remoteActivity.restoreForSession(); playback.start()
         } catch { self.error = error.localizedDescription }
     }
     func refreshBranding() async {
@@ -172,9 +173,10 @@ struct SettingsView: View {
                     NavigationLink("Audio output diagnostics") { AudioRouteDiagnosticsView(playback: model.playback) }
                 }
                 Section("Lock Screen") {
-                    Text("Follow playback from another device on this account using a read-only Live Activity. Start it from that device’s player in Arrify.").font(.footnote)
+                    Toggle("Automatic Lock Screen controls", isOn: Binding(get: { model.playback.remoteActivity.automatic }, set: { model.playback.remoteActivity.automatic = $0 }))
+                    Text("Follow playback from another device on the same account and home network. Open Arrify once to connect; iOS manages Lock Screen availability.").font(.footnote)
                     if model.playback.remoteActivity.active {
-                        Button("Stop Lock Screen status") { Task { await model.playback.remoteActivity.stop() } }
+                        Button("Stop Lock Screen controls") { model.playback.remoteActivity.automatic = false }
                     }
                     if let error = model.playback.remoteActivity.error { Text(error).font(.footnote).foregroundStyle(.orange) }
                 }

@@ -1,4 +1,4 @@
-"""Opt-in, read-only ActivityKit updates. No playback command is accepted here.
+"""ActivityKit updates and same-account, same-network remote controls.
 
 Subscriptions belong to a native session family and expire within seven hours.
 APNs keys stay in the private data mount. Unconfigured servers do not send pushes.
@@ -12,6 +12,9 @@ import subprocess
 import threading
 import time
 from .native_auth import NativeError
+from .local_controls import LocalControls
+from .native_playback import snapshot
+import secrets
 
 
 def _b64(value):
@@ -72,6 +75,7 @@ class APNs:
 class LiveActivities:
     def __init__(self, accounts, listening, directory, sender=None, start_worker=True):
         self.a, self.listening = accounts, listening
+        self.local_controls = LocalControls()
         try:self.sender = sender if sender is not None else APNs(directory)
         except (OSError, ValueError, TypeError):
             logging.getLogger(__name__).warning('APNs configuration is invalid; remote Lock Screen updates are disabled.')
@@ -86,11 +90,15 @@ class LiveActivities:
         if self.enabled and start_worker:
             self.worker = threading.Thread(target=self.background, daemon=True, name='live-activities'); self.worker.start()
 
-    def dispatch(self, uid, access, data):
-        if data is None: return {'available': self.enabled, 'read_only': True}
-        if not isinstance(data, dict) or data.get('action') not in ('register', 'stop'):
+    def dispatch(self, uid, access, data, handler=None):
+        if data is None:
+            status = self.listening.state(uid)['listening']
+            allowed = handler is not None and self.local_controls.allows(uid, status['owner'], status.get('epoch'), handler)
+            return {'available': self.enabled, 'controls_available': bool(self.enabled and allowed), 'read_only': not allowed}
+        if not isinstance(data, dict) or data.get('action') not in ('register', 'stop', 'control'):
             raise NativeError(400, 'invalid_request', 'Choose a Live Activity action.')
         fields = {'action', 'activity_id'} if data['action'] == 'stop' else {'action', 'activity_id', 'token', 'owner_device_id'}
+        if data['action'] == 'control': fields = {'action', 'activity_id', 'command', 'owner_device_id', 'owner_epoch'}
         if set(data) != fields: raise NativeError(400, 'invalid_request', 'Invalid activity fields.')
         activity = data.get('activity_id', '')
         if not isinstance(activity, str) or not re.fullmatch(r'[A-Za-z0-9-]{1,64}', activity):
@@ -102,6 +110,21 @@ class LiveActivities:
             if data['action'] == 'stop':
                 self.a.db.execute('DELETE FROM live_activities WHERE family=? AND activity=?', (family, activity))
                 return {'ok': True}
+            if data['action'] == 'control':
+                row = self.a.db.execute('SELECT owner FROM live_activities WHERE family=? AND activity=? AND expires>?', (family, activity, int(time.time()))).fetchone()
+                state = self.listening.state(uid); status = state['listening']
+                owner, epoch = data.get('owner_device_id'), data.get('owner_epoch')
+                if not row or row[0] != owner or status['owner'] != owner or type(epoch) is not int or status.get('epoch') != epoch:
+                    raise NativeError(409, 'playback_changed', 'Playback moved. Open Arrify to refresh.')
+                if handler is None or not self.local_controls.allows(uid, owner, epoch, handler):
+                    raise NativeError(403, 'local_network_required', 'Both devices must be on the same configured local network.')
+                command = data.get('command')
+                if command not in ('pause', 'resume', 'previous', 'next'):
+                    raise NativeError(400, 'invalid_request', 'Unsupported Lock Screen control.')
+                # The account lock fences ownership and revision through the command.
+                result = self.listening.command(uid, {'action': command, 'device_id': self.a.digest('lockscreen:' + family),
+                    'expected_revision': status['revision'], 'transition_id': secrets.token_hex(16)})
+                return snapshot(result)
             if not self.enabled: raise NativeError(503, 'push_unavailable', 'Live Activity updates are not configured on this server.')
             token, owner = data.get('token', ''), data.get('owner_device_id', '')
             if not isinstance(token, str) or not re.fullmatch(r'[0-9a-f]{64,512}', token):

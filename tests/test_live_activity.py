@@ -63,3 +63,25 @@ class LiveActivityTests(unittest.TestCase):
         self.service.tick(); self.service.tick()
         self.assertEqual(len(self.calls),1)
         self.assertEqual(self.a.db.execute('SELECT count(*) FROM live_activities').fetchone()[0],1)
+
+    def test_controls_fence_session_owner_epoch_and_network(self):
+        from unittest.mock import Mock, patch
+        from app.local_controls import LocalControls
+        self.service.local_controls=LocalControls('192.168.1.0/24','')
+        self.state['listening'].update(epoch=3,revision=7)
+        peer=SimpleNamespace(client_address=('192.168.1.20',1234),headers={})
+        self.service.local_controls.observe(self.uid,{'action':'heartbeat','device_id':'player'},self.state,peer)
+        self.service.listening.command=Mock(return_value=self.state)
+        self.register()
+        data={'action':'control','activity_id':'first','command':'next','owner_device_id':'player','owner_epoch':3}
+        with patch('app.live_activity.snapshot',return_value={'ok':True}):
+            self.assertEqual(self.service.dispatch(self.uid,self.login['access_token'],data,peer),{'ok':True})
+        self.assertEqual(self.service.listening.command.call_args.args[1]['expected_revision'],7)
+        self.service.listening.command.reset_mock()
+        for change in ({'owner_epoch':4},{'owner_device_id':'moved'},{'command':'takeover'}):
+            with self.assertRaises(NativeError):self.service.dispatch(self.uid,self.login['access_token'],dict(data,**change),peer)
+        remote=SimpleNamespace(client_address=('8.8.8.8',1234),headers={})
+        with self.assertRaises(NativeError):self.service.dispatch(self.uid,self.login['access_token'],data,remote)
+        second=self.auth.login({'username':'listener','password':'long-test-password','device_name':'Other'})
+        with self.assertRaises(NativeError):self.service.dispatch(self.uid,second['access_token'],data,peer)
+        self.service.listening.command.assert_not_called()

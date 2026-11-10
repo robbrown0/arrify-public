@@ -51,7 +51,7 @@ def dispatch(handler, path, data=None):
             if path == PREFIX + 'live-activity':
                 try:a.rate_limit(('native-live-activity', user['id']), 30, 60)
                 except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
-                result = handler.server.live_activities.dispatch(user['id'], token, data)
+                result = handler.server.live_activities.dispatch(user['id'], token, data, handler)
             elif path == PREFIX + 'playlists' and data is not None:
                 try:a.rate_limit(('native-playlists', user['id']), 30, 60)
                 except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
@@ -98,6 +98,9 @@ def dispatch(handler, path, data=None):
                 raise NativeError(405, 'method_not_allowed', 'Method not allowed.')
         else:
             raise NativeError(404, 'not_found', 'Endpoint not found.')
+        live = getattr(handler.server, 'live_activities', None)
+        if live and path == PREFIX + 'playback' and data is not None:
+            live.local_controls.observe(user['id'], data, result, handler)
         handler.json(result, extra=headers)
     except PlaybackConflict as exc:
         handler.json({'error': {'code': 'playback_changed', 'message': str(exc), 'request_id': request_id}}, 409, headers)

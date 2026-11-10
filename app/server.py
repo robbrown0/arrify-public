@@ -568,7 +568,11 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/v1/auth/logout':
             self.server.listening.logout(uid,data,a.digest(self.token()[0]))
             return self.json({'ok':True},extra={'Set-Cookie':self.cookie('',True)})
-        if path=='/api/v1/listening':return self.listening_result(self.server.listening.command(uid,data),user)
+        if path=='/api/v1/listening':
+            result=self.server.listening.command(uid,data)
+            live=getattr(self.server,'live_activities',None)
+            if live:live.local_controls.observe(uid,data,result,self)
+            return self.listening_result(result,user)
         if path=='/api/v1/player':
             with a.lock:
                 if p.load(uid).get('listening',{}).get('owner'):raise Error(409,'Refresh Arrify to control this listening session.')

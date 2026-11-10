@@ -502,7 +502,7 @@
     },
     "/api/v1/native/live-activity": {
       "get": {
-        "summary": "Whether remote read-only Lock Screen updates are configured",
+        "summary": "Push availability and same-account, same-local-network control eligibility",
         "security": [
           {
             "bearerAuth": []
@@ -534,7 +534,7 @@
         }
       },
       "post": {
-        "summary": "Register or stop an account/session-scoped ActivityKit update token",
+        "summary": "Register, stop, or control the registered playback session on the same local network",
         "security": [
           {
             "bearerAuth": []
@@ -546,14 +546,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ]
+                    },
+                    {
+                      "$ref": "#/components/schemas/Playback"
                     }
-                  },
-                  "required": [
-                    "ok"
                   ]
                 }
               }
@@ -589,6 +596,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/LiveActivityStop"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LiveActivityControl"
                   }
                 ]
               }
@@ -1439,8 +1449,10 @@
             "type": "boolean"
           },
           "read_only": {
-            "type": "boolean",
-            "const": true
+            "type": "boolean"
+          },
+          "controls_available": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -1527,6 +1539,46 @@
             ]
           }
         ]
+      },
+      "LiveActivityControl": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "activity_id",
+          "command",
+          "owner_device_id",
+          "owner_epoch"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "control"
+            ]
+          },
+          "activity_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "command": {
+            "type": "string",
+            "enum": [
+              "pause",
+              "resume",
+              "next",
+              "previous"
+            ]
+          },
+          "owner_device_id": {
+            "type": "string"
+          },
+          "owner_epoch": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
       }
     },
     "responses": {

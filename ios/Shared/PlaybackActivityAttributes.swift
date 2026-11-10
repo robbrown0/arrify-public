@@ -10,4 +10,6 @@ struct PlaybackActivityAttributes: ActivityAttributes, Sendable {
         let updatedAt: Double
     }
     let owner: String
+    let ownerEpoch: Int
+    let sessionScope: String
 }

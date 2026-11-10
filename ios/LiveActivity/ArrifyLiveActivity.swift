@@ -14,7 +14,11 @@ import WidgetKit
                     if context.isStale { Text("Open Arrify to refresh").font(.caption).foregroundStyle(.secondary) }
                 }
                 Spacer(minLength: 0)
-                Image(systemName: context.state.playing ? "waveform" : "pause.fill").accessibilityLabel(context.state.playing ? "Playing" : "Paused")
+                HStack(spacing: 8) {
+                    Button(intent: RemotePlaybackIntent(activityID: context.activityID, command: "previous")) { Image(systemName: "backward.end.fill").frame(width: 36, height: 44) }.accessibilityLabel("Previous song")
+                    Button(intent: RemotePlaybackIntent(activityID: context.activityID, command: context.state.playing ? "pause" : "resume")) { Image(systemName: context.state.playing ? "pause.fill" : "play.fill").frame(width: 36, height: 44) }.accessibilityLabel(context.state.playing ? "Pause" : "Play")
+                    Button(intent: RemotePlaybackIntent(activityID: context.activityID, command: "next")) { Image(systemName: "forward.end.fill").frame(width: 36, height: 44) }.accessibilityLabel("Next song")
+                }.buttonStyle(.plain)
             }.padding().foregroundStyle(.white).activityBackgroundTint(.black).activitySystemActionForegroundColor(.white)
                 .widgetURL(URL(string: "arrify://player"))
         } dynamicIsland: { context in

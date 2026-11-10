@@ -124,6 +124,19 @@ public actor APIClient {
         struct Input: Encodable { let trackId: Int; let liked: Bool }
         return try await call("/api/v1/native/favorites", method: "POST", body: Self.encoder().encode(Input(trackId: id, liked: liked)))
     }
+    public func sessionScope() async throws -> String {
+        let saved = try await access()
+        return saved.serverId + ":" + saved.tokens.sessionId
+    }
+    public func liveActivityControlsAvailable() async throws -> Bool {
+        struct Status: Decodable { let controlsAvailable: Bool? }
+        let status: Status = try await call("/api/v1/native/live-activity")
+        return status.controlsAvailable == true
+    }
+    public func liveActivityCommand(id: String, owner: String, epoch: Int, command: String) async throws -> PlaybackState {
+        struct Input: Encodable { let action = "control"; let activityId: String; let ownerDeviceId: String; let ownerEpoch: Int; let command: String }
+        return try await call("/api/v1/native/live-activity", method: "POST", body: Self.encoder().encode(Input(activityId: id, ownerDeviceId: owner, ownerEpoch: epoch, command: command)))
+    }
     public func liveActivityAvailable() async throws -> Bool {
         struct Status: Decodable { let available: Bool }
         let status: Status = try await call("/api/v1/native/live-activity")

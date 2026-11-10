@@ -269,3 +269,20 @@ playback change. They are not required or claimed as a solution by the current c
 - [Route detector](https://developer.apple.com/documentation/avfoundation/avroutedetector)
 - [AVRouting](https://developer.apple.com/documentation/avrouting)
 - [Playback arbitration](https://developer.apple.com/videos/play/wwdc2025/302/)
+
+### iPad library and remote Lock Screen controls
+
+The iPad shell uses a fixed sidebar and an always-visible search header, outside the scrolling navigation content. It keeps the tablet player when the keyboard opens. Home contains account-scoped recent albums (daily suggestions when history is empty) and playable mood collections. Native playlist creation and adding songs use the same `Playlists` ownership rules/storage as the web. Inline unlikes keep their row until an explicit refresh, allowing immediate re-addition.
+
+Remote Lock Screen controls start automatically while Arrify is foregrounded and another device on the **same account and configured local network** owns playback. There is no Show on Lock Screen link. A Settings toggle disables automatic controls. A Live Activity uses public App Intents for previous, pause/resume, and next; it does not play silent audio or activate a local audio session. iOS decides presentation and may require device authentication for interactive buttons. This is distinct from the system Now Playing controls on the device that actually plays audio.
+
+Server configuration (private deployment environment, not client-reported network names):
+
+- `ARRIFY_LOCK_SCREEN_NETWORKS`: comma-separated local CIDRs, each representing one trusted local network. Empty by default, which disables remote Lock Screen controls.
+- `ARRIFY_TRUSTED_PROXIES`: exact proxy addresses/CIDRs allowed to provide `X-Forwarded-For`. Empty by default. Untrusted forwarded headers never prove locality. Configure proxies to overwrite untrusted incoming forwarding headers.
+- Both the current output's successful heartbeat and the controller request must resolve into the same configured CIDR. Owner observations expire after 45 seconds. Public-address/hairpin routes may not prove LAN membership; use the local Arrify Home endpoint on both devices.
+- Every command requires the registering native session, matching playback owner and epoch, a fresh same-network observation, and current queue revision. A stale activity cannot take over playback or control a newly logged-in account. Existing in-app/web control permissions are unchanged.
+
+Live Activities still require enabled iOS Live Activities and valid push provisioning. Settings now retains the ActivityKit error domain/code instead of the former generic start failure. Physical-device APNs delivery, Lock Screen presentation and same-LAN behavior require TestFlight validation; simulator compilation is not hardware verification.
+
+Apple references: [interactive widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities), [Activity authorization errors](https://developer.apple.com/documentation/activitykit/activityauthorizationerror).

@@ -61,7 +61,7 @@ struct LikedSongsView: View {
                     Button("Play", systemImage: "play.fill") { Task { await model.playback.play(source: source) } }
                     Spacer()
                     Button("Shuffle", systemImage: "shuffle") { Task { await model.playback.play(source: source, shuffle: true) } }
-                }.disabled(browser.tracks.isEmpty)
+                }.disabled(model.favorites.ids.isEmpty)
             }
             if let error = model.favorites.error { Text(error).foregroundStyle(.orange) }
             RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)

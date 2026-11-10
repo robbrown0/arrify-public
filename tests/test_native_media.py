@@ -133,7 +133,7 @@ class NativeMediaHTTPTests(unittest.TestCase):
         c.request(method, '/api/v1/native/'+path, json.dumps(data) if data is not None else None,
                   {'Content-Type':'application/json','Authorization':'Bearer '+self.pair['access_token']})
         r = c.getresponse(); result = r.status, json.loads(r.read()); c.close()
-        name = 'Error' if result[0] != 200 else 'QueuePage' if path.startswith('playback/queue') else 'CatalogPage' if path.startswith('catalog') else 'LibraryDetail' if path.startswith('library/detail') else 'LibraryOverview' if path == 'library' else 'Playback'
+        name = 'Error' if result[0] != 200 else 'QueuePage' if path.startswith('playback/queue') else 'CatalogPage' if path.startswith('catalog') else 'LibraryDetail' if path.startswith('library/detail') else 'LibraryOverview' if path == 'library' else 'LibraryEntry' if path == 'playlists' else 'Playback'
         with patch.object(contract_test, 'CONTRACT', CONTRACT):
             contract_test.validate(self, result[1], {'$ref':'#/components/schemas/'+name})
         return result
@@ -158,7 +158,11 @@ class NativeMediaHTTPTests(unittest.TestCase):
         self.lib.search = Search(list(self.lib.tracks.values()), [], [])
         self.lib.albums = {}; self.lib.artists = {}; self.lib.collections = lambda: []; self.lib.suggestions = lambda: []
         playlists = Playlists(self.a, self.lib)
-        pid = playlists.edit(1, {'name':'Native mix','track_ids':[1,2,3]})['id']
+        code, created = self.api('playlists', {'name':'Native mix','visibility':'private','add_track_id':1})
+        self.assertEqual(code,200)
+        pid = int(created['id'])
+        self.assertEqual(self.api('playlists', {'id':pid,'add_track_id':2})[0],200)
+        self.assertEqual(self.api('playlists', {'id':pid,'add_track_id':3})[0],200)
         code, library = self.api('library')
         self.assertEqual(code,200); self.assertEqual(library['items'][0]['kind'],'playlists')
         self.assertEqual(self.raw('/api/v1/native/library')[0],401)
@@ -174,6 +178,7 @@ class NativeMediaHTTPTests(unittest.TestCase):
         other = self.a.db.execute("SELECT id FROM users WHERE username='other'").fetchone()[0]
         private = playlists.edit(other, {'name':'Private','track_ids':[1]})['id']
         self.assertEqual(self.api('library/detail?kind=playlists&id='+str(private))[0],404)
+        self.assertEqual(self.api('playlists', {'id':private,'add_track_id':2})[0],404)
         self.assertEqual(self.api('playback', {'action':'play','source':{'kind':'playlists','id':str(private)},
             'device_id':'a'*32,'expected_revision':started['queue_revision']})[0],404)
 
