@@ -1,6 +1,7 @@
 import SwiftUI
 import ArrifyCore
 import ImageIO
+import CryptoKit
 
 @MainActor @Observable final class LibraryStore {
     let api: APIClient
@@ -85,29 +86,80 @@ nonisolated enum ArtworkDecoder {
 
 @MainActor final class ArtworkStore {
     private let api: APIClient
+    private let disk: ArtworkDiskCache
     private let cache = NSCache<NSString, UIImage>()
     private var pending: [String: Task<UIImage?, Never>] = [:]
+    private var cachedAt: [String: Date] = [:]
     private var generation = UUID()
-    init(api: APIClient) { self.api = api; cache.totalCostLimit = 24 * 1024 * 1024; cache.countLimit = 160 }
-    func cachedImage(_ path: String) -> UIImage? { cache.object(forKey: path as NSString) }
+    init(api: APIClient, disk: ArtworkDiskCache = ArtworkDiskCache()) { self.api = api; self.disk = disk; cache.totalCostLimit = 24 * 1024 * 1024; cache.countLimit = 160 }
+    func cachedImage(_ path: String) -> UIImage? {
+        guard let date = cachedAt[path], Date().timeIntervalSince(date) < 86400 else {
+            cache.removeObject(forKey: path as NSString); cachedAt[path] = nil; return nil
+        }
+        return cache.object(forKey: path as NSString)
+    }
     func image(_ path: String) async -> UIImage? {
-        if let image = cache.object(forKey: path as NSString) { return image }
+        if let image = cachedImage(path) { return image }
         if let task = pending[path] {
             let token = generation
             let image = await task.value
             return token == generation ? image : nil
         }
         let token = generation
-        let task = Task { [api] in
+        let task = Task { [api, disk] in
+            let scope = await api.artworkCacheScope()
+            if let scope, let data = await disk.read(scope: scope, path: path),
+               let image = await Task.detached(priority: .utility, operation: { ArtworkDecoder.image(data, pixels: 384) }).value { return image }
             guard let data = try? await api.artwork(path: path) else { return nil as UIImage? }
-            return await Task.detached(priority: .utility) { ArtworkDecoder.image(data, pixels: 384) }.value
+            let image = await Task.detached(priority: .utility) { ArtworkDecoder.image(data, pixels: 384) }.value
+            if let scope, let thumbnail = image?.jpegData(compressionQuality: 0.85), !Task.isCancelled {
+                await disk.write(thumbnail, scope: scope, path: path)
+            }
+            return image
         }
         pending[path] = task
         let image = await task.value
         guard token == generation else { return nil }
         pending[path] = nil
-        if let image { cache.setObject(image, forKey: path as NSString, cost: Int(image.size.width * image.size.height * 4)) }
+        if let image { cachedAt[path] = Date(); cache.setObject(image, forKey: path as NSString, cost: Int(image.size.width * image.size.height * 4)) }
         return image
     }
-    func clear() { generation = UUID(); pending.values.forEach { $0.cancel() }; pending.removeAll(); cache.removeAllObjects() }
+    func clearPersistentCache() async { clear(); await disk.clear() }
+    func clear() { generation = UUID(); pending.values.forEach { $0.cancel() }; pending.removeAll(); cachedAt.removeAll(); cache.removeAllObjects() }
+}
+
+/// Only requested thumbnails are retained. Library membership always comes from the server.
+actor ArtworkDiskCache {
+    private let root: URL
+    private let limit = 100 * 1024 * 1024
+    init(root: URL? = nil) {
+        self.root = root ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ArrifyArtwork-v1", isDirectory: true)
+    }
+    private func file(scope: String, path: String) -> URL {
+        let key = SHA256.hash(data: Data((scope + "\n" + path).utf8)).map { String(format: "%02x", $0) }.joined()
+        return root.appendingPathComponent(key)
+    }
+    func read(scope: String, path: String) -> Data? {
+        let url = file(scope: scope, path: path)
+        guard let values = try? url.resourceValues(forKeys: [.creationDateKey]),
+              let created = values.creationDate, Date().timeIntervalSince(created) < 86400,
+              let data = try? Data(contentsOf: url) else { try? FileManager.default.removeItem(at: url); return nil }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        return data
+    }
+    func write(_ data: Data, scope: String, path: String) {
+        guard data.count <= limit else { return }
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = file(scope: scope, path: path)
+        try? FileManager.default.removeItem(at: url)
+        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])) ?? []
+        let entries = files.compactMap { url -> (URL, Int, Date)? in
+            guard let v = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]) else { return nil }
+            return (url, v.fileSize ?? 0, v.contentModificationDate ?? .distantPast)
+        }.sorted { $0.2 < $1.2 }
+        var size = entries.reduce(0) { $0 + $1.1 }
+        for entry in entries where size > limit { try? FileManager.default.removeItem(at: entry.0); size -= entry.1 }
+    }
+    func clear() { try? FileManager.default.removeItem(at: root) }
 }

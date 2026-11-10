@@ -7,6 +7,12 @@ import FoundationNetworking
 #endif
 
 public struct ServerConnection: Equatable, Sendable {
+    public var degraded = false
+    public var detail: String {
+        if !connected { return "The server could not be reached. Cached playback may continue. Check your connection or server." }
+        if degraded { return "Recent server requests were slow or temporarily failed. This measures server responsiveness, not Wi-Fi signal strength." }
+        return "Connected via " + (home ? "your home address." : "your public server address.")
+    }
     public var address: String?
     public var home: Bool
     public var connected: Bool
@@ -33,11 +39,19 @@ actor ServerRouter {
     func configure(primary: Endpoint, home: Endpoint?, id: String, key: String?) {
         generation = UUID(); selection?.cancel(); selection = nil
         self.primary = primary; self.home = home; serverID = id; publicKey = key
-        status = ServerConnection(); lastCheck = .distantPast; homeRetry = .distantPast
+        status = ServerConnection(address: primary.url.absoluteString); slowResponses = 0; lastCheck = .distantPast; homeRetry = .distantPast
     }
     func reset() {
         generation = UUID(); selection?.cancel(); selection = nil
         primary = nil; home = nil; status = ServerConnection(); lastCheck = .distantPast
+    }
+    private var slowResponses = 0
+    func observed(_ endpoint: Endpoint, seconds: TimeInterval, statusCode: Int) {
+        guard status.address == endpoint.url.absoluteString else { return }
+        if statusCode >= 500 { status.degraded = true; return }
+        slowResponses = seconds > 2 ? slowResponses + 1 : max(0, slowResponses - 1)
+        status.connected = true
+        status.degraded = slowResponses >= 2
     }
     func snapshot() -> ServerConnection { status }
     func invalidate() { generation = UUID(); selection?.cancel(); selection = nil; lastCheck = .distantPast; homeRetry = .distantPast }

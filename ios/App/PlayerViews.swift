@@ -16,11 +16,12 @@ struct MiniPlayerView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(track.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                HStack(spacing: 5) { ServerConnectionBadge(connection: playback.serverConnection); Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                                Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                             Spacer(minLength: 0)
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
+                    if !playback.serverConnection.connected || playback.serverConnection.degraded { ServerConnectionBadge(connection: playback.serverConnection) }
                     AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44).accessibilityIdentifier("miniAirPlay")
                     Button { Task { await playback.send(playback.showsPauseControl ? "pause" : "resume") } } label: {
                         Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill")
@@ -339,7 +340,7 @@ struct TabletPlayerBar: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(track.title).font(.headline).lineLimit(1)
                             Text(track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                            HStack(spacing: 5) { ServerConnectionBadge(connection: playback.serverConnection); Text(playback.contextName).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                            Text(playback.contextName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
@@ -353,6 +354,7 @@ struct TabletPlayerBar: View {
                     }
                 }.frame(width: 180)
                 SystemVolumeSlider().frame(width: 130, height: 44)
+                if !playback.serverConnection.connected || playback.serverConnection.degraded { ServerConnectionBadge(connection: playback.serverConnection) }
                 AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44)
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")
             }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
@@ -399,10 +401,18 @@ struct PlaybackProgressRing: View {
 
 struct ServerConnectionBadge: View {
     let connection: ServerConnection
+    @State private var showDetails = false
+    private var color: Color { !connection.connected ? .red : connection.degraded ? .yellow : .green }
     var body: some View {
-        Image(systemName: connection.home ? "house.fill" : "globe")
-            .font(.caption2).foregroundStyle(connection.connected ? Color.green : Color.secondary)
-            .accessibilityLabel((connection.home ? "Home server connection" : "Public server connection") + (connection.connected ? "" : ", disconnected"))
-            .help(connection.connected ? (connection.home ? "Connected to home server" : "Connected to public server") : "Server connection unavailable")
+        Button { showDetails = true } label: {
+            Image(systemName: connection.home ? "house.fill" : "globe")
+                .font(.callout).foregroundStyle(color).frame(width: 44, height: 44)
+        }.buttonStyle(.plain)
+            .accessibilityLabel("Server connection: " + (!connection.connected ? "unreachable" : connection.degraded ? "slow or interrupted" : connection.home ? "home" : "public"))
+            .alert("Server connection", isPresented: $showDetails) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(connection.detail + (connection.address.map { "\n\n" + $0 } ?? "") + (connection.homeNotice.map { "\n\n" + $0 } ?? "") + "\n\nThis is your connection to Arrify, not your AirPlay speaker.")
+            }
     }
 }

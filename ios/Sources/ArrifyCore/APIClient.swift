@@ -71,8 +71,9 @@ public actor APIClient {
         let body = try Self.encoder().encode(Login(username: username, password: password, deviceName: deviceName))
         let response = try await transport.send(Self.request(endpoint: selected, path: "/api/v1/native/sessions", method: "POST", body: body))
         let pair = try Self.decode(response, as: TokenPair.self)
-        let value = Credential(endpoint: endpoint.url.absoluteString, serverId: caps.serverId, tokens: pair, homeEndpoint: home?.url.absoluteString, serverPublicKey: caps.serverPublicKey)
+        var value = Credential(endpoint: endpoint.url.absoluteString, serverId: caps.serverId, tokens: pair, homeEndpoint: home?.url.absoluteString, serverPublicKey: caps.serverPublicKey)
         guard generation == epoch else { throw CancellationError() }
+        value.artworkAccount = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         try await store.save(value)
         guard generation == epoch else { throw CancellationError() }
         credential = value
@@ -90,8 +91,9 @@ public actor APIClient {
             let body = try Self.encoder().encode(Refresh(refreshToken: saved.tokens.refreshToken))
             let response = try await transport.send(Self.request(endpoint: endpoint, path: "/api/v1/native/refresh", method: "POST", body: body))
             let pair = try Self.decode(response, as: TokenPair.self)
-            let renewed = Credential(endpoint: saved.endpoint, serverId: saved.serverId, tokens: pair, homeEndpoint: saved.homeEndpoint, serverPublicKey: saved.serverPublicKey)
+            var renewed = Credential(endpoint: saved.endpoint, serverId: saved.serverId, tokens: pair, homeEndpoint: saved.homeEndpoint, serverPublicKey: saved.serverPublicKey)
             guard generation == epoch else { throw CancellationError() }
+            renewed.artworkAccount = saved.artworkAccount
             try await store.save(renewed)
             guard generation == epoch else { throw CancellationError() }
             credential = renewed
@@ -118,6 +120,7 @@ public actor APIClient {
     private func sendAuthorized(_ path: String, method: String, body: Data?, saved: Credential) async throws -> HTTPResult {
         let endpoint = try await router.selected()
         let result: HTTPResult
+        let started = Date()
         do {
             result = try await transport.send(Self.request(endpoint: endpoint, path: path, method: method, body: body, token: saved.tokens.accessToken))
         } catch {
@@ -129,6 +132,7 @@ public actor APIClient {
             guard alternate.url != endpoint.url else { throw error }
             return try await transport.send(Self.request(endpoint: alternate, path: path, token: saved.tokens.accessToken))
         }
+        await router.observed(endpoint, seconds: Date().timeIntervalSince(started), statusCode: result.status)
         if [502, 503, 504].contains(result.status) {
             await router.failed(endpoint)
             if method == "GET", let alternate = try? await router.selected(), alternate.url != endpoint.url {
@@ -155,6 +159,10 @@ public actor APIClient {
         let primary = try Endpoint(saved.endpoint)
         let home = try Self.homeAddress(saved.homeEndpoint, publicEndpoint: primary)
         await router.configure(primary: primary, home: home, id: saved.serverId, key: saved.serverPublicKey)
+    }
+    public func artworkCacheScope() -> String? {
+        guard let credential, let account = credential.artworkAccount else { return nil }
+        return credential.serverId + "\n" + (credential.serverPublicKey ?? credential.endpoint) + "\n" + account
     }
     public func connection() async -> ServerConnection { await router.snapshot() }
     public func connectionAddresses() -> (publicAddress: String, homeAddress: String?)? {
