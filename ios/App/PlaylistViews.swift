@@ -54,12 +54,19 @@ struct PlaylistLibraryView: View {
     @State private var creating = false
     var body: some View {
         List {
-            Button("Create playlist", systemImage: "plus") { creating = true }
-            ForEach(model.library.overview?.items.filter { $0.section == "personal" } ?? [], id: \.identity) { item in
-                NavigationLink { DetailScreen(model: model, entry: item) } label: { EntryRow(item: item, artwork: model.artwork) }
+            Section("Your playlists") {
+                Button("Create playlist", systemImage: "plus") { creating = true }
+                ForEach(model.library.overview?.items.filter { $0.section == "personal" } ?? [], id: \.identity) { item in
+                    NavigationLink { DetailScreen(model: model, entry: item) } label: { EntryRow(item: item, artwork: model.artwork) }
+                }
+            }
+            Section("Made for listening") {
+                ForEach(model.library.overview?.items.filter { $0.section == "playlists" } ?? [], id: \.identity) { item in
+                    NavigationLink { DetailScreen(model: model, entry: item) } label: { EntryRow(item: item, artwork: model.artwork) }
+                }
             }
             RefreshStatus(loading: model.library.loading, updated: model.library.updated, error: model.library.error)
-        }.navigationTitle("Your playlists").scrollContentBackground(.hidden).background(Color.black)
+        }.navigationTitle("Playlists").scrollContentBackground(.hidden).background(Color.black)
             .task { await model.library.refresh() }.refreshable { await model.library.refresh() }
             .sheet(isPresented: $creating) { CreatePlaylistView(model: model) }
     }

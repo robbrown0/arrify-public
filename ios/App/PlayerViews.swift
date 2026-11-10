@@ -347,6 +347,7 @@ struct TabletPlayerBar: View {
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")
             }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
                 .padding(.horizontal, 16).padding(.vertical, 8).foregroundStyle(.white)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("tabletPlayer")
                 .sheet(isPresented: $showQueue) { UpNextView(playback: playback) }
         }

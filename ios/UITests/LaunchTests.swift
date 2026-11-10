@@ -102,7 +102,7 @@ extension LaunchTests {
         let last = app.buttons["Play Station 12"]
         for _ in 0..<10 {
             if last.exists && last.isHittable && last.frame.maxY < nowPlaying.frame.minY { break }
-            app.scrollViews.firstMatch.swipeUp()
+            app.scrollViews.containing(.button, identifier: "Play Station 12").firstMatch.swipeUp()
         }
         XCTAssertTrue(last.isHittable)
         XCTAssertLessThan(last.frame.maxY, nowPlaying.frame.minY)
@@ -165,7 +165,9 @@ extension LaunchTests {
         XCTAssertFalse(app.staticTexts["Made for listening"].exists)
         app.buttons["Songs"].firstMatch.tap()
         let play = app.buttons["Play Just Like a Pill by P!nk"]
-        XCTAssertTrue(play.waitForExistence(timeout: 10)); play.tap()
+        XCTAssertTrue(play.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.searchFields.count, 0, "iPad uses one persistent header search, not a second navigation-bar field")
+        play.tap()
         let player = app.otherElements["tabletPlayer"]
         XCTAssertTrue(player.waitForExistence(timeout: 5))
         let search = app.textFields["tabletSearch"]
@@ -184,6 +186,7 @@ extension LaunchTests {
         app.buttons["signIn"].tap()
         XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout: 10)); app.buttons["Library"].firstMatch.tap()
         app.buttons["Playlists"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Driving favourites"].waitForExistence(timeout: 5), "Curated playlists remain available outside Home")
         app.buttons["Create playlist"].firstMatch.tap()
         XCTAssertTrue(app.textFields["playlistName"].waitForExistence(timeout: 5))
         app.textFields["playlistName"].tap(); app.textFields["playlistName"].typeText("Evening mix")

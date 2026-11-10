@@ -224,7 +224,7 @@ struct BrowserScreen: View {
     }
     var body: some View {
         Group {
-            if externalQuery != nil { results }
+            if externalQuery != nil || UIDevice.current.userInterfaceIdiom == .pad { results }
             else { results.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(title.lowercased())") }
         }
     }
@@ -341,7 +341,6 @@ struct SearchScreen: View {
 /// The two Home rails mirror the website's account-scoped history and mood collections.
 struct HomeScreen: View {
     let model: AppModel
-    @State private var creatingPlaylist = false
     @Environment(\.horizontalSizeClass) private var sizeClass
     private var cardWidth: CGFloat { sizeClass == .regular ? 210 : 165 }
     var body: some View {

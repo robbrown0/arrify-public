@@ -47,8 +47,9 @@ actor UITestTransport: HTTPTransport {
             return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: item))
         } else if path.hasSuffix("/library") {
             let stations = (1...12).map { n in station.replacingOccurrences(of: "sirius-80son8", with: "station-\(n)").replacingOccurrences(of: "80s on 8", with: n == 1 ? "80s on 8" : "Station \(n)") }.joined(separator: ",")
+            let featured = mix.replacingOccurrences(of: "mood-feel-good", with: "featured-drive").replacingOccurrences(of: "Feel Good Favorites", with: "Driving favourites").replacingOccurrences(of: "\"section\":\"moods\"", with: "\"section\":\"playlists\"")
             let personal = playlists.isEmpty ? "" : "," + String(data: try JSONSerialization.data(withJSONObject: playlists[0]), encoding: .utf8)!
-            value = "{\"home_albums\":[\(album)],\"items\":[\(stations),\(mix)\(personal)],\"moods\":[{\"id\":\"feel-good\",\"name\":\"Feel Good\",\"description\":\"Sunshine, soul, and familiar favorites.\",\"color\":\"#244632\",\"slugs\":[\"mood-feel-good\"]}],\"tracks\":2,\"albums\":1,\"artists\":1}"
+            value = "{\"home_albums\":[\(album)],\"items\":[\(stations),\(mix),\(featured)\(personal)],\"moods\":[{\"id\":\"feel-good\",\"name\":\"Feel Good\",\"description\":\"Sunshine, soul, and familiar favorites.\",\"color\":\"#244632\",\"slugs\":[\"mood-feel-good\"]}],\"tracks\":2,\"albums\":1,\"artists\":1}"
         } else if path.hasSuffix("/library/detail") {
             if parameter("kind") == "favorites" {
                 let items = (try JSONSerialization.jsonObject(with: Data(songs.utf8)) as! [[String: Any]]).filter { favoriteIds.contains($0["id"] as! Int) }
