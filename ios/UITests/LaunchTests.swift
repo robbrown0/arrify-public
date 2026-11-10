@@ -146,6 +146,49 @@ extension LaunchTests {
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Liked songs"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["Remove from Liked songs: Just Like a Pill"].tap()
-        XCTAssertTrue(app.staticTexts["A place for the keepers"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Add to Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].exists, "Unliking should retain the row until refresh")
+        app.buttons["Add to Liked songs: Just Like a Pill"].tap()
+        XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
+    }
+}
+
+extension LaunchTests {
+    @MainActor func testTabletSearchKeepsHeaderAndPlayerVisible() throws {
+        let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        guard app.textFields["tabletSearch"].waitForExistence(timeout: 5) else { throw XCTSkip("iPad layout only") }
+        XCTAssertTrue(app.staticTexts["Another spin"].exists)
+        XCTAssertFalse(app.staticTexts["Made for listening"].exists)
+        app.buttons["Songs"].firstMatch.tap()
+        let play = app.buttons["Play Just Like a Pill by P!nk"]
+        XCTAssertTrue(play.waitForExistence(timeout: 10)); play.tap()
+        let player = app.otherElements["tabletPlayer"]
+        XCTAssertTrue(player.waitForExistence(timeout: 5))
+        let search = app.textFields["tabletSearch"]
+        search.tap(); search.typeText("pink")
+        XCTAssertTrue(search.isHittable)
+        XCTAssertTrue(app.buttons["Home"].firstMatch.isHittable)
+        XCTAssertTrue(app.buttons["Previous song"].isHittable, "Keyboard must not replace the tablet player with phone controls")
+        XCTAssertLessThan(search.frame.maxY, app.keyboards.firstMatch.frame.minY)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "iPad stable search with keyboard"; shot.lifetime = .keepAlways; add(shot)
+    }
+    @MainActor func testCreatePlaylist() {
+        let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout: 10)); app.buttons["Library"].firstMatch.tap()
+        app.buttons["Playlists"].firstMatch.tap()
+        app.buttons["Create playlist"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["playlistName"].waitForExistence(timeout: 5))
+        app.textFields["playlistName"].tap(); app.textFields["playlistName"].typeText("Evening mix")
+        app.buttons["savePlaylist"].tap()
+        XCTAssertTrue(app.staticTexts["Evening mix"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Done"].exists)
     }
 }

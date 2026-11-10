@@ -104,14 +104,7 @@ struct NowPlayingView: View {
                 HStack {
                     Button("Play here") { Task { await playback.send("takeover") } }
                     Spacer()
-                    Button(playback.remoteActivity.active ? "Stop Lock Screen status" : "Show on Lock Screen", systemImage: "lock.rectangle") {
-                        Task {
-                            if playback.remoteActivity.active { await playback.remoteActivity.stop() }
-                            else { await playback.remoteActivity.start(state: playback.state, track: playback.track, destination: playback.displayOutputName) }
-                        }
-                    }
                 }.font(.footnote)
-                if let error = playback.remoteActivity.error { Text(error).font(.caption).foregroundStyle(.orange) }
             }
             VStack(spacing: 4) {
                 Slider(value: Binding(get: { seeking ? seekPosition : min(playback.position, max(1, playback.duration)) }, set: { seekPosition = $0 }), in: 0...max(1, playback.duration)) { editing in
@@ -329,7 +322,7 @@ struct TabletPlayerBar: View {
     @State private var showQueue = false
     var body: some View {
         if let track = playback.track {
-            HStack(spacing: 20) {
+            HStack(spacing: 12) {
                 Button(action: expand) {
                     HStack(spacing: 12) {
                         ArtworkView(image: playback.artwork).frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 9))
@@ -349,14 +342,12 @@ struct TabletPlayerBar: View {
                         Button { Task { await playback.send("next") } } label: { Image(systemName: "forward.end.fill").frame(width: 44, height: 44) }.accessibilityLabel("Next song")
                     }
                 }.frame(width: 180)
-                VStack(spacing: 2) {
-                    SystemVolumeSlider().frame(height: 28)
-                    Text(playback.routeDescription).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }.frame(width: 150)
+                SystemVolumeSlider().frame(width: 130, height: 44)
                 AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44)
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")
             }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
                 .padding(.horizontal, 16).padding(.vertical, 8).foregroundStyle(.white)
+                .accessibilityIdentifier("tabletPlayer")
                 .sheet(isPresented: $showQueue) { UpNextView(playback: playback) }
         }
     }

@@ -139,6 +139,14 @@ public actor APIClient {
         struct Result: Decodable { let ok: Bool }
         let _: Result = try await call("/api/v1/native/live-activity", method: "POST", body: Self.encoder().encode(Input(activityId: id)))
     }
+    public func createPlaylist(name: String, shared: Bool, trackId: Int? = nil) async throws -> LibraryEntry {
+        struct Input: Encodable { let name: String; let visibility: String; let addTrackId: Int? }
+        return try await call("/api/v1/native/playlists", method: "POST", body: Self.encoder().encode(Input(name: name, visibility: shared ? "shared" : "private", addTrackId: trackId)))
+    }
+    public func addToPlaylist(id: Int, trackId: Int) async throws -> LibraryEntry {
+        struct Input: Encodable { let id: Int; let addTrackId: Int }
+        return try await call("/api/v1/native/playlists", method: "POST", body: Self.encoder().encode(Input(id: id, addTrackId: trackId)))
+    }
     public func library() async throws -> LibraryOverview { try await call("/api/v1/native/library") }
     public func entities(kind: String, query: String, offset: Int = 0, revision: String? = nil) async throws -> EntityPage {
         guard ["albums", "artists"].contains(kind) else { throw APIError.invalidResponse }

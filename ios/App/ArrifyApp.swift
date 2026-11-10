@@ -112,13 +112,7 @@ struct MainView: View {
     var body: some View {
         Group {
             if UIDevice.current.userInterfaceIdiom == .pad {
-                VStack(spacing: 0) {
-                    tabs
-                    ViewThatFits(in: .horizontal) {
-                        TabletPlayerBar(playback: model.playback) { showPlayer = true }.frame(minWidth: 760)
-                        miniPlayer.background(.regularMaterial)
-                    }
-                }
+                TabletShell(model: model) { showPlayer = true }
             } else if #available(iOS 26.1, *) { tabs.tabViewBottomAccessory(isEnabled: model.playback.track != nil) { miniPlayer } }
             else if #available(iOS 26.0, *) { tabs.tabViewBottomAccessory { miniPlayer } }
             else { tabs }

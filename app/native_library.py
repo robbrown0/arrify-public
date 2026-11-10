@@ -31,8 +31,15 @@ def overview(library, accounts, uid):
         items.append(item)
     available = {x['id'] for x in items if x['track_count'] > 0 and x['kind'] == 'collections'}
     moods = [{**g, 'slugs': [s for s in g['slugs'] if s in available]} for g in MOOD_GROUPS]
+    with accounts.lock:
+        recent = accounts.db.execute('SELECT track_id,max(played_at) played FROM history WHERE user_id=? GROUP BY track_id ORDER BY played DESC LIMIT 12', (uid,)).fetchall()
     with library.index_lock:
-        return {'items': items, 'moods': [g for g in moods if g['slugs']],
+        album_ids = list(dict.fromkeys(library.tracks[r[0]].get('album_id') for r in recent if r[0] in library.tracks))
+        albums = [library.albums[i] for i in album_ids if i in library.albums][:6]
+        if not albums:
+            albums = [library.albums[x['id']] for x in library.suggestions() if x['id'] in library.albums]
+        home_albums = [entry(x, 'albums') for x in albums]
+        return {'home_albums': home_albums, 'items': items, 'moods': [g for g in moods if g['slugs']],
                 'tracks': len(library.tracks), 'albums': len(library.albums), 'artists': len(library.artists)}
 
 
@@ -127,3 +134,26 @@ def favorites(library, accounts, uid, data=None):
                 accounts.db.execute('DELETE FROM favorites WHERE user_id=? AND track_id=?', (uid, tid))
     _, ids = selection(library, accounts, uid, 'favorites', 'liked')
     return {'track_ids': ids}
+
+
+def edit_playlist(library, accounts, uid, data):
+    if not isinstance(data, dict) or set(data) - {'id', 'name', 'visibility', 'add_track_id'}:
+        raise NativeError(400, 'invalid_request', 'Invalid playlist fields.')
+    if 'id' in data and (type(data['id']) is not int or data['id'] <= 0):
+        raise NativeError(400, 'invalid_request', 'Choose a playlist.')
+    if ('id' not in data or 'name' in data) and (not isinstance(data.get('name'), str) or not 1 <= len(data['name'].strip()) <= 120):
+        raise NativeError(400, 'invalid_request', 'Use a playlist name between 1 and 120 characters.')
+    if 'visibility' in data and data['visibility'] not in ('private', 'shared'):
+        raise NativeError(400, 'invalid_request', 'Choose private or shared.')
+    if 'add_track_id' in data:
+        if type(data['add_track_id']) is not int or data['add_track_id'] not in library.tracks:
+            raise NativeError(404, 'not_found', 'Song no longer available.')
+    playlists = Playlists(accounts, library)
+    try:
+        result = playlists.edit(uid, data)
+        row = playlists.get(uid, result['id'])
+    except LookupError:
+        raise NativeError(404, 'not_found', 'Playlist not found.') from None
+    item = entry(row, 'playlists', 'personal')
+    if row['track_ids']: item['artwork'] = '/api/v1/artwork/' + str(row['track_ids'][0])
+    return item

@@ -156,7 +156,7 @@ class NativeMediaHTTPTests(unittest.TestCase):
         from app.playlists import Playlists
         self.lib.index_lock = threading.RLock()
         self.lib.search = Search(list(self.lib.tracks.values()), [], [])
-        self.lib.albums = {}; self.lib.artists = {}; self.lib.collections = lambda: []
+        self.lib.albums = {}; self.lib.artists = {}; self.lib.collections = lambda: []; self.lib.suggestions = lambda: []
         playlists = Playlists(self.a, self.lib)
         pid = playlists.edit(1, {'name':'Native mix','track_ids':[1,2,3]})['id']
         code, library = self.api('library')

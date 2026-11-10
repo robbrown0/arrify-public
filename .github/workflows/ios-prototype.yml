@@ -35,7 +35,7 @@ jobs:
       - name: iPad launch and accessibility smoke test
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith("iPad")))')
-          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/iPadTests.xcresult -only-testing:ArrifyUITests/LaunchTests/testSignInIsAccessibleAndDoesNotAutoplay -only-testing:ArrifyUITests/LaunchTests/testAlbumsChannelsAndMoodNavigation -only-testing:ArrifyUITests/LaunchTests/testLastChannelClearsMiniPlayerAndRepeatControls CODE_SIGNING_ALLOWED=NO test
+          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/iPadTests.xcresult -only-testing:ArrifyUITests/LaunchTests/testSignInIsAccessibleAndDoesNotAutoplay -only-testing:ArrifyUITests/LaunchTests/testAlbumsChannelsAndMoodNavigation -only-testing:ArrifyUITests/LaunchTests/testLastChannelClearsMiniPlayerAndRepeatControls -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible -only-testing:ArrifyUITests/LaunchTests/testCreatePlaylist CODE_SIGNING_ALLOWED=NO test
       - name: Export test screenshots
         if: always()
         run: |

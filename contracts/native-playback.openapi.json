@@ -596,6 +596,53 @@
           }
         }
       }
+    },
+    "/api/v1/native/playlists": {
+      "post": {
+        "summary": "Create a personal playlist or add a song; only its owner can edit",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Sign in again"
+          },
+          "403": {
+            "description": "Account unavailable"
+          },
+          "429": {
+            "description": "Retry shortly"
+          },
+          "404": {
+            "description": "Song no longer available"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaylistChange"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1260,6 +1307,12 @@
           "artists": {
             "type": "integer",
             "minimum": 0
+          },
+          "home_albums": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LibraryEntry"
+            }
           }
         },
         "required": [
@@ -1436,6 +1489,44 @@
           }
         },
         "additionalProperties": false
+      },
+      "PlaylistChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "shared"
+            ]
+          },
+          "add_track_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "required": [
+              "name"
+            ]
+          }
+        ]
       }
     },
     "responses": {

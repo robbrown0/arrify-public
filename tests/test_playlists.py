@@ -71,3 +71,16 @@ class PlaylistTests(unittest.TestCase):
         self.a.db.close();self.a=Accounts(self.tmp.name)
         self.assertEqual(self.a.profile(1)['text_size'],'largest')
         self.assertFalse(self.a.playlist_shared_default(1))
+
+    def test_native_creation_and_add_share_web_storage_and_ownership(self):
+        from app.native_library import edit_playlist
+        from app.native_auth import NativeError
+        item=edit_playlist(self.lib,self.a,1,{'name':'Native mix','visibility':'private','add_track_id':1})
+        pid=int(item['id'])
+        self.assertEqual(self.p.get(1,pid)['track_ids'],[1])
+        edit_playlist(self.lib,self.a,1,{'id':pid,'add_track_id':2})
+        edit_playlist(self.lib,self.a,1,{'id':pid,'add_track_id':2})
+        self.assertEqual(self.p.get(1,pid)['track_ids'],[1,2])
+        with self.assertRaises(NativeError):edit_playlist(self.lib,self.a,2,{'id':pid,'add_track_id':1})
+        for body in ({'name':''},{'name':'x','add_track_id':True},{'id':True},{'name':'x','visibility':'public'},{'name':'x','user_id':2}):
+            with self.assertRaises(NativeError):edit_playlist(self.lib,self.a,1,body)

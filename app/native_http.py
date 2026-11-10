@@ -40,7 +40,7 @@ def dispatch(handler, path, data=None):
                         headers['Retry-After'] = '1'
                         raise NativeError(503, 'sign_in_busy', 'Sign-in is busy. Try again.') from None
                     raise NativeError(401, 'invalid_credentials', 'Invalid credentials.') from None
-        elif path in (PREFIX + 'sessions', PREFIX + 'sessions/revoke', PREFIX + 'playback/manifest', PREFIX + 'catalog', PREFIX + 'playback', PREFIX + 'playback/queue', PREFIX + 'library', PREFIX + 'library/detail', PREFIX + 'favorites', PREFIX + 'live-activity'):
+        elif path in (PREFIX + 'sessions', PREFIX + 'sessions/revoke', PREFIX + 'playback/manifest', PREFIX + 'catalog', PREFIX + 'playback', PREFIX + 'playback/queue', PREFIX + 'library', PREFIX + 'library/detail', PREFIX + 'favorites', PREFIX + 'live-activity', PREFIX + 'playlists'):
             token, kind = handler.token()
             if kind != 'native':
                 raise NativeError(401, 'unauthenticated', 'A bearer token is required.')
@@ -52,6 +52,10 @@ def dispatch(handler, path, data=None):
                 try:a.rate_limit(('native-live-activity', user['id']), 30, 60)
                 except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
                 result = handler.server.live_activities.dispatch(user['id'], token, data)
+            elif path == PREFIX + 'playlists' and data is not None:
+                try:a.rate_limit(('native-playlists', user['id']), 30, 60)
+                except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
+                result = native_library.edit_playlist(handler.server.library, a, user['id'], data)
             elif path == PREFIX + 'favorites':
                 try:a.rate_limit(('native-favorites', user['id']), 120, 60)
                 except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None

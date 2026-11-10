@@ -75,3 +75,20 @@ class FavoriteLibraryTests(NativeLibraryTests):
         self.assertEqual(db.execute('SELECT track_id FROM favorites WHERE user_id=1').fetchall(),[(3,)])
         for data in ({'track_id':True,'liked':True},{'track_id':1,'liked':'true'},{'track_id':999,'liked':True},{'track_id':1,'liked':True,'user_id':2}):
             with self.assertRaises(NativeError):favorites(self.lib,a,1,data)
+
+class HomeLibraryTests(NativeLibraryTests):
+    def test_home_albums_follow_account_history_and_skip_deleted_tracks(self):
+        import sqlite3
+        from app.native_library import overview
+        db=sqlite3.connect(':memory:');self.addCleanup(db.close)
+        db.execute('CREATE TABLE history(user_id INTEGER,track_id INTEGER,played_at INTEGER)')
+        db.executemany('INSERT INTO history VALUES(?,?,?)',[(1,1,10),(1,2,20),(1,999,30),(2,3,40)])
+        a=SimpleNamespace(db=db,lock=contextlib.nullcontext())
+        self.lib.tracks[1]['album_id']='a'*24;self.lib.tracks[2]['album_id']='a'*24
+        self.lib.suggestions=lambda:[]
+        with patch('app.native_library.Playlists') as playlists, patch('app.native_library.PersonalStations') as stations:
+            playlists.return_value.rows.return_value=[];stations.return_value.collections.return_value=[]
+            result=overview(self.lib,a,1)
+            self.assertEqual([x['id'] for x in result['home_albums']],['a'*24])
+            self.assertEqual(result['home_albums'][0]['track_count'],120)
+            self.assertEqual(overview(self.lib,a,2)['home_albums'],[])

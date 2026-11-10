@@ -26,6 +26,7 @@ public struct MoodGroup: Codable, Identifiable, Hashable, Sendable {
 public struct LibraryOverview: Codable, Sendable {
     public let items: [LibraryEntry]
     public let moods: [MoodGroup]
+    public let homeAlbums: [LibraryEntry]?
     public let tracks: Int
     public let albums: Int
     public let artists: Int
