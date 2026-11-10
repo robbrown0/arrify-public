@@ -29,6 +29,7 @@ import ArrifyCore
     private let monitor = NWPathMonitor()
     private var localPath = false
     init() {
+        guard ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] != "1" else { return }
         monitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor [weak self] in
                 guard let self else { return }

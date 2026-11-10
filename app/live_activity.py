@@ -110,7 +110,8 @@ class LiveActivities:
             family = row[0]
             if data['action'] == 'verify':
                 status = self.listening.state(uid)['listening']
-                allowed = self.enabled and self.local_presence.consume(uid, family, status['owner'], status.get('epoch'), 'status', data['nonce'], data['proof'])
+                allowed = (self.enabled and data['owner_device_id'] == status['owner'] and type(data['owner_epoch']) is int and data['owner_epoch'] == status.get('epoch')
+                    and self.local_presence.consume(uid, family, status['owner'], status.get('epoch'), 'status', data['nonce'], data['proof']))
                 return {'controls_available': bool(allowed)}
             if data['action'] == 'stop':
                 self.a.db.execute('DELETE FROM live_activities WHERE family=? AND activity=?', (family, activity))

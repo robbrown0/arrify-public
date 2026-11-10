@@ -502,7 +502,7 @@
     },
     "/api/v1/native/live-activity": {
       "get": {
-        "summary": "Push availability and same-account, same-local-network control eligibility",
+        "summary": "Push availability; local control eligibility requires an authenticated reachability proof",
         "security": [
           {
             "bearerAuth": []
@@ -560,6 +560,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/Playback"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "controls_available"
+                      ],
+                      "properties": {
+                        "controls_available": {
+                          "type": "boolean"
+                        }
+                      }
                     }
                   ]
                 }
@@ -599,6 +610,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/LiveActivityControl"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LocalPresenceVerification"
                   }
                 ]
               }
@@ -650,6 +664,53 @@
                 "$ref": "#/components/schemas/PlaylistChange"
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/native/local-presence": {
+      "post": {
+        "summary": "Publish the native playback session local proof key or request a single-use controller challenge",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/LocalPresencePublish"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LocalPresenceChallenge"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Publication acknowledged or opaque service and 12-second nonce returned"
+          },
+          "400": {
+            "description": "Invalid fields"
+          },
+          "401": {
+            "description": "Sign in again"
+          },
+          "403": {
+            "description": "Owner session or local verification unavailable"
+          },
+          "409": {
+            "description": "Playback owner changed"
+          },
+          "429": {
+            "description": "Retry shortly"
           }
         }
       }
@@ -1548,7 +1609,9 @@
           "activity_id",
           "command",
           "owner_device_id",
-          "owner_epoch"
+          "owner_epoch",
+          "nonce",
+          "proof"
         ],
         "properties": {
           "action": {
@@ -1577,6 +1640,121 @@
           "owner_epoch": {
             "type": "integer",
             "minimum": 0
+          },
+          "nonce": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "proof": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "LocalPresenceVerification": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "activity_id",
+          "owner_device_id",
+          "owner_epoch",
+          "nonce",
+          "proof"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "verify"
+            ]
+          },
+          "activity_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "owner_device_id": {
+            "type": "string"
+          },
+          "owner_epoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nonce": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "proof": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "LocalPresencePublish": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "owner_device_id",
+          "owner_epoch",
+          "service",
+          "secret"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "publish"
+            ]
+          },
+          "owner_device_id": {
+            "type": "string"
+          },
+          "owner_epoch": {
+            "type": "integer"
+          },
+          "service": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "secret": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "LocalPresenceChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "owner_device_id",
+          "owner_epoch",
+          "purpose"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "challenge"
+            ]
+          },
+          "owner_device_id": {
+            "type": "string"
+          },
+          "owner_epoch": {
+            "type": "integer"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "status",
+              "pause",
+              "resume",
+              "previous",
+              "next"
+            ]
           }
         }
       }

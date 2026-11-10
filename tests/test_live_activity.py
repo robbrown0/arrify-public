@@ -84,3 +84,24 @@ class LiveActivityTests(unittest.TestCase):
         second=self.auth.login({'username':'listener','password':'long-test-password','device_name':'Other'})
         with self.assertRaises(NativeError):self.service.dispatch(self.uid,second['access_token'],data,peer)
         self.service.listening.command.assert_not_called()
+
+    def test_real_local_proof_controls_once_without_ip_configuration(self):
+        import hashlib, hmac
+        from unittest.mock import Mock, patch
+        owner=self.auth.login({'username':'listener','password':'long-test-password','device_name':'Actual player'})
+        self.state['listening'].update(epoch=3,revision=7)
+        presence=self.service.local_presence
+        presence.acquired(self.uid,owner['access_token'],{}, {'owner_device_id':'player','owner_epoch':3},{'device_id':'player'})
+        presence.dispatch(self.uid,owner['access_token'],dict(action='publish',owner_device_id='player',owner_epoch=3,service='12'*16,secret='ab'*32),self.state['listening'])
+        nonce=presence.dispatch(self.uid,self.login['access_token'],dict(action='challenge',owner_device_id='player',owner_epoch=3,purpose='next'),self.state['listening'])['nonce']
+        proof=hmac.new(bytes.fromhex('ab'*32),nonce.encode(),hashlib.sha256).hexdigest()
+        self.register()
+        self.service.listening.command=Mock(return_value=self.state)
+        data=dict(action='control',activity_id='first',command='next',owner_device_id='player',owner_epoch=3,nonce=nonce,proof=proof)
+        with patch('app.live_activity.snapshot',return_value={'ok':True}):
+            self.assertEqual(self.service.dispatch(self.uid,self.login['access_token'],data),{'ok':True})
+        with self.assertRaises(NativeError):self.service.dispatch(self.uid,self.login['access_token'],data)
+        self.service.listening.command.assert_called_once()
+        # A matching public/private IP has no bypass path when a proof is absent.
+        data.pop('nonce');data.pop('proof')
+        with self.assertRaises(NativeError):self.service.dispatch(self.uid,self.login['access_token'],data,SimpleNamespace(client_address=('192.168.1.20',1),headers={}))
