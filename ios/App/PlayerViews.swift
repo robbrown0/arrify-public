@@ -147,8 +147,11 @@ struct NowPlayingView: View {
             }.buttonStyle(.plain)
             SystemVolumeSlider(retainedView: playback.expandedVolumeView).frame(height: 44).padding(.top, 6)
             HStack {
-                HStack(spacing: 4) { ServerConnectionBadge(connection: playback.serverConnection); Button { showArtwork = true } label: { Image(systemName: "photo").frame(width: 44, height: 44) } }
-                    .accessibilityLabel("Show artwork").accessibilityIdentifier("artworkDisplayButton")
+                HStack(spacing: 4) {
+                    ServerConnectionBadge(connection: playback.serverConnection)
+                    Button { showArtwork = true } label: { Image(systemName: "photo").frame(width: 44, height: 44) }
+                        .accessibilityLabel("Show artwork").accessibilityIdentifier("artworkDisplayButton")
+                }
                 Spacer()
                 VStack(spacing: 0) {
                     AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")
