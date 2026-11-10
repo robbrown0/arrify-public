@@ -83,13 +83,12 @@ def dispatch(handler, path, data=None):
                 except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
                 result = queue_page(handler.server.listening, user['id'], handler.path)
             elif path == PREFIX + 'playback':
+                expanded = data is not None and data.get('action') == 'play' and 'source' in data
+                if expanded:
+                    data = native_library.expand_playback(handler.server.library, a, user['id'], data)
                 with a.lock:
-                    before = snapshot(handler.server.listening.state(user['id']))
-                    if data is not None and data.get('action') == 'play' and 'source' in data:
-                        data = native_library.expand_playback(handler.server.library, a, user['id'], data)
-                        result = snapshot(handler.server.listening.command(user['id'], data))
-                    else:
-                        result = playback(handler.server.listening, user['id'], data)
+                    before = snapshot(handler.server.listening.state(user['id'])) if data is not None else {}
+                    result = snapshot(handler.server.listening.command(user['id'], data)) if expanded else playback(handler.server.listening, user['id'], data)
                     live = getattr(handler.server, 'live_activities', None)
                     if live and data is not None:
                         live.local_presence.acquired(user['id'], token, before, result, data)

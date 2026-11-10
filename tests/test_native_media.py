@@ -342,3 +342,28 @@ class NativeMediaHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([i['state'] for i in manifest['items']], ['unavailable','ready','ready'])
         self.assertEqual(self.raw(url)[0], 403)
+
+    def test_native_owner_session_binding_and_local_challenge_http(self):
+        from types import SimpleNamespace
+        from app.live_activity import LiveActivities
+        self.s.live_activities=LiveActivities(self.a,self.s.listening,self.tmp.name,sender=SimpleNamespace(send=lambda *a:(200,'')),start_worker=False)
+        self.addCleanup(self.s.live_activities.close)
+        def request(path, data, token=None):
+            c=http.client.HTTPConnection('127.0.0.1',self.s.server_port,timeout=5)
+            c.request('POST','/api/v1/native/'+path,json.dumps(data),{'Content-Type':'application/json','Authorization':'Bearer '+(token or self.pair['access_token'])})
+            r=c.getresponse();result=r.status,json.loads(r.read());c.close();return result
+        before=self.s.listening.state(self.a.identity(self.pair['access_token'],'native')['id'])['listening']
+        code,state=request('playback',dict(action='takeover',device_id='b'*32,device_name='Native',expected_revision=before['revision']))
+        self.assertEqual(code,200,state)
+        epoch=state['owner_epoch']
+        data=dict(action='publish',owner_device_id='b'*32,owner_epoch=epoch,service='12'*16,secret='ab'*32)
+        self.assertEqual(request('local-presence',data)[0],200)
+        remote=self.auth.login({'username':'partyhost','password':'a-strong-password','device_name':'Controller'})
+        self.assertEqual(request('local-presence',data,remote['access_token'])[0],403)
+        code,challenge=request('local-presence',dict(action='challenge',owner_device_id='b'*32,owner_epoch=epoch,purpose='status'),remote['access_token'])
+        self.assertEqual(code,200,challenge)
+        import hashlib,hmac
+        proof=hmac.new(bytes.fromhex('ab'*32),challenge['nonce'].encode(),hashlib.sha256).hexdigest()
+        verify=dict(action='verify',activity_id='local-check',owner_device_id='b'*32,owner_epoch=epoch,nonce=challenge['nonce'],proof=proof)
+        self.assertEqual(request('live-activity',verify,remote['access_token']), (200,{'controls_available':True}))
+        self.assertEqual(request('live-activity',verify,remote['access_token']), (200,{'controls_available':False}))
