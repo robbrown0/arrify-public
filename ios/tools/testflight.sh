@@ -49,7 +49,7 @@ IPA_PATH=$(find build/TestFlight -maxdepth 1 -name '*.ipa' -print -quit)
 VERIFY_DIR="$SIGNING_DIR/verify"
 mkdir "$VERIFY_DIR"
 unzip -q "$IPA_PATH" -d "$VERIFY_DIR"
-codesign --display --entitlements - "$VERIFY_DIR/Payload/Arrify.app" 2>/dev/null > "$SIGNING_DIR/app-entitlements.plist"
+codesign --display --entitlements - --xml "$VERIFY_DIR/Payload/Arrify.app" 2>/dev/null > "$SIGNING_DIR/app-entitlements.plist"
 security cms -D -i "$VERIFY_DIR/Payload/Arrify.app/embedded.mobileprovision" > "$SIGNING_DIR/profile.plist"
 python3 - <<'PYVERIFY'
 import os, pathlib, plistlib

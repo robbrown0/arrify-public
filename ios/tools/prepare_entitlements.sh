@@ -9,4 +9,4 @@ if [ -d "$APP_PATH/Frameworks" ]; then
 fi
 codesign --force --sign - --generate-entitlement-der "$APP_PATH/PlugIns/ArrifyLiveActivity.appex"
 codesign --force --sign - --generate-entitlement-der --entitlements "$ENTITLEMENTS_PATH" "$APP_PATH"
-codesign --display --entitlements - "$APP_PATH" 2>/dev/null | python3 -c 'import plistlib,sys; assert plistlib.loads(sys.stdin.buffer.read()).get("aps-environment") == "development", "Archive lost requested push entitlement"'
+codesign --display --entitlements - --xml "$APP_PATH" 2>/dev/null | python3 -c 'import plistlib,sys; assert plistlib.loads(sys.stdin.buffer.read()).get("aps-environment") == "development", "Archive lost requested push entitlement"'

@@ -15,7 +15,8 @@ struct TabletShell: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 10) {
-                            Image("BrandLogo").resizable().scaledToFit().frame(width: 34, height: 34)
+                            if let icon = model.brandIcon { Image(uiImage: icon).resizable().scaledToFit().frame(width: 34, height: 34) }
+                            else { Image("BrandLogo").resizable().scaledToFit().frame(width: 34, height: 34) }
                             Text("Arrify").font(.title2.bold())
                         }.padding(.vertical, 24)
                         navigation("Home", "house")
