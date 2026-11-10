@@ -117,10 +117,9 @@ public actor APIClient {
     }
     private func sendAuthorized(_ path: String, method: String, body: Data?, saved: Credential) async throws -> HTTPResult {
         let endpoint = try await router.selected()
+        let result: HTTPResult
         do {
-            let result = try await transport.send(Self.request(endpoint: endpoint, path: path, method: method, body: body, token: saved.tokens.accessToken))
-            if [502, 503, 504].contains(result.status) { await router.failed(endpoint) }
-            return result
+            result = try await transport.send(Self.request(endpoint: endpoint, path: path, method: method, body: body, token: saved.tokens.accessToken))
         } catch {
             guard !(error is CancellationError), !Task.isCancelled else { throw error }
             await router.failed(endpoint)
@@ -130,6 +129,13 @@ public actor APIClient {
             guard alternate.url != endpoint.url else { throw error }
             return try await transport.send(Self.request(endpoint: alternate, path: path, token: saved.tokens.accessToken))
         }
+        if [502, 503, 504].contains(result.status) {
+            await router.failed(endpoint)
+            if method == "GET", let alternate = try? await router.selected(), alternate.url != endpoint.url {
+                return try await transport.send(Self.request(endpoint: alternate, path: path, token: saved.tokens.accessToken))
+            }
+        }
+        return result
     }
     private func authorizedResponse(_ path: String, method: String = "GET", body: Data? = nil) async throws -> HTTPResult {
         var saved = try await access()
@@ -315,6 +321,7 @@ public actor APIClient {
         return try selected.mediaURL(path.string!)
     }
     public func logout() async {
+        let address = await router.snapshot().address
         let saved = credential
         generation = UUID(); refreshTask?.cancel(); refreshTask = nil; credential = nil
         try? await store.clear()
@@ -322,7 +329,7 @@ public actor APIClient {
         if let saved {
             struct Revoke: Encodable { let sessionId: String }
             if let body = try? Self.encoder().encode(Revoke(sessionId: saved.tokens.sessionId)),
-               let request = try? Self.request(endpoint: Endpoint(saved.endpoint), path: "/api/v1/native/sessions/revoke", method: "POST", body: body, token: saved.tokens.accessToken) {
+               let request = try? Self.request(endpoint: Endpoint(address ?? saved.endpoint), path: "/api/v1/native/sessions/revoke", method: "POST", body: body, token: saved.tokens.accessToken) {
                 _ = try? await transport.send(request)
             }
         }
