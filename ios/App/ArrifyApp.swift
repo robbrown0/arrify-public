@@ -31,17 +31,18 @@ import AVKit
         favorites = FavoritesStore(api: api)
         library = LibraryStore(api: api)
         artwork = ArtworkStore(api: api)
+        RemoteControlRuntime.api = api
     }
     func restore() async {
         defer { restoring = false }
         do {
-            if let saved = try await api.restore() { endpoint = saved; signedIn = true; await playback.remoteActivity.clearRestoredActivities(); playback.start() }
+            if let saved = try await api.restore() { endpoint = saved; signedIn = true; await playback.remoteActivity.restoreForSession(); playback.start() }
         } catch { self.error = error.localizedDescription }
     }
     func login(username: String, password: String) async {
         do {
             try await api.login(endpoint: endpoint, username: username, password: password, deviceName: UIDevice.current.model)
-            signedIn = true; error = nil; await playback.remoteActivity.clearRestoredActivities(); playback.start()
+            signedIn = true; error = nil; await playback.remoteActivity.restoreForSession(); playback.start()
         } catch { self.error = error.localizedDescription }
     }
     func refreshBranding() async {
@@ -112,13 +113,7 @@ struct MainView: View {
     var body: some View {
         Group {
             if UIDevice.current.userInterfaceIdiom == .pad {
-                VStack(spacing: 0) {
-                    tabs
-                    ViewThatFits(in: .horizontal) {
-                        TabletPlayerBar(playback: model.playback) { showPlayer = true }.frame(minWidth: 760)
-                        miniPlayer.background(.regularMaterial)
-                    }
-                }
+                TabletShell(model: model) { showPlayer = true }
             } else if #available(iOS 26.1, *) { tabs.tabViewBottomAccessory(isEnabled: model.playback.track != nil) { miniPlayer } }
             else if #available(iOS 26.0, *) { tabs.tabViewBottomAccessory { miniPlayer } }
             else { tabs }
@@ -175,11 +170,13 @@ struct SettingsView: View {
                         Text("Original").tag("original"); Text("AAC").tag("aac"); Text("MP3").tag("mp3")
                     }
                     Text("Applies to the next song.").font(.footnote).foregroundStyle(.secondary)
+                    NavigationLink("Audio output diagnostics") { AudioRouteDiagnosticsView(playback: model.playback) }
                 }
                 Section("Lock Screen") {
-                    Text("Follow playback from another device on this account using a read-only Live Activity. Start it from that device’s player in Arrify.").font(.footnote)
+                    Toggle("Automatic Lock Screen controls", isOn: Binding(get: { model.playback.remoteActivity.automatic }, set: { model.playback.remoteActivity.automatic = $0 }))
+                    Text("Follow playback from another device on the same account and home network. Open Arrify once to connect; iOS manages Lock Screen availability.").font(.footnote)
                     if model.playback.remoteActivity.active {
-                        Button("Stop Lock Screen status") { Task { await model.playback.remoteActivity.stop() } }
+                        Button("Stop Lock Screen controls") { model.playback.remoteActivity.automatic = false }
                     }
                     if let error = model.playback.remoteActivity.error { Text(error).font(.footnote).foregroundStyle(.orange) }
                 }

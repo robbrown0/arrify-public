@@ -158,3 +158,136 @@ metallic A/music note, gold cutlass, lighting, proportions and details; true alp
 PNG, no redesign or text.” `tools/generate_brand.py` exports deterministic icon
 sizes from `web/assets/arrify-icon-source.jpg`. Server custom icons remain in the
 server's private data mount and do not alter another server's branding.
+
+## Selected output naming investigation (2026-11-10)
+
+Status: implemented conservative name handling and opt-in raw diagnostics; physical
+AirPlay/Bluetooth verification is **pending**, not a claimed fix for generic OS names.
+This workspace is Linux, has no attached iOS device, and its Apple CI uses simulators.
+A nearby receiver or the macOS music-recognition VM cannot provide the iPhone's
+AVAudioSession route values. The user's earlier screenshots establish the visible
+symptom, not the raw API values.
+
+### Code findings and changes
+
+- Before this change, `SystemPlaybackAudioSession.outputName` already read **every
+  currentRoute.outputs portName**, not portType as the destination name. Type only
+  supplied an AirPlay/CarPlay prefix. A single raw `AirPlay` remained `AirPlay`.
+- The session already uses `.playback`, `.default`, `.longFormAudio`, with no category
+  options. This is Apple's documented long-form AirPlay configuration. AVQueuePlayer
+  routes audio through that session; `allowsExternalPlayback` remains false to avoid
+  changing receiver behavior to external video playback. Neither policy nor engine is
+  changed just to obtain a name. Hardware A/B comparisons of these settings remain
+  unperformed; documentation does not promise that changing them reveals names.
+- Preserve complete selected port names locally; remove the old 80-character local
+  truncation and transport-prefix insertion/removal. Port type is only a fallback for
+  an empty name. Distinct selected ports are retained even if their names match.
+- Refresh after route-change notifications, picker dismissal, foreground entry and
+  explicit activation, immediately and at 0.6, 2 and 5 seconds. Existing reconciliation
+  also refreshes. A newer event cancels old delayed reads. Never keep an old receiver's
+  name when the current route becomes generic. No additional continuous timer,
+  discovery, session activation, volume mutation or playback command is used for names.
+- Remote-owner labels still come from the playing device's server heartbeat, not this
+  controller's local route. The server's pre-existing 80-character heartbeat-output
+  limit remains; it is separate from the local selected-output label.
+
+### Public API investigation
+
+| API | Selected destination information | Decision |
+| --- | --- | --- |
+| AVAudioSession.currentRoute.outputs | Selected output ports; portName, portType, uid, channels, selectedDataSource | Authoritative public iOS input for labels; capture raw values, preserve names as returned. |
+| AVAudioSession.outputDataSource / selectedDataSource.dataSourceName | Selected source within a port; session outputDataSource documented for certain USB accessories | Log it, but do not mislabel a microphone/source/channel as a receiver. |
+| AVPlayer.isExternalPlaybackActive | Boolean for **external video** playback | Log alongside allowsExternalPlayback; false does not mean session-based AirPlay audio is inactive. No destination-name property documented on iOS AVPlayer. |
+| AVPlayer.audioOutputDeviceUniqueID | Core Audio output device ID | **macOS-only**; not an iOS alternative. |
+| AVRoutePickerView / delegate | System-owned receiver UI; will-begin/did-end presentation callbacks | Keep native picker. No selected-name/list callback. Its player property is macOS-only. Do not scrape internal views or accessibility strings. |
+| MPVolumeView.isWirelessRouteActive | Wireless-route Boolean (deprecated but public) | Diagnostic only; not a name or selected-member list. Preserve native volume control. |
+| AVRouteDetector | Whether multiple routes are **available** | Not selected-route identity or group membership; do not enable discovery for this task. |
+| AVRoutingPlaybackArbiter / participant | Which app player gets priority on constrained routes | Not speaker identity. |
+| AVCustomRoutingController / AVCustomDeviceRoute | App-integrated custom protocol routes, authorization and endpoints | Not a getter for system-selected AirPlay speakers. No custom protocol added. |
+| prepareRouteSelectionForPlayback | Local/external/none classification for long-form video | Not a name; avoid a route-selection operation purely for diagnostics. |
+
+The native route picker can display system-managed receiver information without
+exporting that information to its host application. Its documented delegate contract
+contains presentation events, not selection details. The visible picker is therefore
+not evidence of an equivalent public name getter. We cannot establish how Apple Music,
+Spotify, Tidal or Sonos obtain their labels from screenshots; proprietary protocols or
+Apple-only facilities must not be assumed equivalent to Arrify's AVAudioSession path.
+
+For grouped AirPlay 2: if iOS returns multiple selected ports or a human-readable group
+name, display exactly those returned names. If it returns one generic `AirPlay` port,
+no reviewed public iOS API exposes the individual selected group members. Do not infer
+member count from output-port count, available receivers, channel count, UID text or
+saved names. Keep the honest `AirPlay` fallback and the native picker. This is the
+public API boundary found in this investigation, not a fabricated hardware result.
+Private AVOutputContext/MediaRemote access, KVC selectors, Bonjour-to-UID matching and
+internal route-picker view traversal are intentionally excluded.
+
+### Hardware capture procedure and evidence still needed
+
+In Settings → Audio → Audio output diagnostics, start capture before selecting the
+receiver. Capture is local, bounded to 120 records/10 minutes, cleared on sign-out or
+Clear capture, and shared only explicitly. Reports contain raw names/UIDs, so do not
+publish an unredacted report in the public repository. No credentials, media URLs,
+server address, track details or audio are collected.
+
+The report includes session category/mode/options/policy, all current output port
+names/types/UIDs, selected source and channel fields, previous route and change reason,
+AVPlayer external-playback flags, MPVolumeView wireless-active flag, local label,
+displayed label, remote-owner indicator, trigger and timestamp. No fake values are
+substituted for unavailable API results. JSON optional fields are absent when nil.
+
+Run on an actual iPhone and, if available, iPad:
+
+1. Built-in speaker → one Apple TV, Sonos or Samsung AirPlay receiver. Note the exact
+   picker-selected name, capture immediately and after 5 seconds, then stop/start music.
+2. Add a second AirPlay receiver to the selected group; remove the first; change the
+   group again while music continues. Compare picker membership with raw outputs.
+3. Bluetooth speaker/headphones: select, rename in system settings if convenient,
+   reconnect, and confirm portName rather than profile/type is displayed.
+4. Return to built-in audio, lock/unlock, foreground the app, and confirm no stale name.
+5. From another logged-in Arrify device, observe the playing owner's reported label;
+   do not confuse the observing device's local audio route with the remote owner.
+6. Record receiver model/firmware, OS/build, the exact selected picker names and whether
+   playback remained uninterrupted. Share the diagnostic report privately.
+
+All of these hardware rows are currently **not run**. Simulator and formatter tests
+validate code and fallback behavior, not AirPlay receiver names. Policy/engine A/B
+experiments must be an isolated diagnostic run on hardware (including default vs
+longFormAudio and external video allowed vs disabled), not an unverified production
+playback change. They are not required or claimed as a solution by the current code.
+
+### Apple references reviewed
+
+- [AirPlay configuration](https://developer.apple.com/documentation/avfoundation/supporting-airplay-in-your-app)
+- [Port description](https://developer.apple.com/documentation/avfaudio/avaudiosessionportdescription)
+- [Selected output data source](https://developer.apple.com/documentation/avfaudio/avaudiosession/outputdatasource)
+- [External playback flag](https://developer.apple.com/documentation/avfoundation/avplayer/isexternalplaybackactive)
+- [macOS output device ID](https://developer.apple.com/documentation/avfoundation/avplayer/audiooutputdeviceuniqueid)
+- [Route picker](https://developer.apple.com/documentation/avkit/avroutepickerview) and [delegate](https://developer.apple.com/documentation/avkit/avroutepickerviewdelegate)
+- [Route picker player availability](https://developer.apple.com/documentation/avkit/avroutepickerview/player)
+- [MPVolumeView](https://developer.apple.com/documentation/mediaplayer/mpvolumeview)
+- [Route detector](https://developer.apple.com/documentation/avfoundation/avroutedetector)
+- [AVRouting](https://developer.apple.com/documentation/avrouting)
+- [Playback arbitration](https://developer.apple.com/videos/play/wwdc2025/302/)
+
+### iPad library and remote Lock Screen controls
+
+The iPad shell uses a fixed sidebar and an always-visible search header, outside the scrolling navigation content. It keeps the tablet player when the keyboard opens. Home contains account-scoped recent albums (daily suggestions when history is empty) and playable mood collections. Native playlist creation and adding songs use the same `Playlists` ownership rules/storage as the web. Inline unlikes keep their row until an explicit refresh, allowing immediate re-addition.
+
+Remote Lock Screen controls start automatically while Arrify is foregrounded and another device on the **same account and locally reachable Wi-Fi/Ethernet network** owns playback. There is no Show on Lock Screen link. A Settings toggle disables automatic controls. A Live Activity uses public App Intents for previous, pause/resume, and next; it does not play silent audio or activate a local audio session. iOS decides presentation and may require device authentication for interactive buttons. This is distinct from the system Now Playing controls on the device that actually plays audio.
+
+Automatic local verification (no household names, IP ranges, or router setup):
+
+- The native session that acquires playback is bound to its owner/epoch on the server. Only that session may publish a rotating in-memory key and opaque Bonjour service identifier. Existing playback acquired before this upgrade needs an explicit Play here once to establish the binding.
+- The controller receives an account/session/owner/epoch/command-scoped 12-second server nonce, discovers the matching `_arrify-local._tcp` service, and asks the player to authenticate that nonce with HMAC-SHA256. Keys and account/media details are never advertised. Public-IP equality and client-reported private subnets are never authorization evidence.
+- Every Lock Screen command obtains a fresh, single-use proof. Replay, expired challenges, a different account/session/owner/epoch/command, or rotated keys are rejected. Keys expire after 35 seconds unless refreshed by the native player. Listener connections and challenge counts are bounded.
+- Network.framework uses Wi-Fi/Ethernet and disables peer-to-peer discovery; cellular, loopback, and other interfaces are prohibited. A network-path change resets the listener/key. Ordinary playback and existing in-app/web controls retain their behavior. The old CIDR/proxy environment settings are unused.
+- This verifies local reachability, not a geographical household. Network administrators can bridge/relay Bonjour or route between local networks; this does not promise resistance to deliberate relaying by someone already authenticated to the account.
+- iOS asks for Local Network permission. Denial, guest-Wi-Fi isolation, unavailable multicast, or a suspended player listener makes verification unavailable; a command fails without changing playback. No silent audio or artificial background keepalive is used. Paused/background behavior and locked-device intent execution require physical-device testing.
+- The initial native-to-native implementation does **not** advertise browser players. Web-to-native remote control remains available in the app, but browser-owned playback does not qualify for this automatic Lock Screen path. Passive APNs metadata can remain visible after a controller leaves; each interactive command still requires fresh local proof. Immediate removal of a suspended device's card on network change is not guaranteed by iOS.
+
+Live Activities still require enabled iOS Live Activities and valid push provisioning. Settings now retains the ActivityKit error domain/code instead of the former generic start failure. Physical-device APNs delivery, Lock Screen presentation and same-LAN behavior require TestFlight validation; simulator compilation is not hardware verification.
+
+Apple references: [interactive widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities), [Activity authorization errors](https://developer.apple.com/documentation/activitykit/activityauthorizationerror).
+
+Distribution qualification explicitly preserves the requested push capability before cloud signing, then verifies `aps-environment=production` in both the exported IPA and its provisioning profile before uploading that exact IPA. The old unsigned-archive/direct-upload flow did not verify this capability. This addresses a suspected provisioning cause of the generic ActivityKit start failure, but the actual device error still needs confirmation.

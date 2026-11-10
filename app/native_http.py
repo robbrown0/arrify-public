@@ -40,7 +40,7 @@ def dispatch(handler, path, data=None):
                         headers['Retry-After'] = '1'
                         raise NativeError(503, 'sign_in_busy', 'Sign-in is busy. Try again.') from None
                     raise NativeError(401, 'invalid_credentials', 'Invalid credentials.') from None
-        elif path in (PREFIX + 'sessions', PREFIX + 'sessions/revoke', PREFIX + 'playback/manifest', PREFIX + 'catalog', PREFIX + 'playback', PREFIX + 'playback/queue', PREFIX + 'library', PREFIX + 'library/detail', PREFIX + 'favorites', PREFIX + 'live-activity'):
+        elif path in (PREFIX + 'sessions', PREFIX + 'sessions/revoke', PREFIX + 'playback/manifest', PREFIX + 'catalog', PREFIX + 'playback', PREFIX + 'playback/queue', PREFIX + 'library', PREFIX + 'library/detail', PREFIX + 'favorites', PREFIX + 'live-activity', PREFIX + 'local-presence', PREFIX + 'playlists'):
             token, kind = handler.token()
             if kind != 'native':
                 raise NativeError(401, 'unauthenticated', 'A bearer token is required.')
@@ -48,10 +48,19 @@ def dispatch(handler, path, data=None):
                 user = a.identity(token, kind)
             except PermissionError:
                 raise NativeError(401, 'unauthenticated', 'Sign in again.') from None
-            if path == PREFIX + 'live-activity':
+            if path == PREFIX + 'local-presence':
+                try:a.rate_limit(('native-presence', user['id']), 120, 60)
+                except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
+                with a.lock:
+                    result = handler.server.live_activities.local_presence.dispatch(user['id'], token, data, handler.server.listening.state(user['id'])['listening'])
+            elif path == PREFIX + 'live-activity':
                 try:a.rate_limit(('native-live-activity', user['id']), 30, 60)
                 except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
-                result = handler.server.live_activities.dispatch(user['id'], token, data)
+                result = handler.server.live_activities.dispatch(user['id'], token, data, handler)
+            elif path == PREFIX + 'playlists' and data is not None:
+                try:a.rate_limit(('native-playlists', user['id']), 30, 60)
+                except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
+                result = native_library.edit_playlist(handler.server.library, a, user['id'], data)
             elif path == PREFIX + 'favorites':
                 try:a.rate_limit(('native-favorites', user['id']), 120, 60)
                 except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
@@ -74,12 +83,15 @@ def dispatch(handler, path, data=None):
                 except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
                 result = queue_page(handler.server.listening, user['id'], handler.path)
             elif path == PREFIX + 'playback':
-                if data is not None and data.get('action') == 'play' and 'source' in data:
+                expanded = data is not None and data.get('action') == 'play' and 'source' in data
+                if expanded:
                     data = native_library.expand_playback(handler.server.library, a, user['id'], data)
-                    result = snapshot(handler.server.listening.command(user['id'], data))
-                    handler.json(result, extra=headers)
-                    return True
-                result = playback(handler.server.listening, user['id'], data)
+                with a.lock:
+                    before = snapshot(handler.server.listening.state(user['id'])) if data is not None else {}
+                    result = snapshot(handler.server.listening.command(user['id'], data)) if expanded else playback(handler.server.listening, user['id'], data)
+                    live = getattr(handler.server, 'live_activities', None)
+                    if live and data is not None:
+                        live.local_presence.acquired(user['id'], token, before, result, data)
             elif path.endswith('/manifest') and data is not None:
                 try:a.rate_limit(('native-manifest', user['id']), 120, 60)
                 except ValueError:

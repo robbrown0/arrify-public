@@ -4,10 +4,19 @@
 import SwiftUI
 import ArrifyCore
 
-/// A read-only remote status card. It never activates audio or registers remote commands.
+/// A remote control card; never activates audio on the controlling device.
 @MainActor @Observable final class RemotePlaybackActivity {
     let api: APIClient
     var active = false
+    var automatic = UserDefaults.standard.object(forKey: "remoteLockScreenAutomatic") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(automatic, forKey: "remoteLockScreenAutomatic")
+            if !automatic { Task { await stop() } }
+            lastAttempt = .distantPast
+        }
+    }
+    private var dismissedOwner: String?
+    private var lastAttempt = Date.distantPast
     private var starting = false
     var error: String?
     private var activity: Activity<PlaybackActivityAttributes>?
@@ -15,40 +24,60 @@ import ArrifyCore
     private var generation = UUID()
     init(api: APIClient) { self.api = api }
     func start(state: PlaybackState?, track: Track?, destination: String) async {
-        guard !starting, let state, let owner = state.ownerDeviceId, let track, track.id == state.currentTrackId else { return }
+        guard automatic, UIApplication.shared.applicationState == .active, !starting, let state, let owner = state.ownerDeviceId, let track, track.id == state.currentTrackId else { return }
+        guard dismissedOwner != "\(owner):\(state.ownerEpoch)" else { return }
         starting = true
         defer { starting = false }
         let requestedGeneration = generation
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { error = "Enable Live Activities for Arrify in Settings."; return }
         do {
-            guard try await api.liveActivityAvailable() else {
-                error = "Lock Screen updates need Apple push notifications configured on your server."; return
+            let (nonce, proof) = try await LocalPeerVerification.proof(api: api, owner: owner, epoch: state.ownerEpoch, purpose: "status")
+            guard try await api.verifyLocalPresence(owner: owner, epoch: state.ownerEpoch, nonce: nonce, proof: proof) else {
+                error = "Lock Screen controls need both devices on the same local network and server push notifications."; return
             }
             guard requestedGeneration == generation, !Task.isCancelled else { return }
             let stoppedGeneration = await stop()
             guard stoppedGeneration == generation, !Task.isCancelled else { return }
             let content = content(state: state, track: track, destination: destination)
-            let new = try Activity.request(attributes: PlaybackActivityAttributes(owner: owner), content: content, pushType: .token)
+            let scope = try await api.sessionScope()
+            guard automatic, UIApplication.shared.applicationState == .active, stoppedGeneration == generation else { return }
+            let new = try Activity.request(attributes: PlaybackActivityAttributes(owner: owner, ownerEpoch: state.ownerEpoch, sessionScope: scope), content: content, pushType: .token)
             activity = new; active = true; error = nil
-            let token = generation
-            tokenTask = Task { [weak self, api] in
-                for await bytes in new.pushTokenUpdates {
-                    guard let self, self.generation == token, !Task.isCancelled else { return }
-                    do {
-                        try await api.registerLiveActivity(id: new.id, token: bytes.map { String(format: "%02x", $0) }.joined(), owner: owner)
-                    } catch {
-                        guard self.generation == token else { return }
-                        self.error = "Lock Screen updates couldn’t connect. Open the player and try again."
-                        await self.stop(); return
-                    }
+            observePushToken(new)
+        } catch {
+            let detail = error as NSError
+            self.error = "Lock Screen unavailable (\(detail.domain), \(detail.code)). Open Arrify in the foreground to retry."
+        }
+    }
+    private func observePushToken(_ observedActivity: Activity<PlaybackActivityAttributes>) {
+        tokenTask?.cancel()
+        let token = generation
+        tokenTask = Task { [weak self, api] in
+            for await bytes in observedActivity.pushTokenUpdates {
+                guard let self, self.generation == token, !Task.isCancelled else { return }
+                do {
+                    try await api.registerLiveActivity(id: observedActivity.id, token: bytes.map { String(format: "%02x", $0) }.joined(), owner: observedActivity.attributes.owner)
+                } catch {
+                    guard self.generation == token else { return }
+                    self.error = "Lock Screen updates couldn’t connect. Open Arrify to retry."
+                    await self.stop(); return
                 }
             }
-        } catch { self.error = "Couldn’t start Lock Screen status. Please try again." }
+        }
     }
     func update(state: PlaybackState?, track: Track?, destination: String, ownsOutput: Bool) async {
-        guard let activity else { return }
-        guard !ownsOutput, let state, let track, state.ownerDeviceId == activity.attributes.owner else { await stop(); return }
-        if activity.activityState == .dismissed || activity.activityState == .ended { await stop(); return }
+        guard automatic else { if active { await stop() }; return }
+        guard !ownsOutput, let state, state.ownerDeviceId != nil, let track else { if active { await stop() }; return }
+        guard let activity else {
+            if UIApplication.shared.applicationState == .active, Date().timeIntervalSince(lastAttempt) >= 15 {
+                lastAttempt = Date()
+                await start(state: state, track: track, destination: destination)
+            }
+            return
+        }
+        guard state.ownerDeviceId == activity.attributes.owner, state.ownerEpoch == activity.attributes.ownerEpoch else { await stop(); return }
+        if activity.activityState == .dismissed { dismissedOwner = "\(activity.attributes.owner):\(activity.attributes.ownerEpoch)"; await stop(); return }
+        if activity.activityState == .ended { await stop(); return }
         guard track.id == state.currentTrackId else { return }
         let next = content(state: state, track: track, destination: destination)
         let old = activity.content.state
@@ -68,10 +97,15 @@ import ArrifyCore
         }
         return nextGeneration
     }
-    func clearRestoredActivities() async {
+    func restoreForSession() async {
+        let scope = try? await api.sessionScope()
         for old in Activity<PlaybackActivityAttributes>.activities {
-            await old.end(nil, dismissalPolicy: .immediate)
-            try? await api.stopLiveActivity(id: old.id)
+            if automatic, old.attributes.sessionScope == scope, activity == nil {
+                activity = old; active = true; observePushToken(old)
+            } else {
+                await old.end(nil, dismissalPolicy: .immediate)
+                try? await api.stopLiveActivity(id: old.id)
+            }
         }
     }
 }

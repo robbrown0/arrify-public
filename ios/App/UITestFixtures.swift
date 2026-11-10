@@ -18,6 +18,7 @@ actor UITestTransport: HTTPTransport {
     private var owner: String?
     private var playing = false
     private var repeatMode = "off"
+    private var playlists: [[String: Any]] = []
     private var favoriteIds: Set<Int> = []
     private let album = #"{"id":"aaaaaaaaaaaaaaaaaaaaaaaa","kind":"albums","name":"M!ssundaztood","subtitle":"P!nk","section":"","artwork":null,"track_count":2}"#
     private let station = #"{"id":"sirius-80son8","kind":"channels","name":"80s on 8","subtitle":"","section":"channels","artwork":null,"track_count":2}"#
@@ -39,16 +40,24 @@ actor UITestTransport: HTTPTransport {
                 if liked { favoriteIds.insert(id) } else { favoriteIds.remove(id) }
             }
             return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: ["track_ids": favoriteIds.sorted()]))
+        } else if path.hasSuffix("/playlists"), let body = request.httpBody,
+                  let input = try JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            let item: [String: Any] = ["id": "1", "kind": "playlists", "name": input["name"] ?? "My mix", "subtitle": "", "section": "personal", "track_count": input["add_track_id"] == nil ? 0 : 1]
+            playlists = [item]
+            return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: item))
         } else if path.hasSuffix("/library") {
             let stations = (1...12).map { n in station.replacingOccurrences(of: "sirius-80son8", with: "station-\(n)").replacingOccurrences(of: "80s on 8", with: n == 1 ? "80s on 8" : "Station \(n)") }.joined(separator: ",")
-            value = "{\"items\":[\(stations),\(mix)],\"moods\":[{\"id\":\"feel-good\",\"name\":\"Feel Good\",\"description\":\"Sunshine, soul, and familiar favorites.\",\"color\":\"#244632\",\"slugs\":[\"mood-feel-good\"]}],\"tracks\":2,\"albums\":1,\"artists\":1}"
+            let featured = mix.replacingOccurrences(of: "mood-feel-good", with: "featured-drive").replacingOccurrences(of: "Feel Good Favorites", with: "Driving favourites").replacingOccurrences(of: "\"section\":\"moods\"", with: "\"section\":\"playlists\"")
+            let personal = playlists.isEmpty ? "" : "," + String(data: try JSONSerialization.data(withJSONObject: playlists[0]), encoding: .utf8)!
+            value = "{\"home_albums\":[\(album)],\"items\":[\(stations),\(mix),\(featured)\(personal)],\"moods\":[{\"id\":\"feel-good\",\"name\":\"Feel Good\",\"description\":\"Sunshine, soul, and familiar favorites.\",\"color\":\"#244632\",\"slugs\":[\"mood-feel-good\"]}],\"tracks\":2,\"albums\":1,\"artists\":1}"
         } else if path.hasSuffix("/library/detail") {
             if parameter("kind") == "favorites" {
                 let items = (try JSONSerialization.jsonObject(with: Data(songs.utf8)) as! [[String: Any]]).filter { favoriteIds.contains($0["id"] as! Int) }
                 let entry: [String: Any] = ["id":"liked", "kind":"favorites", "name":"Liked songs", "subtitle":"", "section":"personal", "track_count":items.count]
                 return HTTPResult(status:200, data: try JSONSerialization.data(withJSONObject: ["item":entry, "items":items, "total":items.count, "revision":"fixture", "next_offset":NSNull()]))
             }
-            let item = parameter("kind") == "channels" ? station : parameter("kind") == "collections" ? mix : album
+            let personal = playlists.first.flatMap { try? JSONSerialization.data(withJSONObject: $0) }.flatMap { String(data: $0, encoding: .utf8) } ?? album
+            let item = parameter("kind") == "playlists" ? personal : parameter("kind") == "channels" ? station : parameter("kind") == "collections" ? mix : album
             value = "{\"item\":\(item),\"items\":\(songs),\"total\":2,\"revision\":\"fixture\",\"next_offset\":null}"
         } else if path.hasSuffix("catalog") {
             let text = parameter("q")

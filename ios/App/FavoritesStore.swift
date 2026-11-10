@@ -61,13 +61,13 @@ struct LikedSongsView: View {
                     Button("Play", systemImage: "play.fill") { Task { await model.playback.play(source: source) } }
                     Spacer()
                     Button("Shuffle", systemImage: "shuffle") { Task { await model.playback.play(source: source, shuffle: true) } }
-                }.disabled(browser.tracks.isEmpty)
+                }.disabled(model.favorites.ids.isEmpty)
             }
             if let error = model.favorites.error { Text(error).foregroundStyle(.orange) }
             RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
             ForEach(browser.tracks) { track in
-                SongRow(track: track, artwork: model.artwork, favorites: model.favorites) {
-                    Task { await model.playback.play(source: source, trackId: track.id) }
+                SongRow(track: track, model: model) {
+                    Task { await model.playback.play(track, in: browser.tracks) }
                 }
             }
             if !browser.loading && browser.tracks.isEmpty && browser.error == nil {
@@ -76,7 +76,6 @@ struct LikedSongsView: View {
             if browser.nextOffset != nil { Button("Load more songs") { Task { await browser.load(more: true) } } }
         }.navigationTitle("Liked songs").scrollContentBackground(.hidden).background(Color.black)
             .task { await model.favorites.refresh(); await browser.load() }
-            .onChange(of: model.favorites.ids) { Task { await browser.load() } }
             .refreshable { await model.favorites.refresh(); await browser.load() }
     }
 }

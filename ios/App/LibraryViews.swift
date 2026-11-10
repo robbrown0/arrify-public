@@ -53,7 +53,7 @@ struct LibraryHome: View {
                     NavigationLink { BrowserScreen(model: model, title: "Songs", kind: "tracks") } label: { Label("Songs", systemImage: "music.note") }
                     NavigationLink { BrowserScreen(model: model, title: "Albums", kind: "albums") } label: { Label("Albums", systemImage: "square.stack") }
                     NavigationLink { BrowserScreen(model: model, title: "Artists", kind: "artists") } label: { Label("Artists", systemImage: "music.mic") }
-                    NavigationLink { CollectionScreen(model: model, section: "playlists", title: "Playlists") } label: { Label("Playlists", systemImage: "music.note.list") }
+                    NavigationLink { PlaylistLibraryView(model: model) } label: { Label("Playlists", systemImage: "music.note.list") }
                     NavigationLink { MoodScreen(model: model) } label: { Label("Moods", systemImage: "sparkles") }
                 }.font(.title3).listRowBackground(Color.white.opacity(0.04))
                 if let overview = model.library.overview {
@@ -160,7 +160,8 @@ struct CollectionCard: View {
             }
             if item.kind != "channels" {
                 Text(item.name).font(.headline).lineLimit(2)
-                Text("\(item.trackCount) songs").font(.caption).foregroundStyle(.secondary)
+                if item.kind == "albums" { Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
+                else { Text("\(item.trackCount) songs").font(.caption).foregroundStyle(.secondary) }
             } else if item.trackCount == 0 { Text("Preparing songs…").font(.caption).foregroundStyle(.secondary) }
         }
     }
@@ -215,40 +216,50 @@ struct BrowserScreen: View {
     let title: String
     @State private var browser: LibraryBrowser
     @State private var query = ""
-    init(model: AppModel, title: String, kind: String) {
-        self.model = model; self.title = title
+    let externalQuery: String?
+    private var activeQuery: String { externalQuery ?? query }
+    init(model: AppModel, title: String, kind: String, externalQuery: String? = nil) {
+        self.model = model; self.title = title; self.externalQuery = externalQuery
         _browser = State(initialValue: LibraryBrowser(api: model.api, kind: kind))
     }
     var body: some View {
+        Group {
+            if externalQuery != nil || UIDevice.current.userInterfaceIdiom == .pad { results }
+            else { results.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(title.lowercased())") }
+        }
+    }
+    private var results: some View {
         List {
             Section { RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error) }
             if browser.kind == "tracks" {
-                ForEach(browser.tracks) { track in SongRow(track: track, artwork: model.artwork, favorites: model.favorites) { Task { await model.playback.play(track, in: browser.tracks) } } }
+                ForEach(browser.tracks) { track in SongRow(track: track, model: model) { Task { await model.playback.play(track, in: browser.tracks) } } }
             } else {
                 ForEach(browser.entries, id: \.identity) { item in
                     NavigationLink { DetailScreen(model: model, entry: item) } label: { EntryRow(item: item, artwork: model.artwork) }
                 }
             }
             if !browser.loading && browser.tracks.isEmpty && browser.entries.isEmpty && browser.error == nil {
-                ContentUnavailableView(query.isEmpty ? "No \(title.lowercased()) yet" : "No matching \(title.lowercased())", systemImage: "magnifyingglass", description: Text(query.isEmpty ? "Music added to your server will appear here." : "Try another name."))
+                ContentUnavailableView(activeQuery.isEmpty ? "No \(title.lowercased()) yet" : "No matching \(title.lowercased())", systemImage: "magnifyingglass", description: Text(activeQuery.isEmpty ? "Music added to your server will appear here." : "Try another name."))
             }
-            if browser.nextOffset != nil { Button("Load more \(title.lowercased())") { Task { await browser.load(query: query, more: true) } }.disabled(browser.loading) }
-            if browser.error != nil { Button("Retry") { Task { await browser.load(query: query) } } }
+            if browser.nextOffset != nil { Button("Load more \(title.lowercased())") { Task { await browser.load(query: activeQuery, more: true) } }.disabled(browser.loading) }
+            if browser.error != nil { Button("Retry") { Task { await browser.load(query: activeQuery) } } }
         }.scrollContentBackground(.hidden).background(Color.black)
-        .navigationTitle(title).searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(title.lowercased())")
-        .task(id: query) {
-            do { try await Task.sleep(for: .milliseconds(query.isEmpty ? 0 : 300)) } catch { return }
-            await browser.load(query: query)
+        .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        .task(id: activeQuery) {
+            do { try await Task.sleep(for: .milliseconds(activeQuery.isEmpty ? 0 : 300)) } catch { return }
+            await browser.load(query: activeQuery)
         }
-        .refreshable { await browser.load(query: query) }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Refresh", systemImage: "arrow.clockwise") { Task { await browser.load(query: query) } }.accessibilityIdentifier("refreshSongs") } }
+        .refreshable { await browser.load(query: activeQuery) }
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Refresh", systemImage: "arrow.clockwise") { Task { await browser.load(query: activeQuery) } }.accessibilityIdentifier("refreshSongs") } }
     }
 }
 
 struct SongRow: View {
     let track: Track
-    let artwork: ArtworkStore
-    let favorites: FavoritesStore
+    let model: AppModel
+    private var artwork: ArtworkStore { model.artwork }
+    private var favorites: FavoritesStore { model.favorites }
+    @State private var addingToPlaylist = false
     let play: () -> Void
     var body: some View {
         HStack(spacing: 0) {
@@ -264,7 +275,11 @@ struct SongRow: View {
             }.frame(minHeight: 48).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel("Play \(track.title) by \(track.artist)")
         FavoriteButton(favorites: favorites, track: track)
-        }
+        Menu {
+            Button("Add to playlist", systemImage: "music.note.list") { addingToPlaylist = true }
+        } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44).foregroundStyle(.secondary) }
+            .accessibilityLabel("More options for \(track.title)")
+        }.sheet(isPresented: $addingToPlaylist) { AddToPlaylistView(model: model, track: track) }
     }
 }
 
@@ -296,7 +311,7 @@ struct DetailScreen: View {
             Section {
                 RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
                 ForEach(Array(browser.tracks.enumerated()), id: \.offset) { _, track in
-                    SongRow(track: track, artwork: model.artwork, favorites: model.favorites) { Task { await model.playback.play(source: item.source, trackId: track.id) } }
+                    SongRow(track: track, model: model) { Task { await model.playback.play(source: item.source, trackId: track.id) } }
                 }
                 if browser.nextOffset != nil { Button("Load more songs") { Task { await browser.load(more: true) } }.disabled(browser.loading) }
                 if browser.error != nil { Button("Retry") { Task { await browser.load() } } }
@@ -323,72 +338,26 @@ struct SearchScreen: View {
     }
 }
 
-/// Home uses the same playable collections as the web, without duplicating catalog state.
+/// The two Home rails mirror the website's account-scoped history and mood collections.
 struct HomeScreen: View {
     let model: AppModel
-    @State private var filter = "All"
     @Environment(\.horizontalSizeClass) private var sizeClass
     private var cardWidth: CGFloat { sizeClass == .regular ? 210 : 165 }
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 28) {
+                LazyVStack(alignment: .leading, spacing: 32) {
                     Text("On the record.").font(.largeTitle.bold())
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(["All", "Playlists", "Moods", "Channels"], id: \.self) { name in
-                                Button { filter = name } label: {
-                                    Text(name).font(.subheadline.weight(.semibold)).padding(.horizontal, 18).padding(.vertical, 12)
-                                        .background(filter == name ? Color.green : Color.white.opacity(0.07), in: Capsule())
-                                        .foregroundStyle(filter == name ? Color.black : Color.white)
-                                }.buttonStyle(.plain).accessibilityAddTraits(filter == name ? .isSelected : [])
-                                    .accessibilityIdentifier("homeFilter-" + name).accessibilityLabel("Show \(name) on Home")
-                            }
-                        }
-                    }
-                    if filter == "All" {
+                    if UIDevice.current.userInterfaceIdiom != .pad {
                         HStack(spacing: 20) {
-                            NavigationLink { BrowserScreen(model: model, title: "Songs", kind: "tracks") } label: {
-                                Text("Songs").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                            }
-                            NavigationLink { BrowserScreen(model: model, title: "Albums", kind: "albums") } label: {
-                                Text("Albums").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                            }
-                            NavigationLink { BrowserScreen(model: model, title: "Artists", kind: "artists") } label: {
-                                Text("Artists").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                            }
-                        }.font(.subheadline.weight(.semibold))
+                            NavigationLink("Songs") { BrowserScreen(model: model, title: "Songs", kind: "tracks") }
+                            NavigationLink("Albums") { BrowserScreen(model: model, title: "Albums", kind: "albums") }
+                            NavigationLink("Artists") { BrowserScreen(model: model, title: "Artists", kind: "artists") }
+                        }.frame(minHeight: 44)
                     }
                     if let overview = model.library.overview {
-                        if filter == "All" || filter == "Playlists" {
-                            rail("Your playlists", items: overview.items.filter { $0.section == "personal" }, section: "playlists")
-                            rail("Made for listening", items: overview.items.filter { $0.section == "playlists" }, section: "playlists")
-                        }
-                        if filter == "All" || filter == "Moods" {
-                            if !overview.moods.isEmpty {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    HStack {
-                                        Text("Set the mood").font(.title2.bold()); Spacer()
-                                        NavigationLink("View all") { MoodScreen(model: model) }.font(.subheadline)
-                                    }
-                                    ScrollView(.horizontal, showsIndicators: false) {
-                                        LazyHStack(alignment: .top, spacing: 18) {
-                                            ForEach(overview.moods) { mood in
-                                                NavigationLink { CollectionScreen(model: model, section: "moods", title: mood.name, mood: mood) } label: {
-                                                    VStack(alignment: .leading, spacing: 10) {
-                                                        MoodCover(mood: mood).frame(width: cardWidth, height: cardWidth).clipShape(RoundedRectangle(cornerRadius: 12))
-                                                        Text(mood.name).font(.headline).foregroundStyle(.primary)
-                                                    }.frame(width: cardWidth, alignment: .leading)
-                                                }.buttonStyle(.plain)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if filter == "All" || filter == "Channels" {
-                            rail("Tune in", items: overview.items.filter { $0.kind == "channels" }, section: "channels")
-                        }
+                        rail("Another spin", items: overview.homeAlbums ?? [], albums: true)
+                        rail("Set the mood", items: overview.items.filter { $0.section == "moods" && $0.trackCount > 0 }, albums: false)
                     }
                     RefreshStatus(loading: model.library.loading, updated: model.library.updated, error: model.library.error)
                 }.padding(24)
@@ -396,22 +365,22 @@ struct HomeScreen: View {
                 .toolbar { ToolbarItem(placement: .topBarTrailing) {
                     Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.library.refresh() } }.accessibilityIdentifier("refreshLibrary")
                 } }
-                .task { if model.library.overview == nil { await model.library.refresh() } }
+                .task { await model.library.refresh() }
                 .refreshable { await model.library.refresh() }
         }
     }
-    @ViewBuilder private func rail(_ title: String, items: [LibraryEntry], section: String) -> some View {
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text(title).font(.title2.bold()); Spacer()
-                    NavigationLink("View all") { CollectionScreen(model: model, section: section, title: section.capitalized) }.font(.subheadline)
-                }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: 18) {
-                        ForEach(Array(items.prefix(12)), id: \.identity) { item in
-                            CollectionCard(model: model, item: item).frame(width: cardWidth)
-                        }
+    private func rail(_ title: String, items: [LibraryEntry], albums: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text(title).font(.title2.bold()); Spacer()
+                if albums { NavigationLink("View all") { BrowserScreen(model: model, title: "Albums", kind: "albums") } }
+                else { NavigationLink("View all") { MoodScreen(model: model) } }
+            }
+            if items.isEmpty { Text(albums ? "Albums you listen to will appear here." : "Mood playlists will appear as your library grows.").foregroundStyle(.secondary).font(.subheadline) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 18) {
+                    ForEach(Array(items.prefix(6)), id: \.identity) { item in
+                        CollectionCard(model: model, item: item).frame(width: cardWidth)
                     }
                 }
             }

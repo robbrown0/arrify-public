@@ -124,6 +124,35 @@ public actor APIClient {
         struct Input: Encodable { let trackId: Int; let liked: Bool }
         return try await call("/api/v1/native/favorites", method: "POST", body: Self.encoder().encode(Input(trackId: id, liked: liked)))
     }
+    public func sessionScope() async throws -> String {
+        let saved = try await access()
+        return saved.serverId + ":" + saved.tokens.sessionId
+    }
+    public func liveActivityControlsAvailable() async throws -> Bool {
+        struct Status: Decodable { let controlsAvailable: Bool? }
+        let status: Status = try await call("/api/v1/native/live-activity")
+        return status.controlsAvailable == true
+    }
+    public func liveActivityCommand(id: String, owner: String, epoch: Int, command: String, nonce: String, proof: String) async throws -> PlaybackState {
+        struct Input: Encodable { let action = "control"; let activityId: String; let ownerDeviceId: String; let ownerEpoch: Int; let command: String; let nonce: String; let proof: String }
+        return try await call("/api/v1/native/live-activity", method: "POST", body: Self.encoder().encode(Input(activityId: id, ownerDeviceId: owner, ownerEpoch: epoch, command: command, nonce: nonce, proof: proof)))
+    }
+    public struct LocalChallenge: Decodable, Sendable { public let nonce: String; public let service: String }
+    public func publishLocalPresence(owner: String, epoch: Int, service: String, secret: String) async throws {
+        struct Input: Encodable { let action = "publish"; let ownerDeviceId: String; let ownerEpoch: Int; let service: String; let secret: String }
+        struct Result: Decodable { let ok: Bool }
+        let _: Result = try await call("/api/v1/native/local-presence", method: "POST", body: Self.encoder().encode(Input(ownerDeviceId: owner, ownerEpoch: epoch, service: service, secret: secret)))
+    }
+    public func localChallenge(owner: String, epoch: Int, purpose: String) async throws -> LocalChallenge {
+        struct Input: Encodable { let action = "challenge"; let ownerDeviceId: String; let ownerEpoch: Int; let purpose: String }
+        return try await call("/api/v1/native/local-presence", method: "POST", body: Self.encoder().encode(Input(ownerDeviceId: owner, ownerEpoch: epoch, purpose: purpose)))
+    }
+    public func verifyLocalPresence(owner: String, epoch: Int, nonce: String, proof: String) async throws -> Bool {
+        struct Input: Encodable { let action = "verify"; let activityId = "local-check"; let ownerDeviceId: String; let ownerEpoch: Int; let nonce: String; let proof: String }
+        struct Result: Decodable { let controlsAvailable: Bool }
+        let result: Result = try await call("/api/v1/native/live-activity", method: "POST", body: Self.encoder().encode(Input(ownerDeviceId: owner, ownerEpoch: epoch, nonce: nonce, proof: proof)))
+        return result.controlsAvailable
+    }
     public func liveActivityAvailable() async throws -> Bool {
         struct Status: Decodable { let available: Bool }
         let status: Status = try await call("/api/v1/native/live-activity")
@@ -138,6 +167,14 @@ public actor APIClient {
         struct Input: Encodable { let action = "stop"; let activityId: String }
         struct Result: Decodable { let ok: Bool }
         let _: Result = try await call("/api/v1/native/live-activity", method: "POST", body: Self.encoder().encode(Input(activityId: id)))
+    }
+    public func createPlaylist(name: String, shared: Bool, trackId: Int? = nil) async throws -> LibraryEntry {
+        struct Input: Encodable { let name: String; let visibility: String; let addTrackId: Int? }
+        return try await call("/api/v1/native/playlists", method: "POST", body: Self.encoder().encode(Input(name: name, visibility: shared ? "shared" : "private", addTrackId: trackId)))
+    }
+    public func addToPlaylist(id: Int, trackId: Int) async throws -> LibraryEntry {
+        struct Input: Encodable { let id: Int; let addTrackId: Int }
+        return try await call("/api/v1/native/playlists", method: "POST", body: Self.encoder().encode(Input(id: id, addTrackId: trackId)))
     }
     public func library() async throws -> LibraryOverview { try await call("/api/v1/native/library") }
     public func entities(kind: String, query: String, offset: Int = 0, revision: String? = nil) async throws -> EntityPage {

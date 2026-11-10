@@ -12,8 +12,9 @@ def add(key, isa, **kwargs):
 def ref(path, kind): return add(path, 'PBXFileReference', lastKnownFileType=kind, path=path, sourceTree='<group>')
 source_files = sorted('App/' + p.name for p in (ROOT/'App').glob('*.swift'))
 shared = ref('Shared/PlaybackActivityAttributes.swift', 'sourcecode.swift')
+intent = ref('Shared/RemotePlaybackIntent.swift', 'sourcecode.swift')
 widget_source = ref('LiveActivity/ArrifyLiveActivity.swift', 'sourcecode.swift')
-files = [ref(p, 'sourcecode.swift') for p in source_files] + [shared]
+files = [ref(p, 'sourcecode.swift') for p in source_files] + [shared, intent]
 test_file = ref('UITests/LaunchTests.swift', 'sourcecode.swift')
 app_test_file = ref('AppTests/NowPlayingArtworkTests.swift', 'sourcecode.swift')
 plist = ref('App/Info.plist', 'text.plist.xml')
@@ -35,9 +36,10 @@ def configs(key, settings):
     for mode in ('Debug', 'Release'):
         values=dict(settings)
         if mode == 'Debug':
-            values['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = 'DEBUG'
+            values['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = 'DEBUG' + (' ARRIFY_APP' if key == 'app' else '')
             values['ONLY_ACTIVE_ARCH'] = 'YES'
             values['ENABLE_TESTABILITY'] = 'YES'
+        if mode == 'Release' and key == 'app': values['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = 'ARRIFY_APP'
         values['SWIFT_OPTIMIZATION_LEVEL'] = '-Onone' if mode=='Debug' else '-O'
         values['DEBUG_INFORMATION_FORMAT'] = 'dwarf' if mode=='Debug' else 'dwarf-with-dsym'
         ids.append(add(key+mode, 'XCBuildConfiguration', buildSettings=values, name=mode))
@@ -46,7 +48,7 @@ base={'SDKROOT':'iphoneos','IPHONEOS_DEPLOYMENT_TARGET':'18.0','SWIFT_VERSION':'
 app_settings={**base,'PRODUCT_BUNDLE_IDENTIFIER':'com.robnets.arrify','PRODUCT_NAME':'$(TARGET_NAME)','INFOPLIST_FILE':'App/Info.plist','CODE_SIGN_ENTITLEMENTS':'App/Arrify.entitlements','CURRENT_PROJECT_VERSION':'1','MARKETING_VERSION':'0.3.0','GENERATE_INFOPLIST_FILE':'NO','ASSETCATALOG_COMPILER_APPICON_NAME':'AppIcon','SUPPORTED_PLATFORMS':'iphoneos iphonesimulator'}
 app=add('app', 'PBXNativeTarget', buildConfigurationList=configs('app',app_settings), buildPhases=[phase('sources','PBXSourcesBuildPhase',files),phase('frameworks','PBXFrameworksBuildPhase',[package_product]),phase('resources','PBXResourcesBuildPhase',[privacy,assets])], buildRules=[], dependencies=[], name='Arrify', packageProductDependencies=[package_product], productName='Arrify', productReference=product, productType='com.apple.product-type.application')
 widget_settings={**base, 'PRODUCT_BUNDLE_IDENTIFIER':'com.robnets.arrify.liveactivity', 'PRODUCT_NAME':'$(TARGET_NAME)', 'INFOPLIST_FILE':'LiveActivity/Info.plist', 'CURRENT_PROJECT_VERSION':'1', 'MARKETING_VERSION':'0.3.0', 'GENERATE_INFOPLIST_FILE':'NO', 'APPLICATION_EXTENSION_API_ONLY':'YES', 'SKIP_INSTALL':'YES', 'LD_RUNPATH_SEARCH_PATHS':'$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks'}
-widget=add('widget', 'PBXNativeTarget', buildConfigurationList=configs('widget',widget_settings), buildPhases=[phase('widget-sources','PBXSourcesBuildPhase',[shared,widget_source]),phase('widget-frameworks','PBXFrameworksBuildPhase',[])],buildRules=[],dependencies=[],name='ArrifyLiveActivity',productName='ArrifyLiveActivity',productReference=widget_product,productType='com.apple.product-type.app-extension')
+widget=add('widget', 'PBXNativeTarget', buildConfigurationList=configs('widget',widget_settings), buildPhases=[phase('widget-sources','PBXSourcesBuildPhase',[shared,intent,widget_source]),phase('widget-frameworks','PBXFrameworksBuildPhase',[])],buildRules=[],dependencies=[],name='ArrifyLiveActivity',productName='ArrifyLiveActivity',productReference=widget_product,productType='com.apple.product-type.app-extension')
 widget_proxy=add('widget-proxy','PBXContainerItemProxy',containerPortal=uid('project'),proxyType=1,remoteGlobalIDString=widget,remoteInfo='ArrifyLiveActivity')
 widget_dependency=add('widget-dependency','PBXTargetDependency',target=widget,targetProxy=widget_proxy)
 embed_build=add('widget-embed-build','PBXBuildFile',fileRef=widget_product,settings={'ATTRIBUTES':['RemoveHeadersOnCopy']})

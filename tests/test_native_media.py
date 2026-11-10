@@ -133,7 +133,7 @@ class NativeMediaHTTPTests(unittest.TestCase):
         c.request(method, '/api/v1/native/'+path, json.dumps(data) if data is not None else None,
                   {'Content-Type':'application/json','Authorization':'Bearer '+self.pair['access_token']})
         r = c.getresponse(); result = r.status, json.loads(r.read()); c.close()
-        name = 'Error' if result[0] != 200 else 'QueuePage' if path.startswith('playback/queue') else 'CatalogPage' if path.startswith('catalog') else 'LibraryDetail' if path.startswith('library/detail') else 'LibraryOverview' if path == 'library' else 'Playback'
+        name = 'Error' if result[0] != 200 else 'QueuePage' if path.startswith('playback/queue') else 'CatalogPage' if path.startswith('catalog') else 'LibraryDetail' if path.startswith('library/detail') else 'LibraryOverview' if path == 'library' else 'LibraryEntry' if path == 'playlists' else 'Playback'
         with patch.object(contract_test, 'CONTRACT', CONTRACT):
             contract_test.validate(self, result[1], {'$ref':'#/components/schemas/'+name})
         return result
@@ -156,9 +156,13 @@ class NativeMediaHTTPTests(unittest.TestCase):
         from app.playlists import Playlists
         self.lib.index_lock = threading.RLock()
         self.lib.search = Search(list(self.lib.tracks.values()), [], [])
-        self.lib.albums = {}; self.lib.artists = {}; self.lib.collections = lambda: []
+        self.lib.albums = {}; self.lib.artists = {}; self.lib.collections = lambda: []; self.lib.suggestions = lambda: []
         playlists = Playlists(self.a, self.lib)
-        pid = playlists.edit(1, {'name':'Native mix','track_ids':[1,2,3]})['id']
+        code, created = self.api('playlists', {'name':'Native mix','visibility':'private','add_track_id':1})
+        self.assertEqual(code,200)
+        pid = int(created['id'])
+        self.assertEqual(self.api('playlists', {'id':pid,'add_track_id':2})[0],200)
+        self.assertEqual(self.api('playlists', {'id':pid,'add_track_id':3})[0],200)
         code, library = self.api('library')
         self.assertEqual(code,200); self.assertEqual(library['items'][0]['kind'],'playlists')
         self.assertEqual(self.raw('/api/v1/native/library')[0],401)
@@ -174,6 +178,7 @@ class NativeMediaHTTPTests(unittest.TestCase):
         other = self.a.db.execute("SELECT id FROM users WHERE username='other'").fetchone()[0]
         private = playlists.edit(other, {'name':'Private','track_ids':[1]})['id']
         self.assertEqual(self.api('library/detail?kind=playlists&id='+str(private))[0],404)
+        self.assertEqual(self.api('playlists', {'id':private,'add_track_id':2})[0],404)
         self.assertEqual(self.api('playback', {'action':'play','source':{'kind':'playlists','id':str(private)},
             'device_id':'a'*32,'expected_revision':started['queue_revision']})[0],404)
 
@@ -337,3 +342,28 @@ class NativeMediaHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([i['state'] for i in manifest['items']], ['unavailable','ready','ready'])
         self.assertEqual(self.raw(url)[0], 403)
+
+    def test_native_owner_session_binding_and_local_challenge_http(self):
+        from types import SimpleNamespace
+        from app.live_activity import LiveActivities
+        self.s.live_activities=LiveActivities(self.a,self.s.listening,self.tmp.name,sender=SimpleNamespace(send=lambda *a:(200,'')),start_worker=False)
+        self.addCleanup(self.s.live_activities.close)
+        def request(path, data, token=None):
+            c=http.client.HTTPConnection('127.0.0.1',self.s.server_port,timeout=5)
+            c.request('POST','/api/v1/native/'+path,json.dumps(data),{'Content-Type':'application/json','Authorization':'Bearer '+(token or self.pair['access_token'])})
+            r=c.getresponse();result=r.status,json.loads(r.read());c.close();return result
+        before=self.s.listening.state(self.a.identity(self.pair['access_token'],'native')['id'])['listening']
+        code,state=request('playback',dict(action='takeover',device_id='b'*32,device_name='Native',expected_revision=before['revision']))
+        self.assertEqual(code,200,state)
+        epoch=state['owner_epoch']
+        data=dict(action='publish',owner_device_id='b'*32,owner_epoch=epoch,service='12'*16,secret='ab'*32)
+        self.assertEqual(request('local-presence',data)[0],200)
+        remote=self.auth.login({'username':'partyhost','password':'a-strong-password','device_name':'Controller'})
+        self.assertEqual(request('local-presence',data,remote['access_token'])[0],403)
+        code,challenge=request('local-presence',dict(action='challenge',owner_device_id='b'*32,owner_epoch=epoch,purpose='status'),remote['access_token'])
+        self.assertEqual(code,200,challenge)
+        import hashlib,hmac
+        proof=hmac.new(bytes.fromhex('ab'*32),challenge['nonce'].encode(),hashlib.sha256).hexdigest()
+        verify=dict(action='verify',activity_id='local-check',owner_device_id='b'*32,owner_epoch=epoch,nonce=challenge['nonce'],proof=proof)
+        self.assertEqual(request('live-activity',verify,remote['access_token']), (200,{'controls_available':True}))
+        self.assertEqual(request('live-activity',verify,remote['access_token']), (200,{'controls_available':False}))

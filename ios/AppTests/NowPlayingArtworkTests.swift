@@ -330,3 +330,39 @@ extension NowPlayingArtworkTests {
         coordinator.stop()
     }
 }
+
+extension NowPlayingArtworkTests {
+    @MainActor func testOutputRefreshPreservesReportedNamesWithoutChangingPlayback() {
+        let session = NamedOutputSession()
+        let coordinator = PlaybackCoordinator(api: APIClient(transport: RestoredOwnerTransport(), store: UITestStore()), audioSession: session)
+        XCTAssertEqual(coordinator.outputName, "Office")
+        session.name = "AirPlay · Living Room, Kitchen"
+        coordinator.outputSelectionChanged()
+        XCTAssertEqual(coordinator.outputName, session.name)
+        XCTAssertTrue(coordinator.routeDescription.hasSuffix(session.name))
+        XCTAssertEqual(session.activations, 0)
+        XCTAssertNil(coordinator.player.currentItem)
+        XCTAssertFalse(coordinator.player.allowsExternalPlayback)
+        coordinator.stop()
+    }
+    @MainActor func testRouteDiagnosticsAreOptInAndClearOnSignOut() {
+        let coordinator = PlaybackCoordinator(api: APIClient(transport: RestoredOwnerTransport(), store: UITestStore()), audioSession: NamedOutputSession())
+        coordinator.refreshOutput()
+        XCTAssertTrue(coordinator.routeDiagnostics.records.isEmpty)
+        coordinator.routeDiagnostics.start()
+        coordinator.refreshOutput(trigger: "test-capture")
+        XCTAssertEqual(coordinator.routeDiagnostics.records.count, 1)
+        XCTAssertTrue(coordinator.routeDiagnostics.exportText.contains("playerAllowsExternalPlayback"))
+        coordinator.stop()
+        XCTAssertFalse(coordinator.routeDiagnostics.capturing)
+        XCTAssertTrue(coordinator.routeDiagnostics.records.isEmpty)
+    }
+}
+
+@MainActor private final class NamedOutputSession: PlaybackAudioSession {
+    var name = "Office"
+    var activations = 0
+    var outputName: String { name }
+    func activate() throws { activations += 1 }
+    func deactivate() throws {}
+}

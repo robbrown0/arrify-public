@@ -7,6 +7,7 @@ import ArrifyCore
 @MainActor @Observable final class PlaybackCoordinator {
     let api: APIClient
     let remoteActivity: RemotePlaybackActivity
+    private let localPeer = LocalPeerVerification()
     private let audioSession: any PlaybackAudioSession
     let player = AVQueuePlayer()
     let cache = AudioCache()
@@ -37,10 +38,30 @@ import ArrifyCore
     var outputName = "iPhone"
     var displayOutputName: String { hasOtherOutput ? (state?.output.flatMap { $0.isEmpty ? nil : $0 } ?? "Other device") : outputName }
     var routeDescription: String {
-        let destination = displayOutputName.replacingOccurrences(of: "AirPlay · ", with: "").replacingOccurrences(of: "CarPlay · ", with: "")
-        return hasOtherOutput ? destination : "\(UIDevice.current.model) → \(destination)"
+        hasOtherOutput ? displayOutputName : "\(UIDevice.current.model) → \(displayOutputName)"
     }
-    func refreshOutput() { outputName = audioSession.outputName }
+    let routeDiagnostics = AudioRouteDiagnostics()
+    private var outputRefreshTask: Task<Void, Never>?
+    func refreshOutput(trigger: String = "reconcile", reason: UInt? = nil, previousOutputs: [RoutePortDetails]? = nil) {
+        outputName = audioSession.outputName
+        if routeDiagnostics.capturing {
+            routeDiagnostics.record(trigger: trigger, player: player, volumeView: expandedVolumeView,
+                localName: outputName, displayedName: displayOutputName, remoteOwner: hasOtherOutput,
+                reason: reason, previousOutputs: previousOutputs)
+        }
+    }
+    /// Read again after route negotiation; never reactivate or reroute audio to obtain a name.
+    func outputSelectionChanged(trigger: String = "picker-dismissed", reason: UInt? = nil, previousOutputs: [RoutePortDetails]? = nil) {
+        outputRefreshTask?.cancel()
+        refreshOutput(trigger: trigger, reason: reason, previousOutputs: previousOutputs)
+        outputRefreshTask = Task { @MainActor [weak self] in
+            for delay in [600, 1400, 3000] {
+                do { try await Task.sleep(for: .milliseconds(delay)) } catch { return }
+                guard let self else { return }
+                self.refreshOutput(trigger: trigger + "-settled")
+            }
+        }
+    }
     var progress: Double { duration.isFinite && duration > 0 && position.isFinite ? min(1, max(0, position / duration)) : 0 }
     var position = 0.0
     var duration = 0.0
@@ -140,12 +161,11 @@ import ArrifyCore
                 Task { await owner.reconcile(); owner.playIfAllowed() }
             }
         }
+        observe(UIApplication.didBecomeActiveNotification) { owner, _ in
+            owner.outputSelectionChanged(trigger: "foreground")
+        }
         observe(AVAudioSession.routeChangeNotification) { owner, note in
-            owner.outputName = owner.audioSession.outputName
-            Task { @MainActor [weak owner] in
-                try? await Task.sleep(for: .milliseconds(600))
-                owner?.outputName = owner?.audioSession.outputName ?? "Audio output"
-            }
+            owner.outputSelectionChanged(trigger: "route-change", reason: note.routeReason, previousOutputs: note.previousOutputs)
             owner.updateReceiverMetadata()
             owner.publishNowPlaying()
             let reason = note.routeReason
@@ -186,6 +206,8 @@ import ArrifyCore
         }
     }
     func stop() {
+        localPeer.stop()
+        outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
         sessionGeneration = UUID(); permission = PlaybackPermission(); connectionInterrupted = false; connectionFailures = 0; message = nil
         aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil; cache.reset(); finishBackgroundTransition()
         eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false; liveConnected = false
@@ -263,7 +285,7 @@ import ArrifyCore
         }
         let generation = sessionGeneration
         if explicitPlayback && (!hasOtherOutput || action == "takeover") {
-            do { try audioSession.activate() }
+            do { try audioSession.activate(); outputSelectionChanged(trigger: "session-activated") }
             catch {
                 player.pause(); permission.userPause()
                 message = "Audio output is unavailable. Tap Play to try again."
@@ -343,7 +365,8 @@ import ArrifyCore
             }
         }
         guard let state = self.state else { return }
-        Task { [remoteActivity, track, displayOutputName, ownsOutput] in
+        Task { [remoteActivity, localPeer, api, track, displayOutputName, ownsOutput] in
+            await localPeer.update(api: api, state: state, ownsOutput: ownsOutput)
             await remoteActivity.update(state: state, track: track, destination: displayOutputName, ownsOutput: ownsOutput)
         }
         if hasOtherOutput { position = state.positionSeconds; duration = state.durationSeconds ?? 0 }
@@ -466,7 +489,7 @@ import ArrifyCore
     private func playIfAllowed() {
         guard permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: loadedKey != nil) else { return }
         guard player.timeControlStatus != .playing else { return }
-        do { try audioSession.activate(); player.play() }
+        do { try audioSession.activate(); refreshOutput(trigger: "playback-activated"); player.play() }
         catch { player.pause(); permission.userPause(); message = "Audio is unavailable. Tap Play to try again." }
     }
     private func updateReceiverMetadata() {
@@ -514,10 +537,12 @@ private struct AudioNotice: Sendable {
     let interruptionType: UInt?
     let interruptionOptions: UInt?
     let routeReason: UInt?
+    let previousOutputs: [RoutePortDetails]?
     init(_ note: Notification) {
         itemId = (note.object as? AVPlayerItem).map(ObjectIdentifier.init)
         interruptionType = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
         interruptionOptions = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
         routeReason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+        previousOutputs = (note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)?.outputs.map(RoutePortDetails.init)
     }
 }
