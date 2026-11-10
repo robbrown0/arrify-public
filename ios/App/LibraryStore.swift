@@ -106,7 +106,7 @@ nonisolated enum ArtworkDecoder {
             return token == generation ? image : nil
         }
         let token = generation
-        let task = Task { [api, disk] in
+        let task = Task<UIImage?, Never> { [api, disk] in
             let scope = await api.artworkCacheScope()
             if let scope, let data = await disk.read(scope: scope, path: path),
                let image = await Task.detached(priority: .utility, operation: { ArtworkDecoder.image(data, pixels: 384) }).value { return image }
