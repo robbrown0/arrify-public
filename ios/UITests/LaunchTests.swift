@@ -210,6 +210,8 @@ extension LaunchTests {
         let takeover = app.buttons["Play here"]
         XCTAssertTrue(takeover.waitForExistence(timeout: 10))
         XCTAssertTrue(takeover.isHittable)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Remote playback takeover available"; shot.lifetime = .keepAlways; add(shot)
         takeover.tap()
         let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: takeover)
         XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 10), .completed)
