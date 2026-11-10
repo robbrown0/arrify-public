@@ -48,7 +48,7 @@ actor ServerRouter {
     private var slowResponses = 0
     func observed(_ endpoint: Endpoint, seconds: TimeInterval, statusCode: Int) {
         guard status.address == endpoint.url.absoluteString else { return }
-        if statusCode >= 500 { status.degraded = true; return }
+        if statusCode >= 500 { status.connected = true; status.degraded = true; return }
         slowResponses = seconds > 2 ? slowResponses + 1 : max(0, slowResponses - 1)
         status.connected = true
         status.degraded = slowResponses >= 2

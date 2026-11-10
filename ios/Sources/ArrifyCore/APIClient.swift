@@ -117,27 +117,41 @@ public actor APIClient {
             throw APIError.signInRequired
         }
     }
-    private func sendAuthorized(_ path: String, method: String, body: Data?, saved: Credential) async throws -> HTTPResult {
-        let endpoint = try await router.selected()
-        let result: HTTPResult
+    private func measuredSend(_ path: String, method: String, body: Data?, saved: Credential, endpoint: Endpoint) async throws -> HTTPResult {
         let started = Date()
         do {
-            result = try await transport.send(Self.request(endpoint: endpoint, path: path, method: method, body: body, token: saved.tokens.accessToken))
+            let result = try await transport.send(Self.request(endpoint: endpoint, path: path, method: method, body: body, token: saved.tokens.accessToken))
+            await router.observed(endpoint, seconds: Date().timeIntervalSince(started), statusCode: result.status)
+            return result
         } catch {
             guard !RequestCancellation.matches(error), !Task.isCancelled else { throw CancellationError() }
             await router.failed(endpoint)
+            throw error
+        }
+    }
+    private func sendAuthorized(_ path: String, method: String, body: Data?, saved: Credential) async throws -> HTTPResult {
+        let endpoint = try await router.selected()
+        let result: HTTPResult
+        do {
+            result = try await measuredSend(path, method: method, body: body, saved: saved, endpoint: endpoint)
+        } catch {
+            guard !RequestCancellation.matches(error), !Task.isCancelled else { throw CancellationError() }
             // Mutations and rotating refresh tokens must never be replayed after an ambiguous failure.
             guard method == "GET" else { throw error }
             let alternate = try await router.selected()
-            guard alternate.url != endpoint.url else { throw error }
-            return try await transport.send(Self.request(endpoint: alternate, path: path, token: saved.tokens.accessToken))
+            guard alternate.url != endpoint.url else {
+                // Identity probe succeeded, but the actual API request did not.
+                await router.observed(endpoint, seconds: 0, statusCode: 503)
+                throw error
+            }
+            return try await measuredSend(path, method: "GET", body: nil, saved: saved, endpoint: alternate)
         }
-        await router.observed(endpoint, seconds: Date().timeIntervalSince(started), statusCode: result.status)
         if [502, 503, 504].contains(result.status) {
             await router.failed(endpoint)
             if method == "GET", let alternate = try? await router.selected(), alternate.url != endpoint.url {
-                return try await transport.send(Self.request(endpoint: alternate, path: path, token: saved.tokens.accessToken))
+                return try await measuredSend(path, method: "GET", body: nil, saved: saved, endpoint: alternate)
             }
+            await router.observed(endpoint, seconds: 0, statusCode: result.status)
         }
         return result
     }
