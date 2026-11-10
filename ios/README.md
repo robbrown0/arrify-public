@@ -286,3 +286,5 @@ Server configuration (private deployment environment, not client-reported networ
 Live Activities still require enabled iOS Live Activities and valid push provisioning. Settings now retains the ActivityKit error domain/code instead of the former generic start failure. Physical-device APNs delivery, Lock Screen presentation and same-LAN behavior require TestFlight validation; simulator compilation is not hardware verification.
 
 Apple references: [interactive widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities), [Activity authorization errors](https://developer.apple.com/documentation/activitykit/activityauthorizationerror).
+
+Distribution qualification explicitly preserves the requested push capability before cloud signing, then verifies `aps-environment=production` in both the exported IPA and its provisioning profile before uploading that exact IPA. The old unsigned-archive/direct-upload flow did not verify this capability. This addresses a suspected provisioning cause of the generic ActivityKit start failure, but the actual device error still needs confirmation.

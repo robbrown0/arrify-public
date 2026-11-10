@@ -3,9 +3,9 @@ import ActivityKit
 
 /// Runs in the app process, using its Keychain session rather than extension credentials.
 struct RemotePlaybackIntent: LiveActivityIntent {
-    static var title: LocalizedStringResource = "Control Arrify playback"
-    static var openAppWhenRun: Bool = false
-    static var isDiscoverable: Bool = false
+    static let title: LocalizedStringResource = "Control Arrify playback"
+    static let openAppWhenRun: Bool = false
+    static let isDiscoverable: Bool = false
     @Parameter(title: "Activity") var activityID: String
     @Parameter(title: "Command") var command: String
     init() {}

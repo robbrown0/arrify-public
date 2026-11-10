@@ -94,7 +94,7 @@ class LiveActivities:
         if data is None:
             status = self.listening.state(uid)['listening']
             allowed = handler is not None and self.local_controls.allows(uid, status['owner'], status.get('epoch'), handler)
-            return {'available': self.enabled, 'controls_available': bool(self.enabled and allowed), 'read_only': not allowed}
+            return {'available': self.enabled, 'controls_available': bool(self.enabled and allowed), 'read_only': not (self.enabled and allowed)}
         if not isinstance(data, dict) or data.get('action') not in ('register', 'stop', 'control'):
             raise NativeError(400, 'invalid_request', 'Choose a Live Activity action.')
         fields = {'action', 'activity_id'} if data['action'] == 'stop' else {'action', 'activity_id', 'token', 'owner_device_id'}
