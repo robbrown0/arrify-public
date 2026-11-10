@@ -45,6 +45,7 @@ struct RoutePortDetails: Codable, Sendable {
         let playerIsExternalPlaybackActive: Bool
         let playerTimeControlStatus: Int
         let volumeViewWirelessRouteActive: Bool
+        let volumeViewAttachedToWindow: Bool
         let displayedLocalOutput: String
         let displayedOutput: String
         let observingRemoteOwner: Bool
@@ -76,6 +77,7 @@ struct RoutePortDetails: Codable, Sendable {
             selectedOutputDataSource: session.outputDataSource.map(RoutePortDetails.DataSource.init),
             playerAllowsExternalPlayback: player.allowsExternalPlayback, playerIsExternalPlaybackActive: player.isExternalPlaybackActive,
             playerTimeControlStatus: player.timeControlStatus.rawValue, volumeViewWirelessRouteActive: volumeView.isWirelessRouteActive,
+            volumeViewAttachedToWindow: volumeView.window != nil,
             displayedLocalOutput: localName, displayedOutput: displayedName, observingRemoteOwner: remoteOwner)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]; encoder.dateEncodingStrategy = .iso8601
         guard let snapshotData = try? encoder.encode(snapshot), let fingerprint = String(data: snapshotData, encoding: .utf8) else { return }
