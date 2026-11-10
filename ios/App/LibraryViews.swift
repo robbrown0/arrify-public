@@ -7,10 +7,11 @@ struct RemoteCover: View {
     let artwork: ArtworkStore
     var channel = false
     @State private var image: UIImage?
+    @State private var loadedPath: String?
     var body: some View {
         ZStack {
             Color.black
-            if let image {
+            if let image = path.flatMap({ artwork.cachedImage($0) }) ?? (loadedPath == path ? image : nil) {
                 if channel {
                     GeometryReader { geometry in
                         Image(uiImage: image).resizable().scaledToFit()
@@ -27,8 +28,10 @@ struct RemoteCover: View {
             }
         }.aspectRatio(1, contentMode: .fit)
         .task(id: path) {
-            image = nil
-            if let path { let result = await artwork.image(path); if !Task.isCancelled { image = result } }
+            guard let path else { image = nil; loadedPath = nil; return }
+            if let cached = artwork.cachedImage(path) { image = cached; loadedPath = path; return }
+            let result = await artwork.image(path)
+            if !Task.isCancelled { image = result; loadedPath = path }
         }.accessibilityHidden(true)
     }
 }

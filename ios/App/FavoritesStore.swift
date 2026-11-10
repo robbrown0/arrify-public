@@ -15,7 +15,7 @@ import ArrifyCore
             let result = try await api.favorites()
             guard token == generation, version == revision, !Task.isCancelled else { return }
             ids = Set(result.trackIds); error = nil
-        } catch is CancellationError {} catch { if token == generation { self.error = "Saved songs couldn’t be refreshed. Pull to retry." } }
+        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch { if token == generation { self.error = "Saved songs couldn’t be refreshed. Pull to retry." } }
     }
     func toggle(_ id: Int) async {
         guard !pending.contains(id) else { return }
