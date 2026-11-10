@@ -366,3 +366,17 @@ extension NowPlayingArtworkTests {
     func activate() throws { activations += 1 }
     func deactivate() throws {}
 }
+
+extension NowPlayingArtworkTests {
+    @MainActor func testVolumeTrackIsCenteredWithoutChangingNativeValue() {
+        let volume = CenteredVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
+        let track = volume.volumeSliderRect(forBounds: volume.bounds)
+        XCTAssertEqual(track.midY, volume.bounds.midY, accuracy: 0.5)
+    }
+    func testLegacyActivityStateStillDecodesWithoutArtwork() throws {
+        let data = Data(#"{"title":"Song","artist":"Artist","destination":"Office","playing":true,"updatedAt":100}"#.utf8)
+        let state = try JSONDecoder().decode(PlaybackActivityAttributes.ContentState.self, from: data)
+        XCTAssertNil(state.artwork)
+        XCTAssertEqual(state.title, "Song")
+    }
+}

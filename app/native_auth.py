@@ -43,7 +43,8 @@ class NativeSessions:
     def capabilities(self):
         with self.a.lock:
             identity = self.a.db.execute('SELECT value FROM server_identity WHERE id=1').fetchone()[0]
-        return {'server_id': identity, 'api_version': '1', 'native_auth_version': 1,
+        from .server_identity import identity as signing_identity
+        return {'server_id': identity, 'server_public_key': signing_identity(self.a).public_key, 'api_version': '1', 'native_auth_version': 1,
                 'access_token_seconds': ACCESS_SECONDS, 'refresh_token_seconds': REFRESH_SECONDS,
                 'features': ['rotating_refresh', 'session_revocation']}
 

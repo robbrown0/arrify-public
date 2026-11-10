@@ -13,6 +13,7 @@ import threading
 import time
 from .native_auth import NativeError
 from .local_presence import LocalPresence
+from .activity_artwork import ActivityArtwork
 from .native_playback import snapshot
 import secrets
 
@@ -59,8 +60,8 @@ class APNs:
         host = 'api.push.apple.com' if self.config['environment'] == 'production' else 'api.sandbox.push.apple.com'
         # All sensitive arguments go through stdin, never argv or logs.
         options = {'url': 'https://' + host + '/3/device/' + token, 'request': 'POST',
-                   'data': json.dumps(payload, separators=(',', ':'))}
-        lines = [key + ' = ' + json.dumps(value) for key, value in options.items()]
+                   'data': json.dumps(payload, separators=(',', ':'), ensure_ascii=False)}
+        lines = [key + ' = ' + json.dumps(value, ensure_ascii=False) for key, value in options.items()]
         for header in ['authorization: bearer ' + self.jwt, 'apns-topic: com.robnets.arrify.push-type.liveactivity',
                        'apns-push-type: liveactivity', 'apns-priority: 5', 'apns-expiration: ' + str(now + 90),
                        'apns-collapse-id: ' + activity, 'content-type: application/json']:
@@ -75,6 +76,7 @@ class APNs:
 class LiveActivities:
     def __init__(self, accounts, listening, directory, sender=None, start_worker=True):
         self.a, self.listening = accounts, listening
+        self.artwork = ActivityArtwork(getattr(getattr(getattr(listening, "p", None), "lib", None), "music", None))
         with self.a.lock: self.local_presence = LocalPresence(accounts)
         try:self.sender = sender if sender is not None else APNs(directory)
         except (OSError, ValueError, TypeError):
@@ -167,6 +169,11 @@ class LiveActivities:
             content = {'title': str(track.get('title') or 'Playback ended')[:200], 'artist': str(track.get('artist') or '')[:200],
                        'destination': str(status.get('output') or status.get('device_name') or 'Another device')[:100],
                        'playing': bool(status['playing']) and not ended, 'updatedAt': now}
+            content['trackID'] = track.get('id')
+            content['artwork'] = self.artwork.get(track.get('id')) if not ended else None
+            # Leave room for attributes and the APNs envelope under ActivityKit's 4 KB limit.
+            if len(json.dumps(content, ensure_ascii=False).encode()) > 3000:
+                content['artwork'] = None
             fingerprint = json.dumps({k: v for k, v in content.items() if k != 'updatedAt'}, sort_keys=True)
             previous = self.sent.get(key)
             if not ended and previous and previous[0] == fingerprint and now - previous[1] < 60: continue

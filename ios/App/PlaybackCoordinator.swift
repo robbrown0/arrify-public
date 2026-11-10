@@ -1,5 +1,6 @@
 import SwiftUI
 import ArrifyCore
+import Network
 @preconcurrency import AVFoundation
 @preconcurrency import MediaPlayer
 
@@ -14,7 +15,7 @@ import ArrifyCore
     // Retain the receiver-owned volume control across full-screen presentations.
     // A newly created slider must not substitute the phone's local volume.
     @ObservationIgnored lazy var expandedVolumeView: MPVolumeView = {
-        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        let view = CenteredVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
         view.showsRouteButton = false; view.tintColor = .white
         return view
     }()
@@ -67,6 +68,8 @@ import ArrifyCore
     var duration = 0.0
     var busy = false
     var message: String?
+    var serverConnection = ServerConnection()
+    @ObservationIgnored private var networkMonitor: NWPathMonitor?
     var connectionInterrupted = false
     private var connectionFailures = 0
     var profile = "original"
@@ -86,6 +89,8 @@ import ArrifyCore
     private var loadedProfile = "original"
     private var retryPreparation = false
     private var loadedKey: String?
+    private var routeRecoveryTask: Task<Void, Never>?
+    private var routeRecoveryItem: ObjectIdentifier?
     private var desiredKey: String?
     private var seekIntent = -1
     private var heartbeatSequence: HeartbeatSequence
@@ -117,8 +122,14 @@ import ArrifyCore
                 let seconds = self.player.currentItem?.duration.seconds ?? 0
                 self.duration = seconds.isFinite ? seconds : 0
                 self.publishNowPlaying()
-                if self.player.currentItem?.status == .failed { self.message = "Playback stopped. Tap Retry to reconnect." }
+                if self.player.currentItem?.status == .failed { self.recoverServerRoute() }
             }
+        }
+        observe(AVPlayerItem.failedToPlayToEndTimeNotification) { owner, note in
+            if note.itemId == owner.player.currentItem.map(ObjectIdentifier.init) { owner.recoverServerRoute() }
+        }
+        observe(AVPlayerItem.playbackStalledNotification) { owner, note in
+            if note.itemId == owner.player.currentItem.map(ObjectIdentifier.init) { owner.recoverServerRoute() }
         }
         observe(AVPlayerItem.didPlayToEndTimeNotification) { owner, note in
             guard let identity = note.itemId, let ended = owner.queuedTracks[identity],
@@ -163,6 +174,10 @@ import ArrifyCore
         }
         observe(UIApplication.didBecomeActiveNotification) { owner, _ in
             owner.outputSelectionChanged(trigger: "foreground")
+            Task {
+                guard owner.pollTask != nil else { return }
+                await owner.api.networkChanged(); await owner.reconcile()
+            }
         }
         observe(AVAudioSession.routeChangeNotification) { owner, note in
             owner.outputSelectionChanged(trigger: "route-change", reason: note.routeReason, previousOutputs: note.previousOutputs)
@@ -186,6 +201,15 @@ import ArrifyCore
     }
     func start() {
         guard pollTask == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.api.networkChanged()
+                await self.reconcile()
+            }
+        }
+        networkMonitor = monitor; monitor.start(queue: DispatchQueue(label: "arrify.server-network"))
         eventsTask = Task { [weak self, api] in
             var failures = 0
             while !Task.isCancelled {
@@ -206,6 +230,8 @@ import ArrifyCore
         }
     }
     func stop() {
+        routeRecoveryTask?.cancel(); routeRecoveryTask = nil; routeRecoveryItem = nil
+        networkMonitor?.cancel(); networkMonitor = nil; serverConnection = ServerConnection()
         localPeer.stop()
         outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
         sessionGeneration = UUID(); permission = PlaybackPermission(); connectionInterrupted = false; connectionFailures = 0; message = nil
@@ -254,10 +280,12 @@ import ArrifyCore
             }
             if ownsOutput { refreshOutput() }
             connectionFailures = 0; connectionInterrupted = false
+            serverConnection = await api.connection()
         } catch is CancellationError {} catch {
             guard generation == sessionGeneration, !Task.isCancelled else { return }
             connectionFailures += 1
             connectionInterrupted = connectionFailures >= 2
+            serverConnection = await api.connection()
         }
     }
     func play(_ track: Track, in tracks: [Track]) async {
@@ -398,6 +426,37 @@ import ArrifyCore
         synchronizeQueuedItems()
         if loadedKey != nil, state.playing { startReadAhead() }
         publishNowPlaying()
+    }
+    private func recoverServerRoute() {
+        guard routeRecoveryTask == nil, ownsOutput, permission.enabled,
+              let current = player.currentItem, routeRecoveryItem != ObjectIdentifier(current),
+              let url = (current.asset as? AVURLAsset)?.url, !url.isFileURL,
+              let id = state?.currentTrackId else { return }
+        routeRecoveryItem = ObjectIdentifier(current)
+        let key = loadedKey
+        let resumePosition = position
+        routeRecoveryTask = Task { [weak self, api] in
+            guard let self else { return }
+            defer { self.routeRecoveryTask = nil }
+            do {
+                guard let alternate = try await api.alternateMediaURL(url), !Task.isCancelled,
+                      self.ownsOutput, self.loadedKey == key, self.player.currentItem === current else {
+                    if current.status == .failed { self.message = "Playback stopped. Tap Retry to reconnect." }
+                    return
+                }
+                self.aheadTask?.cancel(); self.aheadTask = nil; self.aheadGeneration = UUID(); self.aheadCompletedRevision = nil
+                let replacement = AVPlayerItem(url: alternate)
+                self.player.pause(); self.player.removeAllItems()
+                self.queuedTracks = [ObjectIdentifier(replacement): id]
+                self.player.insert(replacement, after: nil)
+                self.player.seek(to: CMTime(seconds: max(0, resumePosition), preferredTimescale: 600), completionHandler: { _ in })
+                self.serverConnection = await api.connection()
+                self.updateReceiverMetadata(); self.playIfAllowed(); self.startReadAhead()
+                self.message = nil
+            } catch {
+                if !Task.isCancelled, self.player.currentItem === current { self.message = "Playback stopped. Tap Retry to reconnect." }
+            }
+        }
     }
     private func prepare(key: String, id: Int, epoch: Int) async {
         let requestedProfile = profile

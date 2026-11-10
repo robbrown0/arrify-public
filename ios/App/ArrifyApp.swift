@@ -12,6 +12,7 @@ import AVKit
     var signedIn = false
     var restoring = true
     var endpoint = "https://arrify.robnets.com"
+    var homeEndpoint = ""
     var error: String?
     init() {
         #if DEBUG
@@ -36,12 +37,12 @@ import AVKit
     func restore() async {
         defer { restoring = false }
         do {
-            if let saved = try await api.restore() { endpoint = saved; signedIn = true; await playback.remoteActivity.restoreForSession(); playback.start() }
+            if let saved = try await api.restore() { endpoint = saved; homeEndpoint = await api.connectionAddresses()?.homeAddress ?? ""; signedIn = true; await playback.remoteActivity.restoreForSession(); playback.start() }
         } catch { self.error = error.localizedDescription }
     }
     func login(username: String, password: String) async {
         do {
-            try await api.login(endpoint: endpoint, username: username, password: password, deviceName: UIDevice.current.model)
+            try await api.login(endpoint: endpoint, homeEndpoint: homeEndpoint, username: username, password: password, deviceName: UIDevice.current.model)
             signedIn = true; error = nil; await playback.remoteActivity.restoreForSession(); playback.start()
         } catch { self.error = error.localizedDescription }
     }
@@ -83,10 +84,14 @@ struct SignInView: View {
                 }
                 Section { Link("Privacy policy", destination: URL(string: "https://arrify.robnets.com/privacy")!).accessibilityIdentifier("privacyPolicy") }
                 Section("Server") {
-                    TextField("Server address", text: $model.endpoint)
+                    TextField("Public server address", text: $model.endpoint)
                         .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never)
                         .autocorrectionDisabled().accessibilityIdentifier("serverAddress")
-                    Text("Use Arrify Home only when connected to your home network or VPN.").font(.footnote).foregroundStyle(.secondary)
+                    DisclosureGroup("Home address (optional)") {
+                        TextField("https://home.example.com", text: $model.homeEndpoint)
+                            .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Text("Use HTTPS. Arrify verifies and prefers home when reachable, then falls back to public.").font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
                 Section("Account") {
                     TextField("Username", text: $username).textContentType(.username)
@@ -164,7 +169,7 @@ struct SettingsView: View {
                     }
                 }
                 Section { Link("Privacy policy", destination: URL(string: "https://arrify.robnets.com/privacy")!).accessibilityIdentifier("privacyPolicy") }
-                Section("Connection") { Text(model.endpoint).textSelection(.enabled) }
+                Section("Connection") { NavigationLink("Server addresses") { ServerAddressesView(model: model) } }
                 Section("Audio") {
                     Picker("Quality", selection: Binding(get: { model.playback.profile }, set: { model.playback.profile = $0 })) {
                         Text("Original").tag("original"); Text("AAC").tag("aac"); Text("MP3").tag("mp3")
@@ -195,5 +200,44 @@ struct ArtworkView: View {
             if let image { Image(uiImage: image).resizable().scaledToFit() }
             else { Rectangle().fill(.white.opacity(0.05)).overlay { Image(systemName: "music.note").font(.largeTitle).foregroundStyle(.green) } }
         }.accessibilityHidden(true)
+    }
+}
+
+struct ServerAddressesView: View {
+    @Bindable var model: AppModel
+    @State private var publicAddress = ""
+    @State private var homeAddress = ""
+    @State private var saving = false
+    @State private var result: String?
+    var body: some View {
+        Form {
+            Section("Public server") {
+                TextField("https://music.example.com", text: $publicAddress)
+                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+            }
+            Section("Home server · optional") {
+                TextField("https://home.example.com", text: $homeAddress)
+                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                Text("Arrify uses this address only after verifying it is the same server. Both addresses need a valid HTTPS certificate.").font(.footnote)
+            }
+            Section {
+                Label(model.playback.serverConnection.home ? "Home connection" : "Public connection", systemImage: model.playback.serverConnection.home ? "house.fill" : "globe")
+                    .foregroundStyle(model.playback.serverConnection.connected ? .green : .secondary)
+                if let notice = model.playback.serverConnection.homeNotice { Text(notice).font(.footnote) }
+                if let result { Text(result).font(.footnote) }
+                Button(saving ? "Verifying…" : "Save addresses") {
+                    saving = true; result = nil
+                    Task {
+                        do {
+                            try await model.api.updateAddresses(publicAddress: publicAddress, homeAddress: homeAddress)
+                            model.endpoint = publicAddress; model.homeEndpoint = homeAddress
+                            await model.playback.reconcile(); result = "Addresses saved."
+                        } catch { result = error.localizedDescription }
+                        saving = false
+                    }
+                }.disabled(saving)
+            }
+        }.navigationTitle("Server addresses")
+            .onAppear { publicAddress = model.endpoint; homeAddress = model.homeEndpoint }
     }
 }

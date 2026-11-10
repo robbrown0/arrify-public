@@ -23,9 +23,14 @@ import Foundation
                 epoch: activity.attributes.ownerEpoch, command: command, nonce: nonce, proof: proof)
             guard let id = state.currentTrackId else { await activity.end(nil, dismissalPolicy: .immediate); return }
             let track = try await client.track(id)
-            await activity.update(ActivityContent(state: .init(title: track.title, artist: track.artist,
-                destination: state.output ?? activity.content.state.destination, playing: state.playing,
-                updatedAt: Date().timeIntervalSince1970), staleDate: Date().addingTimeInterval(90)))
+            await activity.update(ActivityContent(state: .init(title: String(track.title.prefix(100)), artist: String(track.artist.prefix(100)),
+                destination: String((state.output ?? activity.content.state.destination).prefix(80)), playing: state.playing,
+                updatedAt: Date().timeIntervalSince1970, artwork: activity.content.state.trackID == id ? activity.content.state.artwork : nil, trackID: id), staleDate: Date().addingTimeInterval(90)))
+            let thumbnail = await ActivityThumbnail.load(api: client, trackID: id)
+            if let thumbnail, activity.content.state.trackID == id, !Task.isCancelled {
+                var content = activity.content.state; content.artwork = thumbnail
+                await activity.update(ActivityContent(state: content, staleDate: activity.content.staleDate))
+            }
         } catch {
             // Keep the last confirmed state and mark it stale; never claim an unconfirmed action succeeded.
             await activity.update(ActivityContent(state: activity.content.state, staleDate: Date()))

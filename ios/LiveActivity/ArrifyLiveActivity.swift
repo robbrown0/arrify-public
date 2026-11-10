@@ -1,12 +1,13 @@
 import ActivityKit
 import SwiftUI
 import WidgetKit
+import UIKit
 
 @main struct ArrifyLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PlaybackActivityAttributes.self) { context in
             HStack(spacing: 14) {
-                Image(systemName: "music.note").font(.title).foregroundStyle(.green)
+                ActivityCover(encoded: context.state.artwork).frame(width: 44, height: 44)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Playing on \(context.state.destination)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Text(context.state.title).font(.headline).lineLimit(1)
@@ -37,6 +38,17 @@ import WidgetKit
             compactTrailing: { Image(systemName: context.state.playing ? "waveform" : "pause.fill") }
             minimal: { Image(systemName: "music.note") }
                 .widgetURL(URL(string: "arrify://player"))
+        }
+    }
+}
+
+private struct ActivityCover: View {
+    let encoded: String?
+    var body: some View {
+        if let encoded, encoded.utf8.count <= 2000, let bytes = Data(base64Encoded: encoded), let image = UIImage(data: bytes) {
+            Image(uiImage: image).resizable().scaledToFill().clipShape(RoundedRectangle(cornerRadius: 6))
+        } else {
+            Image(systemName: "music.note").font(.title).foregroundStyle(.green)
         }
     }
 }

@@ -8,6 +8,8 @@ struct PlaybackActivityAttributes: ActivityAttributes, Sendable {
         let destination: String
         let playing: Bool
         let updatedAt: Double
+        var artwork: String? = nil
+        var trackID: Int? = nil
     }
     let owner: String
     let ownerEpoch: Int

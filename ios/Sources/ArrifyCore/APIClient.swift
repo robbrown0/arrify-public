@@ -3,17 +3,19 @@ import Foundation
 import FoundationNetworking
 #endif
 
+private struct RouteUnavailable: Error { let cause: any Error }
 private struct ErrorBody: Decodable { let code: String; let message: String }
 private struct ErrorEnvelope: Decodable { let error: ErrorBody }
 
 public actor APIClient {
     private let transport: any HTTPTransport
     private let store: any CredentialStore
+    private let router: ServerRouter
     private var credential: Credential?
     private var refreshTask: Task<Credential, Error>?
     private var generation = UUID()
     public init(transport: any HTTPTransport = SessionTransport(), store: any CredentialStore) {
-        self.transport = transport; self.store = store
+        self.transport = transport; self.store = store; router = ServerRouter(transport: transport)
     }
     private static func encoder() -> JSONEncoder { let e = JSONEncoder(); e.keyEncodingStrategy = .convertToSnakeCase; return e }
     private static func decoder() -> JSONDecoder { let d = JSONDecoder(); d.keyDecodingStrategy = .convertFromSnakeCase; return d }
@@ -41,24 +43,35 @@ public actor APIClient {
     }
     public func restore() async throws -> String? {
         let epoch = generation
-        guard let saved = try await store.load() else { return nil }
+        guard var saved = try await store.load() else { return nil }
         let endpoint = try Endpoint(saved.endpoint)
-        let caps = try await capabilities(endpoint)
-        guard caps.serverId == saved.serverId else { throw APIError.serverChanged }
+        if saved.serverPublicKey == nil {
+            let caps = try await capabilities(endpoint)
+            guard caps.serverId == saved.serverId else { throw APIError.serverChanged }
+            saved.serverPublicKey = caps.serverPublicKey
+            try await store.save(saved)
+        }
+        guard epoch == generation else { throw CancellationError() }
+        try await configure(saved)
+        _ = try await router.selected()
         guard epoch == generation else { throw CancellationError() }
         credential = saved
         _ = try await access()
         return saved.endpoint
     }
-    public func login(endpoint text: String, username: String, password: String, deviceName: String) async throws {
+    public func login(endpoint text: String, homeEndpoint homeText: String? = nil, username: String, password: String, deviceName: String) async throws {
         generation = UUID(); let epoch = generation
         refreshTask?.cancel(); refreshTask = nil; credential = nil
         let endpoint = try Endpoint(text); let caps = try await capabilities(endpoint)
+        let home = try Self.homeAddress(homeText, publicEndpoint: endpoint)
+        await router.configure(primary: endpoint, home: home, id: caps.serverId, key: caps.serverPublicKey)
+        let selected = try await router.selected()
+        guard generation == epoch else { throw CancellationError() }
         struct Login: Encodable { let username: String; let password: String; let deviceName: String }
         let body = try Self.encoder().encode(Login(username: username, password: password, deviceName: deviceName))
-        let response = try await transport.send(Self.request(endpoint: endpoint, path: "/api/v1/native/sessions", method: "POST", body: body))
+        let response = try await transport.send(Self.request(endpoint: selected, path: "/api/v1/native/sessions", method: "POST", body: body))
         let pair = try Self.decode(response, as: TokenPair.self)
-        let value = Credential(endpoint: endpoint.url.absoluteString, serverId: caps.serverId, tokens: pair)
+        let value = Credential(endpoint: endpoint.url.absoluteString, serverId: caps.serverId, tokens: pair, homeEndpoint: home?.url.absoluteString, serverPublicKey: caps.serverPublicKey)
         guard generation == epoch else { throw CancellationError() }
         try await store.save(value)
         guard generation == epoch else { throw CancellationError() }
@@ -70,11 +83,14 @@ public actor APIClient {
         if !force && saved.accessExpires.timeIntervalSinceNow > 60 { return saved }
         let epoch = generation
         let task = Task<Credential, Error> {
+            let endpoint: Endpoint
+            do { endpoint = try await router.selected() }
+            catch { throw RouteUnavailable(cause: error) }
             struct Refresh: Encodable { let refreshToken: String }
             let body = try Self.encoder().encode(Refresh(refreshToken: saved.tokens.refreshToken))
-            let response = try await transport.send(Self.request(endpoint: Endpoint(saved.endpoint), path: "/api/v1/native/refresh", method: "POST", body: body))
+            let response = try await transport.send(Self.request(endpoint: endpoint, path: "/api/v1/native/refresh", method: "POST", body: body))
             let pair = try Self.decode(response, as: TokenPair.self)
-            let renewed = Credential(endpoint: saved.endpoint, serverId: saved.serverId, tokens: pair)
+            let renewed = Credential(endpoint: saved.endpoint, serverId: saved.serverId, tokens: pair, homeEndpoint: saved.homeEndpoint, serverPublicKey: saved.serverPublicKey)
             guard generation == epoch else { throw CancellationError() }
             try await store.save(renewed)
             guard generation == epoch else { throw CancellationError() }
@@ -87,6 +103,10 @@ public actor APIClient {
             if generation == epoch { refreshTask = nil }
             return value
         } catch {
+            if let unavailable = error as? RouteUnavailable {
+                if generation == epoch { refreshTask = nil }
+                throw unavailable.cause
+            }
             if generation == epoch {
                 credential = nil; refreshTask = nil
                 try? await store.clear()
@@ -95,15 +115,69 @@ public actor APIClient {
             throw APIError.signInRequired
         }
     }
+    private func sendAuthorized(_ path: String, method: String, body: Data?, saved: Credential) async throws -> HTTPResult {
+        let endpoint = try await router.selected()
+        let result: HTTPResult
+        do {
+            result = try await transport.send(Self.request(endpoint: endpoint, path: path, method: method, body: body, token: saved.tokens.accessToken))
+        } catch {
+            guard !(error is CancellationError), !Task.isCancelled else { throw error }
+            await router.failed(endpoint)
+            // Mutations and rotating refresh tokens must never be replayed after an ambiguous failure.
+            guard method == "GET" else { throw error }
+            let alternate = try await router.selected()
+            guard alternate.url != endpoint.url else { throw error }
+            return try await transport.send(Self.request(endpoint: alternate, path: path, token: saved.tokens.accessToken))
+        }
+        if [502, 503, 504].contains(result.status) {
+            await router.failed(endpoint)
+            if method == "GET", let alternate = try? await router.selected(), alternate.url != endpoint.url {
+                return try await transport.send(Self.request(endpoint: alternate, path: path, token: saved.tokens.accessToken))
+            }
+        }
+        return result
+    }
     private func authorizedResponse(_ path: String, method: String = "GET", body: Data? = nil) async throws -> HTTPResult {
         var saved = try await access()
-        var response = try await transport.send(Self.request(endpoint: Endpoint(saved.endpoint), path: path, method: method, body: body, token: saved.tokens.accessToken))
+        var response = try await sendAuthorized(path, method: method, body: body, saved: saved)
         if response.status == 401 {
-            // A concurrent request may already have rotated this access token.
             saved = try await access(force: credential?.tokens.accessToken == saved.tokens.accessToken)
-            response = try await transport.send(Self.request(endpoint: Endpoint(saved.endpoint), path: path, method: method, body: body, token: saved.tokens.accessToken))
+            response = try await sendAuthorized(path, method: method, body: body, saved: saved)
         }
         return response
+    }
+    private static func homeAddress(_ value: String?, publicEndpoint: Endpoint) throws -> Endpoint? {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let home = try Endpoint(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        return home.url == publicEndpoint.url ? nil : home
+    }
+    private func configure(_ saved: Credential) async throws {
+        let primary = try Endpoint(saved.endpoint)
+        let home = try Self.homeAddress(saved.homeEndpoint, publicEndpoint: primary)
+        await router.configure(primary: primary, home: home, id: saved.serverId, key: saved.serverPublicKey)
+    }
+    public func connection() async -> ServerConnection { await router.snapshot() }
+    public func connectionAddresses() -> (publicAddress: String, homeAddress: String?)? {
+        credential.map { ($0.endpoint, $0.homeEndpoint) }
+    }
+    public func networkChanged() async { await router.invalidate() }
+    public func updateAddresses(publicAddress: String, homeAddress: String?) async throws {
+        if let task = refreshTask { _ = try await task.value }
+        guard var saved = credential else { throw APIError.signInRequired }
+        let epoch = generation
+        let primary = try Endpoint(publicAddress)
+        let home = try Self.homeAddress(homeAddress, publicEndpoint: primary)
+        try await ServerRouter.verify(primary, id: saved.serverId, key: saved.serverPublicKey, transport: transport)
+        let caps = try await capabilities(primary)
+        guard caps.serverId == saved.serverId, saved.serverPublicKey == nil || saved.serverPublicKey == caps.serverPublicKey else { throw APIError.serverChanged }
+        guard generation == epoch, credential?.tokens.accessToken == saved.tokens.accessToken else { throw CancellationError() }
+        saved.endpoint = primary.url.absoluteString; saved.homeEndpoint = home?.url.absoluteString
+        saved.serverPublicKey = caps.serverPublicKey
+        try await store.save(saved)
+        guard generation == epoch else { throw CancellationError() }
+        credential = saved
+        try await configure(saved)
+        _ = try await router.selected()
     }
     private func call<T: Decodable & Sendable>(_ path: String, method: String = "GET", body: Data? = nil) async throws -> T {
         try Self.decode(await authorizedResponse(path, method: method, body: body), as: T.self)
@@ -206,7 +280,7 @@ public actor APIClient {
     public func listeningEvents(changed: @escaping @Sendable () async -> Void) async throws {
         var saved = try await access()
         for attempt in 0..<2 {
-            var request = try Self.request(endpoint: Endpoint(saved.endpoint), path: "/api/v1/listening/events", token: saved.tokens.accessToken)
+            var request = try Self.request(endpoint: try await router.selected(), path: "/api/v1/listening/events", token: saved.tokens.accessToken)
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             do { try await transport.listeningEvents(request, changed: changed); return }
             catch APIError.rejected(let status, _, _) where status == 401 || status == 403 {
@@ -228,18 +302,34 @@ public actor APIClient {
         let result: Result = try await call("/api/v1/tracks/\(id)")
         return result.track
     }
-    public func mediaURL(_ item: MediaItem) throws -> URL {
-        guard let saved = credential, let path = item.url else { throw APIError.signInRequired }
-        return try Endpoint(saved.endpoint).mediaURL(path)
+    public func mediaURL(_ item: MediaItem) async throws -> URL {
+        guard credential != nil, let path = item.url else { throw APIError.signInRequired }
+        return try await router.selected().mediaURL(path)
+    }
+    public func alternateMediaURL(_ url: URL) async throws -> URL? {
+        guard let saved = credential, url.scheme == "https", let host = url.host else { return nil }
+        var origin = URLComponents(); origin.scheme = "https"; origin.host = host; origin.port = url.port
+        let failed = try Endpoint(origin.string!)
+        let primary = try Endpoint(saved.endpoint)
+        let home = try Self.homeAddress(saved.homeEndpoint, publicEndpoint: primary)
+        guard failed.url == primary.url || failed.url == home?.url else { return nil }
+        await router.failed(failed)
+        let selected = try await router.selected()
+        guard selected.url != failed.url else { return nil }
+        var path = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        path.scheme = nil; path.host = nil; path.port = nil
+        return try selected.mediaURL(path.string!)
     }
     public func logout() async {
+        let address = await router.snapshot().address
         let saved = credential
         generation = UUID(); refreshTask?.cancel(); refreshTask = nil; credential = nil
         try? await store.clear()
+        await router.reset()
         if let saved {
             struct Revoke: Encodable { let sessionId: String }
             if let body = try? Self.encoder().encode(Revoke(sessionId: saved.tokens.sessionId)),
-               let request = try? Self.request(endpoint: Endpoint(saved.endpoint), path: "/api/v1/native/sessions/revoke", method: "POST", body: body, token: saved.tokens.accessToken) {
+               let request = try? Self.request(endpoint: Endpoint(address ?? saved.endpoint), path: "/api/v1/native/sessions/revoke", method: "POST", body: body, token: saved.tokens.accessToken) {
                 _ = try? await transport.send(request)
             }
         }

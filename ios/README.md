@@ -291,3 +291,21 @@ Live Activities still require enabled iOS Live Activities and valid push provisi
 Apple references: [interactive widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities), [Activity authorization errors](https://developer.apple.com/documentation/activitykit/activityauthorizationerror).
 
 Distribution qualification explicitly preserves the requested push capability before cloud signing, then verifies `aps-environment=production` in both the exported IPA and its provisioning profile before uploading that exact IPA. The old unsigned-archive/direct-upload flow did not verify this capability. This addresses a suspected provisioning cause of the generic ActivityKit start failure, but the actual device error still needs confirmation.
+
+### Home and public server addresses
+
+Sign-in and Settings → Connection → Server addresses accept a public HTTPS address and an optional home HTTPS address. The public origin enrolls the server's stable P-256 public key; existing credentials enroll from their already-trusted origin without extending token expiry. Before credentials or media grants go to an alternate origin, it must answer a fresh nonce with a valid signature from that pinned key and the same server ID. TLS certificates remain mandatory and redirects are rejected. Legacy servers without proof support remain public-only.
+
+Verified home is preferred, with public fallback and a short probe cache/backoff. Network and foreground changes invalidate the probe cache. GET requests can retry once on a different verified origin; mutations and rotating refresh requests are never replayed after ambiguous transport failure. A failed/stalled remote media item can recover through the alternate verified origin at its saved position without advancing the queue. Healthy media is not restarted solely because a home route becomes available.
+
+Small house/globe badges describe this device's **server connection**, not its AirPlay speaker or the location of a different player. Green indicates a verified connection; unavailable connections are gray. The addresses and key pin stay in Keychain credentials. Changing addresses verifies the public address belongs to the existing server. The signing private key lives in the server data volume's `secrets/server-identity.pem` (0600); retain it with private server backups. Demo and production maintain independent identities.
+
+Real-device checks still required: home Wi-Fi → cellular and back during playback, VPN/local DNS, grouped AirPlay while changing networks, unreachable/mismatched home endpoint, and relaunch while public Internet is unavailable. No physical network-handoff test is claimed by CI.
+
+### Remote Lock Screen artwork and volume alignment
+
+Remote Live Activity state now includes a bounded inline JPEG thumbnail, rendered in the card instead of a permanent music-note icon. The app prepares the initial cover; server push updates carry the current cover when the app is suspended. No widget network request or public artwork URL is needed. Encoded covers stay below 2 KB and the server drops artwork if metadata would exceed its reserved payload budget. Missing artwork leaves a placeholder and never blocks transport controls. This is a cover inside the remote-control Live Activity, not Apple's full-screen local Now Playing presentation.
+
+The volume view overrides the public `volumeSliderRect(forBounds:)` layout hook to center its track within the 44-point control frame. MediaPlayer still owns volume values and receiver synchronization. Physical AirPlay volume behavior and Lock Screen APNs artwork must be validated in TestFlight.
+
+References: [Live Activity presentation and data limits](https://developer.apple.com/documentation/activitykit/displaying-live-data-with-live-activities), [native volume slider layout](https://developer.apple.com/documentation/mediaplayer/mpvolumeview/volumesliderrect(forbounds:)).

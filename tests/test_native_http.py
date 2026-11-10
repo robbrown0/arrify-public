@@ -87,3 +87,13 @@ class NativeHTTPTests(unittest.TestCase):
         self.assertEqual(self.call(base + 'sessions', token=token)[0], 401)
         self.assertEqual(self.call(base + 'refresh', {'refresh_token':renewed['refresh_token']})[0], 401)
         self.assertEqual(self.call(base + 'sessions', raw='{bad')[0], 400)
+
+    def test_server_proof_needs_no_account_and_validates_nonce(self):
+        _, caps = self.call('/api/v1/native/capabilities')
+        self.assertTrue(caps['server_public_key'])
+        status, proof = self.call('/api/v1/native/server-proof', {'nonce':'a'*64})
+        self.assertEqual(status, 200)
+        self.assertEqual(proof['server_id'], caps['server_id'])
+        self.assertEqual(proof['nonce'], 'a'*64)
+        for body in ({'nonce':'invalid'}, {'nonce':'a'*64,'server_id':'spoof'}, {}):
+            self.assertEqual(self.call('/api/v1/native/server-proof', body)[0], 400)
