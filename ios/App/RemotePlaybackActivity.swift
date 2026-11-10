@@ -12,8 +12,17 @@ import ArrifyCore
         didSet {
             UserDefaults.standard.set(automatic, forKey: "remoteLockScreenAutomatic")
             if !automatic { Task { await stop() } }
+            dismissedOwner = nil
+            error = nil
             lastAttempt = .distantPast
         }
+    }
+    var status: String {
+        if !automatic { return "Off" }
+        if starting { return "Connecting Lock Screen controls…" }
+        if active { return "Lock Screen controls are active." }
+        if dismissedOwner != nil { return "Dismissed for this playback session. Switch this option off and on to show controls again." }
+        return "Waiting for playback from another device while Arrify is open."
     }
     private var dismissedOwner: String?
     private var lastAttempt = Date.distantPast
@@ -50,7 +59,11 @@ import ArrifyCore
             requestThumbnail(track.id)
         } catch {
             let detail = error as NSError
-            self.error = "Lock Screen unavailable (\(detail.domain), \(detail.code)). Open Arrify in the foreground to retry."
+            if let apiError = error as? APIError {
+                self.error = apiError.localizedDescription
+            } else {
+                self.error = "Lock Screen unavailable (\(detail.domain), \(detail.code)). Open Arrify in the foreground to retry."
+            }
         }
     }
     private func observePushToken(_ observedActivity: Activity<PlaybackActivityAttributes>) {
@@ -119,7 +132,7 @@ import ArrifyCore
     func restoreForSession() async {
         let scope = try? await api.sessionScope()
         for old in Activity<PlaybackActivityAttributes>.activities {
-            if automatic, old.attributes.sessionScope == scope, activity == nil {
+            if automatic, old.activityState != .ended, old.activityState != .dismissed, old.attributes.sessionScope == scope, activity == nil {
                 activity = old; active = true; observePushToken(old)
             } else {
                 await old.end(nil, dismissalPolicy: .immediate)

@@ -195,3 +195,24 @@ extension LaunchTests {
         XCTAssertTrue(app.buttons["Done"].exists)
     }
 }
+
+
+extension LaunchTests {
+    @MainActor func testRemotePlaybackOffersTakeoverFromBrowsing() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        let takeover = app.buttons["Play here"]
+        XCTAssertTrue(takeover.waitForExistence(timeout: 10))
+        XCTAssertTrue(takeover.isHittable)
+        takeover.tap()
+        let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: takeover)
+        XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 10), .completed)
+        XCTAssertTrue(app.buttons["Pause"].firstMatch.exists)
+    }
+}
