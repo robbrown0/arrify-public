@@ -341,6 +341,50 @@
           }
         }
       }
+    },
+    "/api/v1/native/server-proof": {
+      "post": {
+        "operationId": "verifyNativeServer",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "nonce"
+                ],
+                "properties": {
+                  "nonce": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fresh signed server identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerProof"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -421,6 +465,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "server_public_key": {
+            "type": "string",
+            "description": "Base64 DER P-256 public key, persisted per server. Pin from the trusted public HTTPS origin before verifying an alternate address."
           }
         }
       },
@@ -543,6 +591,27 @@
             "items": {
               "$ref": "#/components/schemas/Session"
             }
+          }
+        }
+      },
+      "ServerProof": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "nonce",
+          "signature"
+        ],
+        "properties": {
+          "server_id": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "signature": {
+            "type": "string",
+            "description": "Base64 DER ECDSA SHA-256 signature over UTF-8 arrify-server-proof-v1, server_id and nonce separated by newline characters, without a trailing newline."
           }
         }
       }

@@ -24,8 +24,8 @@ import Foundation
             guard let id = state.currentTrackId else { await activity.end(nil, dismissalPolicy: .immediate); return }
             let track = try await client.track(id)
             let thumbnail = await ActivityThumbnail.load(api: client, trackID: id)
-            await activity.update(ActivityContent(state: .init(title: track.title, artist: track.artist,
-                destination: state.output ?? activity.content.state.destination, playing: state.playing,
+            await activity.update(ActivityContent(state: .init(title: String(track.title.prefix(100)), artist: String(track.artist.prefix(100)),
+                destination: String((state.output ?? activity.content.state.destination).prefix(80)), playing: state.playing,
                 updatedAt: Date().timeIntervalSince1970, artwork: thumbnail), staleDate: Date().addingTimeInterval(90)))
         } catch {
             // Keep the last confirmed state and mark it stale; never claim an unconfirmed action succeeded.

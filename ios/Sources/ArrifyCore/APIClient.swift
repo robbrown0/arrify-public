@@ -3,6 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
+private struct RouteUnavailable: Error { let cause: any Error }
 private struct ErrorBody: Decodable { let code: String; let message: String }
 private struct ErrorEnvelope: Decodable { let error: ErrorBody }
 
@@ -82,9 +83,12 @@ public actor APIClient {
         if !force && saved.accessExpires.timeIntervalSinceNow > 60 { return saved }
         let epoch = generation
         let task = Task<Credential, Error> {
+            let endpoint: Endpoint
+            do { endpoint = try await router.selected() }
+            catch { throw RouteUnavailable(cause: error) }
             struct Refresh: Encodable { let refreshToken: String }
             let body = try Self.encoder().encode(Refresh(refreshToken: saved.tokens.refreshToken))
-            let response = try await transport.send(Self.request(endpoint: try await router.selected(), path: "/api/v1/native/refresh", method: "POST", body: body))
+            let response = try await transport.send(Self.request(endpoint: endpoint, path: "/api/v1/native/refresh", method: "POST", body: body))
             let pair = try Self.decode(response, as: TokenPair.self)
             let renewed = Credential(endpoint: saved.endpoint, serverId: saved.serverId, tokens: pair, homeEndpoint: saved.homeEndpoint, serverPublicKey: saved.serverPublicKey)
             guard generation == epoch else { throw CancellationError() }
@@ -99,6 +103,10 @@ public actor APIClient {
             if generation == epoch { refreshTask = nil }
             return value
         } catch {
+            if let unavailable = error as? RouteUnavailable {
+                if generation == epoch { refreshTask = nil }
+                throw unavailable.cause
+            }
             if generation == epoch {
                 credential = nil; refreshTask = nil
                 try? await store.clear()
@@ -291,6 +299,20 @@ public actor APIClient {
     public func mediaURL(_ item: MediaItem) async throws -> URL {
         guard credential != nil, let path = item.url else { throw APIError.signInRequired }
         return try await router.selected().mediaURL(path)
+    }
+    public func alternateMediaURL(_ url: URL) async throws -> URL? {
+        guard let saved = credential, url.scheme == "https", let host = url.host else { return nil }
+        var origin = URLComponents(); origin.scheme = "https"; origin.host = host; origin.port = url.port
+        let failed = try Endpoint(origin.string!)
+        let primary = try Endpoint(saved.endpoint)
+        let home = try Self.homeAddress(saved.homeEndpoint, publicEndpoint: primary)
+        guard failed.url == primary.url || failed.url == home?.url else { return nil }
+        await router.failed(failed)
+        let selected = try await router.selected()
+        guard selected.url != failed.url else { return nil }
+        var path = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        path.scheme = nil; path.host = nil; path.port = nil
+        return try selected.mediaURL(path.string!)
     }
     public func logout() async {
         let saved = credential

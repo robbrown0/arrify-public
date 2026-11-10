@@ -40,7 +40,7 @@ actor ServerRouter {
         primary = nil; home = nil; status = ServerConnection(); lastCheck = .distantPast
     }
     func snapshot() -> ServerConnection { status }
-    func invalidate() { lastCheck = .distantPast; homeRetry = .distantPast }
+    func invalidate() { generation = UUID(); selection?.cancel(); selection = nil; lastCheck = .distantPast; homeRetry = .distantPast }
     func failed(_ endpoint: Endpoint) {
         if endpoint.url == home?.url { homeRetry = Date().addingTimeInterval(30) }
         if status.address == endpoint.url.absoluteString { status.connected = false; lastCheck = .distantPast }

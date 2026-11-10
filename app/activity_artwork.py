@@ -2,6 +2,8 @@
 import base64
 from collections import OrderedDict
 import subprocess
+from .errors import CatalogError
+from .artwork_local import ArtworkError
 
 
 class ActivityArtwork:
@@ -32,6 +34,6 @@ class ActivityArtwork:
             while len(self.cache) > 64:
                 self.cache.popitem(last=False)
             return result
-        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        except (OSError, ValueError, KeyError, CatalogError, ArtworkError, subprocess.SubprocessError):
             # Missing artwork must not prevent transport controls or status updates.
             return None

@@ -89,6 +89,8 @@ import Network
     private var loadedProfile = "original"
     private var retryPreparation = false
     private var loadedKey: String?
+    private var routeRecoveryTask: Task<Void, Never>?
+    private var routeRecoveryItem: ObjectIdentifier?
     private var desiredKey: String?
     private var seekIntent = -1
     private var heartbeatSequence: HeartbeatSequence
@@ -120,8 +122,14 @@ import Network
                 let seconds = self.player.currentItem?.duration.seconds ?? 0
                 self.duration = seconds.isFinite ? seconds : 0
                 self.publishNowPlaying()
-                if self.player.currentItem?.status == .failed { self.message = "Playback stopped. Tap Retry to reconnect." }
+                if self.player.currentItem?.status == .failed { self.recoverServerRoute() }
             }
+        }
+        observe(AVPlayerItem.failedToPlayToEndTimeNotification) { owner, note in
+            if note.itemId == owner.player.currentItem.map(ObjectIdentifier.init) { owner.recoverServerRoute() }
+        }
+        observe(AVPlayerItem.playbackStalledNotification) { owner, note in
+            if note.itemId == owner.player.currentItem.map(ObjectIdentifier.init) { owner.recoverServerRoute() }
         }
         observe(AVPlayerItem.didPlayToEndTimeNotification) { owner, note in
             guard let identity = note.itemId, let ended = owner.queuedTracks[identity],
@@ -219,6 +227,7 @@ import Network
         }
     }
     func stop() {
+        routeRecoveryTask?.cancel(); routeRecoveryTask = nil; routeRecoveryItem = nil
         networkMonitor?.cancel(); networkMonitor = nil; serverConnection = ServerConnection()
         localPeer.stop()
         outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
@@ -414,6 +423,37 @@ import Network
         synchronizeQueuedItems()
         if loadedKey != nil, state.playing { startReadAhead() }
         publishNowPlaying()
+    }
+    private func recoverServerRoute() {
+        guard routeRecoveryTask == nil, ownsOutput, permission.enabled,
+              let current = player.currentItem, routeRecoveryItem != ObjectIdentifier(current),
+              let url = (current.asset as? AVURLAsset)?.url, !url.isFileURL,
+              let id = state?.currentTrackId else { return }
+        routeRecoveryItem = ObjectIdentifier(current)
+        let key = loadedKey
+        let resumePosition = position
+        routeRecoveryTask = Task { [weak self, api] in
+            guard let self else { return }
+            defer { self.routeRecoveryTask = nil }
+            do {
+                guard let alternate = try await api.alternateMediaURL(url), !Task.isCancelled,
+                      self.ownsOutput, self.loadedKey == key, self.player.currentItem === current else {
+                    if current.status == .failed { self.message = "Playback stopped. Tap Retry to reconnect." }
+                    return
+                }
+                self.aheadTask?.cancel(); self.aheadTask = nil; self.aheadGeneration = UUID(); self.aheadCompletedRevision = nil
+                let replacement = AVPlayerItem(url: alternate)
+                self.player.pause(); self.player.removeAllItems()
+                self.queuedTracks = [ObjectIdentifier(replacement): id]
+                self.player.insert(replacement, after: nil)
+                self.player.seek(to: CMTime(seconds: max(0, resumePosition), preferredTimescale: 600), completionHandler: { _ in })
+                self.serverConnection = await api.connection()
+                self.updateReceiverMetadata(); self.playIfAllowed(); self.startReadAhead()
+                self.message = nil
+            } catch {
+                if !Task.isCancelled, self.player.currentItem === current { self.message = "Playback stopped. Tap Retry to reconnect." }
+            }
+        }
     }
     private func prepare(key: String, id: Int, epoch: Int) async {
         let requestedProfile = profile

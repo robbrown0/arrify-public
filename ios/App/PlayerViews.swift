@@ -400,6 +400,6 @@ struct ServerConnectionBadge: View {
         Image(systemName: connection.home ? "house.fill" : "globe")
             .font(.caption2).foregroundStyle(connection.connected ? Color.green : Color.secondary)
             .accessibilityLabel((connection.home ? "Home server connection" : "Public server connection") + (connection.connected ? "" : ", disconnected"))
-            .help(connection.home ? "Connected to home server" : "Connected to public server")
+            .help(connection.connected ? (connection.home ? "Connected to home server" : "Connected to public server") : "Server connection unavailable")
     }
 }

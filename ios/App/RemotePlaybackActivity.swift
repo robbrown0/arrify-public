@@ -85,7 +85,7 @@ import ArrifyCore
         guard track.id == state.currentTrackId else { return }
         let token = generation
         await loadThumbnail(track.id)
-        guard token == generation, !Task.isCancelled else { return }
+        guard token == generation, thumbnailID == track.id, !Task.isCancelled else { return }
         let next = content(state: state, track: track, destination: destination)
         let old = activity.content.state
         if old.artwork != next.state.artwork || old.title != next.state.title || old.artist != next.state.artist || old.destination != next.state.destination || old.playing != next.state.playing || Date().timeIntervalSince1970 - old.updatedAt >= 60 {
@@ -99,7 +99,7 @@ import ArrifyCore
         if thumbnailID == id { thumbnail = value }
     }
     private func content(state: PlaybackState, track: Track, destination: String) -> ActivityContent<PlaybackActivityAttributes.ContentState> {
-        ActivityContent(state: .init(title: track.title, artist: track.artist, destination: destination, playing: state.playing, updatedAt: Date().timeIntervalSince1970, artwork: thumbnailID == track.id ? thumbnail : nil), staleDate: Date().addingTimeInterval(90))
+        ActivityContent(state: .init(title: String(track.title.prefix(100)), artist: String(track.artist.prefix(100)), destination: String(destination.prefix(80)), playing: state.playing, updatedAt: Date().timeIntervalSince1970, artwork: thumbnailID == track.id ? thumbnail : nil), staleDate: Date().addingTimeInterval(90))
     }
     @discardableResult func stop() async -> UUID {
         let nextGeneration = UUID(); generation = nextGeneration; tokenTask?.cancel(); tokenTask = nil

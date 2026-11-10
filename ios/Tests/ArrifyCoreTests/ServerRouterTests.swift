@@ -38,6 +38,23 @@ final class ServerRouterTests: XCTestCase {
             XCTAssertTrue(hosts.isEmpty)
         }
     }
+    func testHomeTransportFailureRetriesReadButNeverMutation() async throws {
+        for mutation in [false, true] {
+            let transport = ProofTransport()
+            let client = APIClient(transport: transport, store: MemoryStore())
+            try await client.login(endpoint: "https://public.test", homeEndpoint: "https://home.test", username: "test", password: "test", deviceName: "test")
+            await transport.failAuthenticatedHome()
+            if mutation {
+                do { _ = try await client.setFavorite(1, liked: true); XCTFail("Expected ambiguous failure") } catch {}
+                let hosts = await transport.credentialHosts
+                XCTAssertEqual(hosts, ["home.test", "home.test"])
+            } else {
+                _ = try await client.catalog(query: "")
+                let hosts = await transport.credentialHosts
+                XCTAssertEqual(hosts, ["home.test", "home.test", "public.test"])
+            }
+        }
+    }
     func testOldCredentialDecodesWithoutNewFields() throws {
         let saved = Credential(endpoint: "https://public.test", serverId: "test", tokens: TokenPair(accessToken: "a", refreshToken: "r", expiresIn: 900, refreshExpiresIn: 9000, sessionId: "s"))
         var fields = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any])
@@ -54,6 +71,8 @@ actor ProofTransport: HTTPTransport {
     let wrongHome: Bool
     let replayHome: Bool
     private var publicOffline = false
+    private var failHome = false
+    func failAuthenticatedHome() { failHome = true }
     var credentialHosts: [String] = []
     init(wrongHome: Bool = false, replayHome: Bool = false) { self.wrongHome = wrongHome; self.replayHome = replayHome }
     func disablePublic() { publicOffline = true }
@@ -72,6 +91,8 @@ actor ProofTransport: HTTPTransport {
             return try result(["server_id": "test", "nonce": nonce, "signature": signature.derRepresentation.base64EncodedString()])
         }
         credentialHosts.append(host)
+        if failHome, host == "home.test" { throw URLError(.networkConnectionLost) }
+        if request.url!.path.hasSuffix("catalog") { return try result(["revision": "v1", "items": []]) }
         return try result(["access_token": "access", "refresh_token": "refresh", "expires_in": 900, "refresh_expires_in": 9000, "session_id": "session"])
     }
     func listeningEvents(_ request: URLRequest, changed: @escaping @Sendable () async -> Void) async throws {}
