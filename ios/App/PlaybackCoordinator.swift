@@ -174,7 +174,10 @@ import Network
         }
         observe(UIApplication.didBecomeActiveNotification) { owner, _ in
             owner.outputSelectionChanged(trigger: "foreground")
-            Task { await owner.api.networkChanged(); await owner.reconcile() }
+            Task {
+                guard owner.pollTask != nil else { return }
+                await owner.api.networkChanged(); await owner.reconcile()
+            }
         }
         observe(AVAudioSession.routeChangeNotification) { owner, note in
             owner.outputSelectionChanged(trigger: "route-change", reason: note.routeReason, previousOutputs: note.previousOutputs)

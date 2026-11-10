@@ -169,6 +169,7 @@ class LiveActivities:
             content = {'title': str(track.get('title') or 'Playback ended')[:200], 'artist': str(track.get('artist') or '')[:200],
                        'destination': str(status.get('output') or status.get('device_name') or 'Another device')[:100],
                        'playing': bool(status['playing']) and not ended, 'updatedAt': now}
+            content['trackID'] = track.get('id')
             content['artwork'] = self.artwork.get(track.get('id')) if not ended else None
             # Leave room for attributes and the APNs envelope under ActivityKit's 4 KB limit.
             if len(json.dumps(content, ensure_ascii=False).encode()) > 3000:

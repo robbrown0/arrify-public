@@ -20,6 +20,7 @@ import ArrifyCore
     private var starting = false
     private var thumbnailID: Int?
     private var thumbnail: String?
+    private var thumbnailTask: Task<Void, Never>?
     var error: String?
     private var activity: Activity<PlaybackActivityAttributes>?
     private var tokenTask: Task<Void, Never>?
@@ -40,14 +41,13 @@ import ArrifyCore
             guard requestedGeneration == generation, !Task.isCancelled else { return }
             let stoppedGeneration = await stop()
             guard stoppedGeneration == generation, !Task.isCancelled else { return }
-            await loadThumbnail(track.id)
-            guard stoppedGeneration == generation, !Task.isCancelled else { return }
             let content = content(state: state, track: track, destination: destination)
             let scope = try await api.sessionScope()
             guard automatic, UIApplication.shared.applicationState == .active, stoppedGeneration == generation else { return }
             let new = try Activity.request(attributes: PlaybackActivityAttributes(owner: owner, ownerEpoch: state.ownerEpoch, sessionScope: scope), content: content, pushType: .token)
             activity = new; active = true; error = nil
             observePushToken(new)
+            requestThumbnail(track.id)
         } catch {
             let detail = error as NSError
             self.error = "Lock Screen unavailable (\(detail.domain), \(detail.code)). Open Arrify in the foreground to retry."
@@ -83,27 +83,32 @@ import ArrifyCore
         if activity.activityState == .dismissed { dismissedOwner = "\(activity.attributes.owner):\(activity.attributes.ownerEpoch)"; await stop(); return }
         if activity.activityState == .ended { await stop(); return }
         guard track.id == state.currentTrackId else { return }
-        let token = generation
-        await loadThumbnail(track.id)
-        guard token == generation, thumbnailID == track.id, !Task.isCancelled else { return }
+        requestThumbnail(track.id)
         let next = content(state: state, track: track, destination: destination)
         let old = activity.content.state
         if old.artwork != next.state.artwork || old.title != next.state.title || old.artist != next.state.artist || old.destination != next.state.destination || old.playing != next.state.playing || Date().timeIntervalSince1970 - old.updatedAt >= 60 {
             await activity.update(next)
         }
     }
-    private func loadThumbnail(_ id: Int) async {
+    private func requestThumbnail(_ id: Int) {
         guard thumbnailID != id else { return }
-        thumbnailID = id; thumbnail = nil
-        let value = await ActivityThumbnail.load(api: api, trackID: id)
-        if thumbnailID == id { thumbnail = value }
+        thumbnailID = id; thumbnail = nil; thumbnailTask?.cancel()
+        let token = generation
+        thumbnailTask = Task { [weak self, api] in
+            let value = await ActivityThumbnail.load(api: api, trackID: id)
+            guard let self, !Task.isCancelled, self.generation == token, self.thumbnailID == id else { return }
+            self.thumbnail = value
+            guard let activity = self.activity, activity.content.state.trackID == id else { return }
+            var state = activity.content.state; state.artwork = value
+            await activity.update(ActivityContent(state: state, staleDate: activity.content.staleDate))
+        }
     }
     private func content(state: PlaybackState, track: Track, destination: String) -> ActivityContent<PlaybackActivityAttributes.ContentState> {
-        ActivityContent(state: .init(title: String(track.title.prefix(100)), artist: String(track.artist.prefix(100)), destination: String(destination.prefix(80)), playing: state.playing, updatedAt: Date().timeIntervalSince1970, artwork: thumbnailID == track.id ? thumbnail : nil), staleDate: Date().addingTimeInterval(90))
+        ActivityContent(state: .init(title: String(track.title.prefix(100)), artist: String(track.artist.prefix(100)), destination: String(destination.prefix(80)), playing: state.playing, updatedAt: Date().timeIntervalSince1970, artwork: thumbnailID == track.id ? thumbnail : nil, trackID: track.id), staleDate: Date().addingTimeInterval(90))
     }
     @discardableResult func stop() async -> UUID {
         let nextGeneration = UUID(); generation = nextGeneration; tokenTask?.cancel(); tokenTask = nil
-        thumbnailID = nil; thumbnail = nil
+        thumbnailTask?.cancel(); thumbnailTask = nil; thumbnailID = nil; thumbnail = nil
         let previous = activity; activity = nil; active = false
         if let previous {
             await previous.end(nil, dismissalPolicy: .immediate)
