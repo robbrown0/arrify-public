@@ -18,6 +18,8 @@ import ArrifyCore
     private var dismissedOwner: String?
     private var lastAttempt = Date.distantPast
     private var starting = false
+    private var thumbnailID: Int?
+    private var thumbnail: String?
     var error: String?
     private var activity: Activity<PlaybackActivityAttributes>?
     private var tokenTask: Task<Void, Never>?
@@ -37,6 +39,8 @@ import ArrifyCore
             }
             guard requestedGeneration == generation, !Task.isCancelled else { return }
             let stoppedGeneration = await stop()
+            guard stoppedGeneration == generation, !Task.isCancelled else { return }
+            await loadThumbnail(track.id)
             guard stoppedGeneration == generation, !Task.isCancelled else { return }
             let content = content(state: state, track: track, destination: destination)
             let scope = try await api.sessionScope()
@@ -79,17 +83,27 @@ import ArrifyCore
         if activity.activityState == .dismissed { dismissedOwner = "\(activity.attributes.owner):\(activity.attributes.ownerEpoch)"; await stop(); return }
         if activity.activityState == .ended { await stop(); return }
         guard track.id == state.currentTrackId else { return }
+        let token = generation
+        await loadThumbnail(track.id)
+        guard token == generation, !Task.isCancelled else { return }
         let next = content(state: state, track: track, destination: destination)
         let old = activity.content.state
-        if old.title != next.state.title || old.artist != next.state.artist || old.destination != next.state.destination || old.playing != next.state.playing || Date().timeIntervalSince1970 - old.updatedAt >= 60 {
+        if old.artwork != next.state.artwork || old.title != next.state.title || old.artist != next.state.artist || old.destination != next.state.destination || old.playing != next.state.playing || Date().timeIntervalSince1970 - old.updatedAt >= 60 {
             await activity.update(next)
         }
     }
+    private func loadThumbnail(_ id: Int) async {
+        guard thumbnailID != id else { return }
+        thumbnailID = id; thumbnail = nil
+        let value = await ActivityThumbnail.load(api: api, trackID: id)
+        if thumbnailID == id { thumbnail = value }
+    }
     private func content(state: PlaybackState, track: Track, destination: String) -> ActivityContent<PlaybackActivityAttributes.ContentState> {
-        ActivityContent(state: .init(title: track.title, artist: track.artist, destination: destination, playing: state.playing, updatedAt: Date().timeIntervalSince1970), staleDate: Date().addingTimeInterval(90))
+        ActivityContent(state: .init(title: track.title, artist: track.artist, destination: destination, playing: state.playing, updatedAt: Date().timeIntervalSince1970, artwork: thumbnailID == track.id ? thumbnail : nil), staleDate: Date().addingTimeInterval(90))
     }
     @discardableResult func stop() async -> UUID {
         let nextGeneration = UUID(); generation = nextGeneration; tokenTask?.cancel(); tokenTask = nil
+        thumbnailID = nil; thumbnail = nil
         let previous = activity; activity = nil; active = false
         if let previous {
             await previous.end(nil, dismissalPolicy: .immediate)

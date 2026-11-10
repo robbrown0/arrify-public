@@ -23,9 +23,10 @@ import Foundation
                 epoch: activity.attributes.ownerEpoch, command: command, nonce: nonce, proof: proof)
             guard let id = state.currentTrackId else { await activity.end(nil, dismissalPolicy: .immediate); return }
             let track = try await client.track(id)
+            let thumbnail = await ActivityThumbnail.load(api: client, trackID: id)
             await activity.update(ActivityContent(state: .init(title: track.title, artist: track.artist,
                 destination: state.output ?? activity.content.state.destination, playing: state.playing,
-                updatedAt: Date().timeIntervalSince1970), staleDate: Date().addingTimeInterval(90)))
+                updatedAt: Date().timeIntervalSince1970, artwork: thumbnail), staleDate: Date().addingTimeInterval(90)))
         } catch {
             // Keep the last confirmed state and mark it stale; never claim an unconfirmed action succeeded.
             await activity.update(ActivityContent(state: activity.content.state, staleDate: Date()))

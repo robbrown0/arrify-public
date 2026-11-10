@@ -1,5 +1,6 @@
 import SwiftUI
 import ArrifyCore
+import Network
 @preconcurrency import AVFoundation
 @preconcurrency import MediaPlayer
 
@@ -14,7 +15,7 @@ import ArrifyCore
     // Retain the receiver-owned volume control across full-screen presentations.
     // A newly created slider must not substitute the phone's local volume.
     @ObservationIgnored lazy var expandedVolumeView: MPVolumeView = {
-        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        let view = CenteredVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
         view.showsRouteButton = false; view.tintColor = .white
         return view
     }()
@@ -67,6 +68,8 @@ import ArrifyCore
     var duration = 0.0
     var busy = false
     var message: String?
+    var serverConnection = ServerConnection()
+    @ObservationIgnored private var networkMonitor: NWPathMonitor?
     var connectionInterrupted = false
     private var connectionFailures = 0
     var profile = "original"
@@ -163,6 +166,7 @@ import ArrifyCore
         }
         observe(UIApplication.didBecomeActiveNotification) { owner, _ in
             owner.outputSelectionChanged(trigger: "foreground")
+            Task { await owner.api.networkChanged(); await owner.reconcile() }
         }
         observe(AVAudioSession.routeChangeNotification) { owner, note in
             owner.outputSelectionChanged(trigger: "route-change", reason: note.routeReason, previousOutputs: note.previousOutputs)
@@ -186,6 +190,15 @@ import ArrifyCore
     }
     func start() {
         guard pollTask == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.api.networkChanged()
+                await self.reconcile()
+            }
+        }
+        networkMonitor = monitor; monitor.start(queue: DispatchQueue(label: "arrify.server-network"))
         eventsTask = Task { [weak self, api] in
             var failures = 0
             while !Task.isCancelled {
@@ -206,6 +219,7 @@ import ArrifyCore
         }
     }
     func stop() {
+        networkMonitor?.cancel(); networkMonitor = nil; serverConnection = ServerConnection()
         localPeer.stop()
         outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
         sessionGeneration = UUID(); permission = PlaybackPermission(); connectionInterrupted = false; connectionFailures = 0; message = nil
@@ -254,10 +268,12 @@ import ArrifyCore
             }
             if ownsOutput { refreshOutput() }
             connectionFailures = 0; connectionInterrupted = false
+            serverConnection = await api.connection()
         } catch is CancellationError {} catch {
             guard generation == sessionGeneration, !Task.isCancelled else { return }
             connectionFailures += 1
             connectionInterrupted = connectionFailures >= 2
+            serverConnection = await api.connection()
         }
     }
     func play(_ track: Track, in tracks: [Track]) async {

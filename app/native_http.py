@@ -24,6 +24,12 @@ def dispatch(handler, path, data=None):
                 result['media_profiles'] = ['original', 'aac', 'mp3']
                 result['media_leveling_modes'] = ['off']
                 result['native_prefetch_tracks'] = 3
+        elif path == PREFIX + 'server-proof' and data is not None:
+            try:a.rate_limit(('server-proof', handler.client_address[0]), 120, 60)
+            except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
+            if not isinstance(data,dict) or set(data) != {'nonce'}:raise NativeError(400, 'invalid_request', 'Invalid server verification request.')
+            from .server_identity import identity
+            result = identity(a).proof(service.capabilities()['server_id'], data['nonce'])
         elif path in (PREFIX + 'sessions', PREFIX + 'refresh') and data is not None:
             try:
                 a.rate_limit(('native-auth', handler.client_address[0], path), 60 if path.endswith('refresh') else 12, 900)

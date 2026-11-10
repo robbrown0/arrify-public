@@ -16,7 +16,7 @@ struct MiniPlayerView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(track.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                HStack(spacing: 5) { ServerConnectionBadge(connection: playback.serverConnection); Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                             }
                             Spacer(minLength: 0)
                         }.contentShape(Rectangle())
@@ -147,7 +147,7 @@ struct NowPlayingView: View {
             }.buttonStyle(.plain)
             SystemVolumeSlider(retainedView: playback.expandedVolumeView).frame(height: 44).padding(.top, 6)
             HStack {
-                Button { showArtwork = true } label: { Image(systemName: "photo").frame(width: 44, height: 44) }
+                HStack(spacing: 4) { ServerConnectionBadge(connection: playback.serverConnection); Button { showArtwork = true } label: { Image(systemName: "photo").frame(width: 44, height: 44) } }
                     .accessibilityLabel("Show artwork").accessibilityIdentifier("artworkDisplayButton")
                 Spacer()
                 VStack(spacing: 0) {
@@ -304,10 +304,17 @@ struct AirPlayPicker: UIViewRepresentable {
 // Keep the native control's identity stable during route-name and playback updates.
 // MediaPlayer owns receiver-volume synchronization; never seed it from the phone's
 // outputVolume or write a remembered value when this view appears.
+final class CenteredVolumeView: MPVolumeView {
+    override func volumeSliderRect(forBounds bounds: CGRect) -> CGRect {
+        let rect = super.volumeSliderRect(forBounds: bounds)
+        return CGRect(x: rect.minX, y: bounds.midY - rect.height / 2, width: rect.width, height: rect.height)
+    }
+}
+
 struct SystemVolumeSlider: UIViewRepresentable {
     var retainedView: MPVolumeView? = nil
     func makeUIView(context: Context) -> MPVolumeView {
-        let view = retainedView ?? MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44)); view.showsRouteButton = false; view.tintColor = .white
+        let view = retainedView ?? CenteredVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44)); view.showsRouteButton = false; view.tintColor = .white
         return view
     }
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
@@ -329,7 +336,7 @@ struct TabletPlayerBar: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(track.title).font(.headline).lineLimit(1)
                             Text(track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                            Text(playback.contextName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            HStack(spacing: 5) { ServerConnectionBadge(connection: playback.serverConnection); Text(playback.contextName).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
@@ -384,5 +391,15 @@ struct PlaybackProgressRing: View {
                 .rotationEffect(.degrees(-90))
                 .animation(reduceMotion ? nil : .linear(duration: 0.25), value: progress)
         }.allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+struct ServerConnectionBadge: View {
+    let connection: ServerConnection
+    var body: some View {
+        Image(systemName: connection.home ? "house.fill" : "globe")
+            .font(.caption2).foregroundStyle(connection.connected ? Color.green : Color.secondary)
+            .accessibilityLabel((connection.home ? "Home server connection" : "Public server connection") + (connection.connected ? "" : ", disconnected"))
+            .help(connection.home ? "Connected to home server" : "Connected to public server")
     }
 }

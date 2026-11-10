@@ -105,3 +105,18 @@ class LiveActivityTests(unittest.TestCase):
         # A matching public/private IP has no bypass path when a proof is absent.
         data.pop('nonce');data.pop('proof')
         with self.assertRaises(NativeError):self.service.dispatch(self.uid,self.login['access_token'],data,SimpleNamespace(client_address=('192.168.1.20',1),headers={}))
+
+    def test_cover_follows_track_and_stays_bounded_in_push(self):
+        import json
+        self.service.artwork = SimpleNamespace(get=lambda ident: 'a'*1800 if ident == 1 else 'b'*1700)
+        self.state['track']['id'] = 1
+        self.register(); self.service.tick()
+        self.assertEqual(self.calls[-1][1]['aps']['content-state']['artwork'], 'a'*1800)
+        self.state['track']['id'] = 2; self.service.tick()
+        self.assertEqual(self.calls[-1][1]['aps']['content-state']['artwork'], 'b'*1700)
+        self.assertLess(len(json.dumps(self.calls[-1][1]).encode()), 3500)
+        self.state['track']['title'] = '🎵'*200
+        self.state['track']['artist'] = '🎵'*200
+        self.service.tick()
+        self.assertIsNone(self.calls[-1][1]['aps']['content-state']['artwork'])
+        self.assertLess(len(json.dumps(self.calls[-1][1], ensure_ascii=False).encode()), 3500)

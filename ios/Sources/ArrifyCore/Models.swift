@@ -3,6 +3,7 @@ import Foundation
 public struct Capabilities: Codable, Sendable {
     public let serverId: String
     public let features: [String]
+    public var serverPublicKey: String?
 }
 public struct TokenPair: Codable, Sendable {
     public let accessToken: String
@@ -12,12 +13,15 @@ public struct TokenPair: Codable, Sendable {
     public let sessionId: String
 }
 public struct Credential: Codable, Sendable {
-    public let endpoint: String
+    public var endpoint: String
+    public var homeEndpoint: String?
+    public var serverPublicKey: String?
     public let serverId: String
     public let tokens: TokenPair
     public let accessExpires: Date
-    public init(endpoint: String, serverId: String, tokens: TokenPair, now: Date = Date()) {
+    public init(endpoint: String, serverId: String, tokens: TokenPair, now: Date = Date(), homeEndpoint: String? = nil, serverPublicKey: String? = nil) {
         self.endpoint = endpoint; self.serverId = serverId; self.tokens = tokens
+        self.homeEndpoint = homeEndpoint; self.serverPublicKey = serverPublicKey
         accessExpires = now.addingTimeInterval(TimeInterval(tokens.expiresIn))
     }
 }
