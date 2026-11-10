@@ -61,7 +61,7 @@ class APNs:
         # All sensitive arguments go through stdin, never argv or logs.
         options = {'url': 'https://' + host + '/3/device/' + token, 'request': 'POST',
                    'data': json.dumps(payload, separators=(',', ':'), ensure_ascii=False)}
-        lines = [key + ' = ' + json.dumps(value) for key, value in options.items()]
+        lines = [key + ' = ' + json.dumps(value, ensure_ascii=False) for key, value in options.items()]
         for header in ['authorization: bearer ' + self.jwt, 'apns-topic: com.robnets.arrify.push-type.liveactivity',
                        'apns-push-type: liveactivity', 'apns-priority: 5', 'apns-expiration: ' + str(now + 90),
                        'apns-collapse-id: ' + activity, 'content-type: application/json']:

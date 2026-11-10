@@ -120,3 +120,22 @@ class LiveActivityTests(unittest.TestCase):
         self.service.tick()
         self.assertIsNone(self.calls[-1][1]['aps']['content-state']['artwork'])
         self.assertLess(len(json.dumps(self.calls[-1][1], ensure_ascii=False).encode()), 3500)
+
+    def test_push_preserves_unicode_through_curl_config(self):
+        import json
+        from unittest.mock import patch
+        from app.live_activity import APNs
+        sender = APNs.__new__(APNs)
+        sender.config = {'environment':'production'}
+        sender.jwt = 'fixture'; sender.issued = int(time.time())
+        payload = {'aps':{'content-state':{'title':'Beyoncé 🎵', 'artwork':'small-cover'}}}
+        captured = []
+        def capture(args, **kwargs):
+            captured.append(kwargs['input'].decode())
+            return SimpleNamespace(stdout=b'{}\n200')
+        with patch('app.live_activity.subprocess.run', side_effect=capture):
+            self.assertEqual(sender.send('a'*64, payload, 'fixture'), (200,''))
+        data = next(line for line in captured[0].splitlines() if line.startswith('data = '))
+        # curl config does not decode JSON's Unicode escape syntax. Send literal UTF-8.
+        self.assertIn('Beyoncé 🎵', data)
+        self.assertEqual(json.loads(json.loads(data.removeprefix('data = '))), payload)

@@ -87,9 +87,11 @@ struct SignInView: View {
                     TextField("Public server address", text: $model.endpoint)
                         .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never)
                         .autocorrectionDisabled().accessibilityIdentifier("serverAddress")
-                    TextField("Home address (optional)", text: $model.homeEndpoint)
-                        .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("Use HTTPS addresses. Arrify verifies and prefers your home server when reachable, then falls back to public.").font(.footnote).foregroundStyle(.secondary)
+                    DisclosureGroup("Home address (optional)") {
+                        TextField("https://home.example.com", text: $model.homeEndpoint)
+                            .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Text("Use HTTPS. Arrify verifies and prefers home when reachable, then falls back to public.").font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
                 Section("Account") {
                     TextField("Username", text: $username).textContentType(.username)
