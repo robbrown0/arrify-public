@@ -121,7 +121,7 @@ public actor APIClient {
         do {
             result = try await transport.send(Self.request(endpoint: endpoint, path: path, method: method, body: body, token: saved.tokens.accessToken))
         } catch {
-            guard !(error is CancellationError), !Task.isCancelled else { throw error }
+            guard !RequestCancellation.matches(error), !Task.isCancelled else { throw CancellationError() }
             await router.failed(endpoint)
             // Mutations and rotating refresh tokens must never be replayed after an ambiguous failure.
             guard method == "GET" else { throw error }

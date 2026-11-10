@@ -184,3 +184,12 @@ public struct BufferReport: Encodable, Sendable {
     public let sampleAgeSeconds = 0
     public init(items: [BufferEntry], playerSeconds: Int) { self.items = items; self.playerSeconds = playerSeconds }
 }
+
+/// URLSession uses NSURLErrorCancelled, while Swift tasks use CancellationError.
+public enum RequestCancellation {
+    public static func matches(_ error: any Error) -> Bool {
+        if error is CancellationError { return true }
+        let value = error as NSError
+        return value.domain == NSURLErrorDomain && value.code == NSURLErrorCancelled
+    }
+}

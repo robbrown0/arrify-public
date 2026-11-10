@@ -97,6 +97,7 @@ private struct ArtworkRequest: @unchecked Sendable {
 }
 
 private actor RestoredOwnerTransport: HTTPTransport {
+    private(set) var artworkRequests = 0
     private var owner = ""
     private var networkFailure = false
     func setNetworkFailure(_ value: Bool) { networkFailure = value }
@@ -134,6 +135,7 @@ private actor RestoredOwnerTransport: HTTPTransport {
             return HTTPResult(status: 200, data: Data(#"{"track":{"id":1,"title":"Test song","artist":"Test artist","album":"Test album"}}"#.utf8))
         }
         if path.hasSuffix("/artwork/1") {
+            artworkRequests += 1
             // Opaque one-pixel PNG; no network or account data enters the test.
             return HTTPResult(status: 200, data: Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=")!)
         }
@@ -378,5 +380,72 @@ extension NowPlayingArtworkTests {
         let state = try JSONDecoder().decode(PlaybackActivityAttributes.ContentState.self, from: data)
         XCTAssertNil(state.artwork)
         XCTAssertEqual(state.title, "Song")
+    }
+}
+
+
+extension NowPlayingArtworkTests {
+    @MainActor func testArtworkRevisitsAndConcurrentViewsReuseOneRequest() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let artwork = ArtworkStore(api: api)
+        let path = "/api/v1/artwork/1"
+        let first = Task { await artwork.image(path) }
+        let second = Task { await artwork.image(path) }
+        let original = await first.value
+        let concurrent = await second.value
+        XCTAssertNotNil(original)
+        XCTAssertTrue(original === concurrent)
+        XCTAssertTrue(artwork.cachedImage(path) === original, "New views can render synchronously from cache")
+        let revisit = await artwork.image(path)
+        XCTAssertTrue(revisit === original)
+        let count = await transport.artworkRequests
+        XCTAssertEqual(count, 1)
+        artwork.clear()
+        XCTAssertNil(artwork.cachedImage(path), "Sign-out clears private artwork")
+        _ = await artwork.image(path)
+        let afterClear = await transport.artworkRequests
+        XCTAssertEqual(afterClear, 2)
+    }
+    @MainActor func testCancelledNavigationPreservesLibraryWithoutError() async throws {
+        let transport = CancelledNavigationTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let library = LibraryStore(api: api)
+        let browser = LibraryBrowser(api: api)
+        await library.refresh(); await browser.load()
+        XCTAssertNotNil(library.overview); XCTAssertEqual(browser.tracks.count, 2)
+        await transport.fail(with: .cancelled)
+        await library.refresh(); await browser.load()
+        XCTAssertNil(library.error); XCTAssertNil(browser.error)
+        XCTAssertNotNil(library.overview); XCTAssertEqual(browser.tracks.count, 2)
+        XCTAssertFalse(library.loading); XCTAssertFalse(browser.loading)
+        await transport.fail(with: .notConnectedToInternet)
+        await library.refresh(); await browser.load()
+        XCTAssertNotNil(library.error); XCTAssertNotNil(browser.error)
+    }
+    @MainActor func testCancelledPlaybackCommandDoesNotShowCancelledBanner() async throws {
+        let transport = CancelledNavigationTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let coordinator = PlaybackCoordinator(api: api, audioSession: TestAudioSession())
+        await transport.fail(with: .cancelled)
+        await coordinator.send("pause")
+        XCTAssertNil(coordinator.message)
+        await transport.fail(with: .notConnectedToInternet)
+        await coordinator.send("pause")
+        XCTAssertNotNil(coordinator.message)
+        coordinator.stop()
+    }
+}
+
+private actor CancelledNavigationTransport: HTTPTransport {
+    private let fallback = UITestTransport()
+    private var failure: URLError.Code?
+    func fail(with code: URLError.Code) { failure = code }
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        if let failure, ["/api/v1/native/library", "/api/v1/native/catalog"].contains(request.url!.path) || (request.url!.path == "/api/v1/native/playback" && request.httpMethod == "POST") { throw URLError(failure) }
+        return try await fallback.send(request)
     }
 }

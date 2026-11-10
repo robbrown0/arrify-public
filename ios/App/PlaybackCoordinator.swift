@@ -281,7 +281,7 @@ import Network
             if ownsOutput { refreshOutput() }
             connectionFailures = 0; connectionInterrupted = false
             serverConnection = await api.connection()
-        } catch is CancellationError {} catch {
+        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
             guard generation == sessionGeneration, !Task.isCancelled else { return }
             connectionFailures += 1
             connectionInterrupted = connectionFailures >= 2
@@ -347,7 +347,7 @@ import Network
             message = nil; connectionFailures = 0; connectionInterrupted = false
             await apply(update)
         } catch {
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, !Task.isCancelled, !RequestCancellation.matches(error) else { return }
             message = error.localizedDescription
             await reconcile()
         }
@@ -487,7 +487,7 @@ import Network
                 try await Task.sleep(for: .seconds(min(5, max(1, manifest.retryAfterSeconds))))
             }
             throw PlaybackFailure()
-        } catch is CancellationError {} catch {
+        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
             if desiredKey == key { busy = false; message = "This song could not be prepared. Tap Retry or choose another song." }
         }
     }

@@ -17,7 +17,7 @@ import ImageIO
             let result = try await api.library()
             guard generation == token, !Task.isCancelled else { return }
             overview = result; error = nil; updated = Date()
-        } catch is CancellationError {} catch {
+        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
             if generation == token { self.error = error.localizedDescription }
         }
     }
@@ -65,7 +65,7 @@ import ImageIO
                 total = page.total; nextOffset = page.nextOffset; revision = page.revision
             }
             error = nil; updated = Date()
-        } catch is CancellationError {} catch APIError.rejected(_, let code, _) where code == "catalog_changed" && more {
+        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch APIError.rejected(_, let code, _) where code == "catalog_changed" && more {
             guard generation == token else { return }
             await load(query: query)
         } catch { if generation == token { self.error = error.localizedDescription } }
@@ -89,9 +89,14 @@ nonisolated enum ArtworkDecoder {
     private var pending: [String: Task<UIImage?, Never>] = [:]
     private var generation = UUID()
     init(api: APIClient) { self.api = api; cache.totalCostLimit = 24 * 1024 * 1024; cache.countLimit = 160 }
+    func cachedImage(_ path: String) -> UIImage? { cache.object(forKey: path as NSString) }
     func image(_ path: String) async -> UIImage? {
         if let image = cache.object(forKey: path as NSString) { return image }
-        if let task = pending[path] { return await task.value }
+        if let task = pending[path] {
+            let token = generation
+            let image = await task.value
+            return token == generation ? image : nil
+        }
         let token = generation
         let task = Task { [api] in
             guard let data = try? await api.artwork(path: path) else { return nil as UIImage? }
