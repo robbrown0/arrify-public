@@ -186,6 +186,10 @@ struct SettingsView: View {
                     }
                     if let error = model.playback.remoteActivity.error { Text(error).font(.footnote).foregroundStyle(.orange) }
                 }
+                Section("Artwork cache") {
+                    Text("Recently viewed covers are kept on this device, up to 100 MB. They can be reused after signing back into the same account.").font(.footnote)
+                    Button("Clear artwork cache") { Task { await model.artwork.clearPersistentCache() } }
+                }
                 Section("Device cache") { CacheStatusView(cache: model.playback.cache) }
                 Section { Button("Sign out", role: .destructive) { Task { await model.logout() } } }
                 Section { Text("Arrify • 0.3.0").foregroundStyle(.secondary) }
@@ -222,8 +226,7 @@ struct ServerAddressesView: View {
                 Text("Arrify uses this address only after verifying it is the same server. Both addresses need a valid HTTPS certificate.").font(.footnote)
             }
             Section {
-                Label(model.playback.serverConnection.home ? "Home connection" : "Public connection", systemImage: model.playback.serverConnection.home ? "house.fill" : "globe")
-                    .foregroundStyle(model.playback.serverConnection.connected ? .green : .secondary)
+                HStack { ServerConnectionBadge(connection: model.playback.serverConnection); Text(model.playback.serverConnection.detail).font(.footnote) }
                 if let notice = model.playback.serverConnection.homeNotice { Text(notice).font(.footnote) }
                 if let result { Text(result).font(.footnote) }
                 Button(saving ? "Verifying…" : "Save addresses") {

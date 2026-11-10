@@ -13,6 +13,7 @@ public struct TokenPair: Codable, Sendable {
     public let sessionId: String
 }
 public struct Credential: Codable, Sendable {
+    public var artworkAccount: String?
     public var endpoint: String
     public var homeEndpoint: String?
     public var serverPublicKey: String?

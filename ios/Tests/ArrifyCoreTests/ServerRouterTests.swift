@@ -3,6 +3,44 @@ import CryptoKit
 @testable import ArrifyCore
 
 final class ServerRouterTests: XCTestCase {
+    func testConnectionHealthRequiresRepeatedSlowResponsesAndRecovers() async throws {
+        let transport = ProofTransport()
+        let router = ServerRouter(transport: transport)
+        let endpoint = try Endpoint("https://public.test")
+        await router.configure(primary: endpoint, home: nil, id: "test", key: transport.key.publicKey.derRepresentation.base64EncodedString())
+        _ = try await router.selected()
+        await router.observed(endpoint, seconds: 3, statusCode: 200)
+        var status = await router.snapshot()
+        XCTAssertFalse(status.degraded)
+        await router.observed(endpoint, seconds: 3, statusCode: 200)
+        status = await router.snapshot()
+        XCTAssertTrue(status.degraded)
+        XCTAssertTrue(status.connected)
+        await router.observed(endpoint, seconds: 0.1, statusCode: 200)
+        status = await router.snapshot()
+        XCTAssertFalse(status.degraded)
+        await router.failed(endpoint)
+        status = await router.snapshot()
+        XCTAssertFalse(status.connected)
+        await router.observed(endpoint, seconds: 0.1, statusCode: 200)
+        status = await router.snapshot()
+        XCTAssertTrue(status.connected)
+    }
+    func testArtworkScopeSurvivesRestoreButNotSignOut() async throws {
+        let transport = ProofTransport()
+        let store = MemoryStore()
+        let client = APIClient(transport: transport, store: store)
+        try await client.login(endpoint: "https://public.test", username: "Test", password: "test", deviceName: "test")
+        let initial = await client.artworkCacheScope()
+        XCTAssertNotNil(initial)
+        let restored = APIClient(transport: transport, store: store)
+        _ = try await restored.restore()
+        let scope = await restored.artworkCacheScope()
+        XCTAssertEqual(scope, initial)
+        await restored.logout()
+        let signedOut = await restored.artworkCacheScope()
+        XCTAssertNil(signedOut)
+    }
     func testPrivateFirstAndWrongServerNeverGetsCredentials() async throws {
         for wrong in [false, true] {
             let transport = ProofTransport(wrongHome: wrong)

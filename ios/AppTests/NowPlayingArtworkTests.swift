@@ -389,7 +389,8 @@ extension NowPlayingArtworkTests {
         let transport = RestoredOwnerTransport()
         let api = APIClient(transport: transport, store: UITestStore())
         try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
-        let artwork = ArtworkStore(api: api)
+        let disk = ArtworkDiskCache(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let artwork = ArtworkStore(api: api, disk: disk)
         let path = "/api/v1/artwork/1"
         let first = Task { await artwork.image(path) }
         let second = Task { await artwork.image(path) }
@@ -406,7 +407,27 @@ extension NowPlayingArtworkTests {
         XCTAssertNil(artwork.cachedImage(path), "Sign-out clears private artwork")
         _ = await artwork.image(path)
         let afterClear = await transport.artworkRequests
-        XCTAssertEqual(afterClear, 2)
+        XCTAssertEqual(afterClear, 1, "Sign-out clears memory but preserves same-account disk thumbnails")
+        await artwork.clearPersistentCache()
+        _ = await artwork.image(path)
+        let afterDiskClear = await transport.artworkRequests
+        XCTAssertEqual(afterDiskClear, 2)
+        await artwork.clearPersistentCache()
+    }
+    func testPersistentArtworkIsIsolatedAndExpires() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let disk = ArtworkDiskCache(root: root)
+        let bytes = Data("thumbnail".utf8)
+        await disk.write(bytes, scope: "server/account-a", path: "/cover")
+        let restored = await ArtworkDiskCache(root: root).read(scope: "server/account-a", path: "/cover")
+        XCTAssertEqual(restored, bytes)
+        let other = await disk.read(scope: "server/account-b", path: "/cover")
+        XCTAssertNil(other)
+        let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        try FileManager.default.setAttributes([.creationDate: Date().addingTimeInterval(-90000)], ofItemAtPath: files[0].path)
+        let expired = await disk.read(scope: "server/account-a", path: "/cover")
+        XCTAssertNil(expired)
+        await disk.clear()
     }
     @MainActor func testCancelledNavigationPreservesLibraryWithoutError() async throws {
         let transport = CancelledNavigationTransport()
