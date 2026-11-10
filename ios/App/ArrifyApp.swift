@@ -180,6 +180,7 @@ struct SettingsView: View {
                 Section("Lock Screen") {
                     Toggle("Automatic Lock Screen controls", isOn: Binding(get: { model.playback.remoteActivity.automatic }, set: { model.playback.remoteActivity.automatic = $0 }))
                     Text("Follow playback from another device on the same account and home network. Open Arrify once to connect; iOS manages Lock Screen availability.").font(.footnote)
+                    Text(model.playback.remoteActivity.status).font(.footnote).foregroundStyle(.secondary)
                     if model.playback.remoteActivity.active {
                         Button("Stop Lock Screen controls") { model.playback.remoteActivity.automatic = false }
                     }

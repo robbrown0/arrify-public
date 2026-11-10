@@ -15,7 +15,7 @@ actor UITestStore: CredentialStore {
     func clear() { credential = nil }
 }
 actor UITestTransport: HTTPTransport {
-    private var owner: String?
+    private var owner: String? = ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1" ? "other-device" : nil
     private var playing = false
     private var repeatMode = "off"
     private var playlists: [[String: Any]] = []
@@ -29,7 +29,9 @@ actor UITestTransport: HTTPTransport {
         let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func parameter(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
         let value: String
-        if path.hasSuffix("capabilities") {
+        if path.hasSuffix("/local-presence") {
+            return HTTPResult(status: 403, data: Data(#"{"error":{"code":"local_network_required","message":"The playing device is not available for local verification."}}"#.utf8))
+        } else if path.hasSuffix("capabilities") {
             value = #"{"server_id":"fixture","features":["rotating_refresh","native_media_manifest_v1","native_catalog_v1","native_playback_v1","native_library_v1"]}"#
         } else if path.hasSuffix("sessions") {
             value = #"{"access_token":"fixture","refresh_token":"fixture","expires_in":900,"refresh_expires_in":3600,"session_id":"fixture"}"#

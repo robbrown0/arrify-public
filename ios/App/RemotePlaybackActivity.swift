@@ -12,9 +12,19 @@ import ArrifyCore
         didSet {
             UserDefaults.standard.set(automatic, forKey: "remoteLockScreenAutomatic")
             if !automatic { Task { await stop() } }
+            dismissedOwner = nil
+            error = nil
             lastAttempt = .distantPast
         }
     }
+    var status: String {
+        if !automatic { return "Off" }
+        if starting { return "Connecting Lock Screen controls…" }
+        if active { return "Lock Screen controls are active." }
+        if dismissedOwner != nil { return "Dismissed for this playback session. Switch this option off and on to show controls again." }
+        return waitingReason
+    }
+    private var waitingReason = "Waiting for playback from another device while Arrify is open."
     private var dismissedOwner: String?
     private var lastAttempt = Date.distantPast
     private var starting = false
@@ -50,7 +60,11 @@ import ArrifyCore
             requestThumbnail(track.id)
         } catch {
             let detail = error as NSError
-            self.error = "Lock Screen unavailable (\(detail.domain), \(detail.code)). Open Arrify in the foreground to retry."
+            if let apiError = error as? APIError {
+                self.error = apiError.localizedDescription
+            } else {
+                self.error = "Lock Screen unavailable (\(detail.domain), \(detail.code)). Open Arrify in the foreground to retry."
+            }
         }
     }
     private func observePushToken(_ observedActivity: Activity<PlaybackActivityAttributes>) {
@@ -71,7 +85,22 @@ import ArrifyCore
     }
     func update(state: PlaybackState?, track: Track?, destination: String, ownsOutput: Bool) async {
         guard automatic else { if active { await stop() }; return }
-        guard !ownsOutput, let state, state.ownerDeviceId != nil, let track else { if active { await stop() }; return }
+        guard !ownsOutput else {
+            waitingReason = "This device owns playback. Automatic controls follow playback owned by another device."
+            if active { await stop() }; return
+        }
+        guard let state, state.ownerDeviceId != nil else {
+            waitingReason = "Waiting for another device to start playback."
+            if active { await stop() }; return
+        }
+        guard let track, track.id == state.currentTrackId else {
+            waitingReason = "Waiting for the current song’s details."
+            return
+        }
+        waitingReason = UIApplication.shared.applicationState == .active
+            ? "Preparing remote Lock Screen controls…"
+            : "Open Arrify to start remote Lock Screen controls."
+
         guard let activity else {
             if UIApplication.shared.applicationState == .active, Date().timeIntervalSince(lastAttempt) >= 15 {
                 lastAttempt = Date()
@@ -119,7 +148,7 @@ import ArrifyCore
     func restoreForSession() async {
         let scope = try? await api.sessionScope()
         for old in Activity<PlaybackActivityAttributes>.activities {
-            if automatic, old.attributes.sessionScope == scope, activity == nil {
+            if automatic, old.activityState != .ended, old.activityState != .dismissed, old.attributes.sessionScope == scope, activity == nil {
                 activity = old; active = true; observePushToken(old)
             } else {
                 await old.end(nil, dismissalPolicy: .immediate)

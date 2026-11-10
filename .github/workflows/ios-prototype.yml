@@ -49,7 +49,7 @@ jobs:
           xcrun simctl shutdown all || true
           xcrun simctl boot "$DEVICE"
           xcrun simctl bootstatus "$DEVICE" -b
-          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/iPadTests.xcresult -only-testing:ArrifyUITests/LaunchTests/testSignInIsAccessibleAndDoesNotAutoplay -only-testing:ArrifyUITests/LaunchTests/testAlbumsChannelsAndMoodNavigation -only-testing:ArrifyUITests/LaunchTests/testLastChannelClearsMiniPlayerAndRepeatControls -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible -only-testing:ArrifyUITests/LaunchTests/testCreatePlaylist CODE_SIGNING_ALLOWED=NO test
+          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/iPadTests.xcresult -only-testing:ArrifyUITests/LaunchTests/testSignInIsAccessibleAndDoesNotAutoplay -only-testing:ArrifyUITests/LaunchTests/testAlbumsChannelsAndMoodNavigation -only-testing:ArrifyUITests/LaunchTests/testLastChannelClearsMiniPlayerAndRepeatControls -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible -only-testing:ArrifyUITests/LaunchTests/testCreatePlaylist -only-testing:ArrifyUITests/LaunchTests/testRemotePlaybackOffersTakeoverFromBrowsing CODE_SIGNING_ALLOWED=NO test
       - name: Export test screenshots
         if: always()
         run: |
