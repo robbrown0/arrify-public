@@ -160,7 +160,8 @@ struct CollectionCard: View {
             }
             if item.kind != "channels" {
                 Text(item.name).font(.headline).lineLimit(2)
-                Text("\(item.trackCount) songs").font(.caption).foregroundStyle(.secondary)
+                if item.kind == "albums" { Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
+                else { Text("\(item.trackCount) songs").font(.caption).foregroundStyle(.secondary) }
             } else if item.trackCount == 0 { Text("Preparing songs…").font(.caption).foregroundStyle(.secondary) }
         }
     }

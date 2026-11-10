@@ -42,22 +42,26 @@ import ArrifyCore
             guard automatic, UIApplication.shared.applicationState == .active, stoppedGeneration == generation else { return }
             let new = try Activity.request(attributes: PlaybackActivityAttributes(owner: owner, ownerEpoch: state.ownerEpoch, sessionScope: scope), content: content, pushType: .token)
             activity = new; active = true; error = nil
-            let token = generation
-            tokenTask = Task { [weak self, api] in
-                for await bytes in new.pushTokenUpdates {
-                    guard let self, self.generation == token, !Task.isCancelled else { return }
-                    do {
-                        try await api.registerLiveActivity(id: new.id, token: bytes.map { String(format: "%02x", $0) }.joined(), owner: owner)
-                    } catch {
-                        guard self.generation == token else { return }
-                        self.error = "Lock Screen updates couldn’t connect. Open the player and try again."
-                        await self.stop(); return
-                    }
-                }
-            }
+            observePushToken(new)
         } catch {
             let detail = error as NSError
             self.error = "Lock Screen unavailable (\(detail.domain), \(detail.code)). Open Arrify in the foreground to retry."
+        }
+    }
+    private func observePushToken(_ observedActivity: Activity<PlaybackActivityAttributes>) {
+        tokenTask?.cancel()
+        let token = generation
+        tokenTask = Task { [weak self, api] in
+            for await bytes in observedActivity.pushTokenUpdates {
+                guard let self, self.generation == token, !Task.isCancelled else { return }
+                do {
+                    try await api.registerLiveActivity(id: observedActivity.id, token: bytes.map { String(format: "%02x", $0) }.joined(), owner: observedActivity.attributes.owner)
+                } catch {
+                    guard self.generation == token else { return }
+                    self.error = "Lock Screen updates couldn’t connect. Open Arrify to retry."
+                    await self.stop(); return
+                }
+            }
         }
     }
     func update(state: PlaybackState?, track: Track?, destination: String, ownsOutput: Bool) async {
@@ -96,7 +100,7 @@ import ArrifyCore
         let scope = try? await api.sessionScope()
         for old in Activity<PlaybackActivityAttributes>.activities {
             if automatic, old.attributes.sessionScope == scope, activity == nil {
-                activity = old; active = true
+                activity = old; active = true; observePushToken(old)
             } else {
                 await old.end(nil, dismissalPolicy: .immediate)
                 try? await api.stopLiveActivity(id: old.id)

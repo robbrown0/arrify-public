@@ -4,6 +4,7 @@ import ArrifyCore
 struct CreatePlaylistView: View {
     let model: AppModel
     var track: Track? = nil
+    var onCreated: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var shared = false
@@ -30,6 +31,7 @@ struct CreatePlaylistView: View {
                                 do {
                                     created = try await model.api.createPlaylist(name: name.trimmingCharacters(in: .whitespacesAndNewlines), shared: shared, trackId: track?.id)
                                     await model.library.refresh()
+                                    onCreated?()
                                 } catch {
                                     self.error = "Couldn’t confirm the save. Check your playlists before trying again; it may already have been created."
                                 }
@@ -68,6 +70,7 @@ struct AddToPlaylistView: View {
     let track: Track
     @Environment(\.dismiss) private var dismiss
     @State private var creating = false
+    @State private var createdNewPlaylist = false
     @State private var saving = false
     @State private var error: String?
     var body: some View {
@@ -89,7 +92,7 @@ struct AddToPlaylistView: View {
             }.disabled(saving).navigationTitle("Add to playlist")
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(saving) } }
                 .task { await model.library.refresh() }
-                .sheet(isPresented: $creating, onDismiss: { dismiss() }) { CreatePlaylistView(model: model, track: track) }
+                .sheet(isPresented: $creating, onDismiss: { if createdNewPlaylist { dismiss() } }) { CreatePlaylistView(model: model, track: track, onCreated: { createdNewPlaylist = true }) }
         }.interactiveDismissDisabled(saving)
     }
 }
