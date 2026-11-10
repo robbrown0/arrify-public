@@ -403,6 +403,13 @@ struct ServerConnectionBadge: View {
     let connection: ServerConnection
     @State private var showDetails = false
     private var color: Color { !connection.connected ? .red : connection.degraded ? .yellow : .green }
+    private var details: String {
+        var lines = [connection.detail]
+        if let address = connection.address { lines.append(address) }
+        if let notice = connection.homeNotice { lines.append(notice) }
+        lines.append("This is your connection to Arrify, not your AirPlay speaker.")
+        return lines.joined(separator: "\n\n")
+    }
     var body: some View {
         Button { showDetails = true } label: {
             Image(systemName: connection.home ? "house.fill" : "globe")
@@ -412,7 +419,7 @@ struct ServerConnectionBadge: View {
             .alert("Server connection", isPresented: $showDetails) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(connection.detail + (connection.address.map { "\n\n" + $0 } ?? "") + (connection.homeNotice.map { "\n\n" + $0 } ?? "") + "\n\nThis is your connection to Arrify, not your AirPlay speaker.")
+                Text(details)
             }
     }
 }
