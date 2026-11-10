@@ -79,5 +79,9 @@ class LocalPresence:
         self.challenges.pop(nonce, None)
         current = self.owners.get(uid)
         if not current or (current['owner'],current['epoch'],current['secret']) != (owner,epoch,record['secret']): return False
+        bound = self.a.db.execute('''SELECT 1 FROM native_output_sessions o JOIN native_families f ON f.id=o.family
+            JOIN sessions s ON s.digest=f.anchor WHERE o.user_id=? AND o.owner=? AND o.epoch=? AND o.family=?
+            AND f.expires>? AND s.expires>?''', (uid, owner, epoch, current['family'], int(time.time()), int(time.time()))).fetchone()
+        if not bound: return False
         expected = hmac.new(bytes.fromhex(record['secret']), nonce.encode('ascii'), hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, proof)

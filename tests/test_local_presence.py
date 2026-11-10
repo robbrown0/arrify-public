@@ -53,3 +53,8 @@ class LocalPresenceTests(unittest.TestCase):
     def test_pending_challenges_bounded(self):
         for _ in range(8):self.challenge()
         with self.assertRaises(NativeError):self.challenge()
+
+    def test_revoking_player_session_invalidates_inflight_proof(self):
+        challenge=self.challenge()
+        NativeSessions(self.a).revoke(self.uid,self.owner['session_id'])
+        self.assertFalse(self.consume(challenge))
