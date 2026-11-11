@@ -470,3 +470,63 @@ private actor CancelledNavigationTransport: HTTPTransport {
         return try await fallback.send(request)
     }
 }
+
+final class PlaybackDiagnosticsTests: XCTestCase {
+    func testLogSurvivesWriterRecreationAndRotates() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let writer = DiagnosticWriter(directory: directory, limit: 1024)
+        for n in 0..<100 {
+            writer.record("test-event-\(n)")
+            if n % 20 == 0 { _ = try await writer.export() }
+        }
+        let export = try await writer.export()
+        let data = try Data(contentsOf: export)
+        XCTAssertLessThan(data.count, 2200)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("test-event-99"))
+        let reopened = DiagnosticWriter(directory: directory, limit: 1024)
+        let recovered = try await reopened.export()
+        XCTAssertEqual(try Data(contentsOf: recovered), data)
+        await reopened.clear()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    @MainActor func testBackgroundRecorderCapturesBlockedMainThread() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let writer = DiagnosticWriter(directory: directory)
+        writer.monitor(enabled: true)
+        // Deliberately block only this test process, below the system watchdog limit.
+        blockMainThreadForDiagnosticTest()
+        writer.monitor(enabled: false)
+        let export = try await writer.export()
+        XCTAssertTrue(try String(contentsOf: export, encoding: .utf8).contains("main-unresponsive"))
+        await writer.clear()
+    }
+    @MainActor private func blockMainThreadForDiagnosticTest() { Thread.sleep(forTimeInterval: 5.5) }
+
+    @MainActor func testRealLocalAudioAdvancesWithDiagnosticRecording() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let audioURL = directory.appendingPathComponent("test.caf")
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44100 * 8)!
+        buffer.frameLength = buffer.frameCapacity
+        // Quiet generated tone; no copyrighted music or production server access.
+        for n in 0..<Int(buffer.frameLength) { buffer.floatChannelData![0][n] = Float(sin(Double(n) * 2 * .pi * 220 / 44100)) * 0.001 }
+        do { let file = try AVAudioFile(forWriting: audioURL, settings: format.settings); try file.write(from: buffer) }
+        let writer = DiagnosticWriter(directory: directory.appendingPathComponent("logs"))
+        writer.monitor(enabled: true)
+        let player = AVQueuePlayer(items: [AVPlayerItem(url: audioURL)])
+        player.allowsExternalPlayback = false
+        player.isMuted = true
+        player.play()
+        for _ in 0..<100 {
+            if player.currentTime().seconds >= 2 { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertGreaterThanOrEqual(player.currentTime().seconds, 2, "Actual AVPlayer playback must advance")
+        player.pause(); player.removeAllItems(); writer.monitor(enabled: false)
+        _ = try await writer.export()
+        await writer.clear()
+        try FileManager.default.removeItem(at: directory)
+    }
+}

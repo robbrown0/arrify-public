@@ -65,7 +65,7 @@ struct TabletShell: View {
             TabletPlayerBar(playback: model.playback, expand: expandPlayer)
         }.background(Color.black)
             .onChange(of: query) { destination = "Search" }
-            .onChange(of: searching) { if searching { destination = "Search" } }
+            .onChange(of: searching) { PlaybackDiagnostics.record("search-focused=\(searching)"); if searching { destination = "Search" } }
             .sheet(isPresented: $creatingPlaylist) { CreatePlaylistView(model: model) }
     }
     private func navigation(_ title: String, _ icon: String, key: String? = nil) -> some View {
