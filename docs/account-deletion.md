@@ -14,7 +14,7 @@ Implemented against Apple's [5.1.1(v) account deletion guidance](https://develop
 
 `account-deletions.jsonl` contains only reserved numeric IDs and the initial-setup-completed flag. It is written and fsynced before erasure, kept with the live data, and replayed before authentication is enabled. `deleted_account_ids` prevents ID reuse and blocks late writes by requests that were already in flight. A malformed ledger stops startup rather than restoring deleted accounts.
 
-**Never roll back or omit the live deletion ledger when restoring an old database.** Preserve it separately from rotating database snapshots. A full disaster restore must recover the most recent ledger before starting the service. Failed deletion transactions with a recorded intent are completed at the next server start.
+**Never roll back or omit the live deletion ledger when restoring an old database.** Preserve it separately from rotating database snapshots. The hourly tool also copies the latest ledger to the backup root as `account-deletions.jsonl`; use that latest copy rather than an older snapshot’s ledger. A full disaster restore must recover the most recent ledger before starting the service. Failed deletion transactions with a recorded intent are completed at the next server start.
 
 Run the following hourly for each server, with its own data and backup directories:
 

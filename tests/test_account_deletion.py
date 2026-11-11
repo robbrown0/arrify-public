@@ -103,6 +103,7 @@ class AccountDeletionTests(unittest.TestCase):
         item = requests/'inbox'/'one.json';item.write_text(json.dumps({'requested_by':self.uid,'selection':{'title':'Song'}}))
         self.assertEqual(scrub(self.tmp.name, root, requests), 1)
         self.assertNotIn('requested_by',json.loads(item.read_text()))
+        self.assertEqual((root/'account-deletions.jsonl').read_text(), (Path(self.tmp.name)/'account-deletions.jsonl').read_text())
         with sqlite3.connect(root/'accounts.db') as db:
             self.assertEqual(db.execute('SELECT username FROM users').fetchall(), [('other',)])
             self.assertEqual(db.execute('SELECT email FROM profiles').fetchall(), [('other@example.invalid',)])

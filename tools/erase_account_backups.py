@@ -22,6 +22,15 @@ def scrub(data, backups, requests=None):
     entries = [json.loads(line) for line in ledger.read_text().splitlines()]
     if any(set(e) != {'id','setup_complete'} or type(e['id']) is not int or e['id'] < 1 or type(e['setup_complete']) is not bool for e in entries):
         raise ValueError('Invalid deletion ledger')
+    backup_root = Path(backups)
+    backup_root.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=backup_root, prefix='.deletion-ledger-')
+    try:
+        with os.fdopen(fd, 'w') as out:
+            out.write(''.join(json.dumps(e)+'\n' for e in entries));out.flush();os.fsync(out.fileno())
+        os.replace(temporary, backup_root/'account-deletions.jsonl')
+    finally:
+        if os.path.exists(temporary):os.unlink(temporary)
     ids = {e['id'] for e in entries}
     if requests:
         for path in (Path(requests)/'inbox').glob('*.json'):
