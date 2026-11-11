@@ -91,7 +91,7 @@ struct TabletShell: View {
                     }.pickerStyle(.segmented).padding(.horizontal, 16).padding(.bottom, 12)
                     BrowserScreen(model: model, title: searchKind == "tracks" ? "Songs" : searchKind.capitalized, kind: searchKind, externalQuery: query).id(searchKind)
                 }
-            }
+            }.id(query)
         default:
             NavigationStack {
                 switch destination {

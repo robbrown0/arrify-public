@@ -32,8 +32,12 @@ public struct Track: Codable, Identifiable, Equatable, Sendable {
     public let artist: String
     public let album: String
     public let artwork: String?
+    public var albumId: String?
+    public var artistId: String?
+    public var popularity: SongPopularity?
 }
 public struct CatalogPage: Codable, Sendable {
+    public var popularityPending: Bool?
     public let total: Int?
     public let revision: String
     public let items: [Track]
@@ -193,4 +197,14 @@ public enum RequestCancellation {
         let value = error as NSError
         return value.domain == NSURLErrorDomain && value.code == NSURLErrorCancelled
     }
+}
+
+public struct SongPopularity: Codable, Equatable, Sendable {
+    public let doubloons: Int
+    public let rising: Bool?
+    public let evidence: [PopularityEvidence]?
+}
+public struct PopularityEvidence: Codable, Equatable, Sendable {
+    public let source: String?
+    public let url: String?
 }

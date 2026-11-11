@@ -23,7 +23,7 @@ actor UITestTransport: HTTPTransport {
     private let album = #"{"id":"aaaaaaaaaaaaaaaaaaaaaaaa","kind":"albums","name":"M!ssundaztood","subtitle":"P!nk","section":"","artwork":null,"track_count":2}"#
     private let station = #"{"id":"sirius-80son8","kind":"channels","name":"80s on 8","subtitle":"","section":"channels","artwork":null,"track_count":2}"#
     private let mix = #"{"id":"mood-feel-good","kind":"collections","name":"Feel Good Favorites","subtitle":"Familiar favorites","section":"moods","artwork":null,"track_count":2}"#
-    private let songs = #"[{"id":1,"title":"Just Like a Pill","artist":"P!nk","album":"M!ssundaztood"},{"id":2,"title":"Try","artist":"P!nk","album":"The Truth About Love"}]"#
+    private let songs = #"[{"id":1,"title":"Just Like a Pill","artist":"P!nk","album":"M!ssundaztood","artist_id":"bbbbbbbbbbbbbbbbbbbbbbbb","album_id":"aaaaaaaaaaaaaaaaaaaaaaaa","popularity":{"doubloons":2,"rising":true,"evidence":[{"source":"Fixture chart","url":"https://example.com/chart"}]}},{"id":2,"title":"Try","artist":"P!nk","album":"The Truth About Love"}]"#
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
         let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -87,7 +87,10 @@ actor UITestTransport: HTTPTransport {
             }
             value = "{\"repeat_mode\":\"\(repeatMode)\",\"queue_controls_available\":true,\"partial\":false,\"current_track_id\":\(owner == nil ? "null" : "1"),\"position_seconds\":0,\"server_time\":1,\"queue_revision\":1,\"owner_device_id\":\(owner.map { "\"\($0)\"" } ?? "null"),\"owner_epoch\":1,\"intent\":1,\"playing\":\(playing),\"observed\":\"paused\",\"seek_target_seconds\":0,\"seek_intent\":0,\"play_id\":1,\"upcoming_track_ids\":[2]}"
         }
-        return HTTPResult(status: 200, data: Data(value.utf8))
+        let response = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_TITLE"] == "1"
+            ? value.replacingOccurrences(of: "Just Like a Pill", with: "A Very Long Song Title That Wraps Onto Two Lines in the Expanded Player During Keyboard Restoration")
+            : value
+        return HTTPResult(status: 200, data: Data(response.utf8))
     }
 }
 #endif

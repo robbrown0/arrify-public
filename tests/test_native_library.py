@@ -18,6 +18,39 @@ class NativeLibraryTests(unittest.TestCase):
         self.lib=SimpleNamespace(index_lock=contextlib.nullcontext(), tracks={t['id']:t for t in tracks}, albums={album['id']:album}, artists={}, search=Search(tracks,[album],[]))
         self.lib.collections=lambda:[{'slug':'station','name':'Station','section':'channels','tracks':120},{'slug':'mix','name':'Mix','section':'playlists','tracks':120}]
         self.lib.collection_ids=lambda slug:list(range(1,121))
+    def test_search_popularity_preserves_navigation_and_page_order(self):
+        from unittest.mock import Mock
+        self.lib.popularity = Mock()
+        self.lib.popularity.get.side_effect = lambda artist, rows: ([dict(row, popularity={'doubloons': 2, 'evidence': []}) for row in rows], True)
+        result = page(self.lib, '/api/v1/native/catalog?q=Pink&limit=3')
+        self.assertEqual(len(result['items']), 3)
+        self.assertTrue(all(row['popularity']['doubloons'] == 2 for row in result['items']))
+        self.lib.popularity.get.assert_called_once()
+        self.assertEqual(result['next_offset'], 3)
+        self.lib.popularity.get.reset_mock()
+        page(self.lib, '/api/v1/native/catalog')
+        self.lib.popularity.get.assert_not_called()
+
+    def test_track_navigation_ids_and_detail_popularity(self):
+        from app.native_library import track
+        row = dict(self.lib.tracks[1], album_id='album', artist_id='artist')
+        self.assertEqual(track(row)['album_id'], 'album')
+        self.assertEqual(track(row)['artist_id'], 'artist')
+        from unittest.mock import Mock
+        self.lib.popularity = Mock()
+        self.lib.popularity.get.side_effect = lambda artist, rows: ([dict(row, popularity={'doubloons': 1}) for row in rows], False)
+        result = detail(self.lib, None, 1, '/api/v1/native/library/detail?kind=albums&id='+'a'*24)
+        self.assertEqual(result['items'][0]['popularity']['doubloons'], 1)
+
+    def test_radio_source_is_validated_and_keeps_radio_semantics(self):
+        from unittest.mock import Mock
+        self.lib.radio = Mock()
+        self.lib.radio.describe.return_value = {'kind':'track', 'seed':'1'}
+        result = expand_playback(self.lib, None, 1, {'action':'play', 'source':{'kind':'radio-track','id':'1'}})
+        self.assertEqual(result['radio'], {'kind':'track','seed':'1'})
+        self.assertNotIn('ids', result)
+        self.lib.radio.describe.assert_called_once_with('track', '1')
+
     def test_empty_catalog_browses_and_search_still_uses_aliases(self):
         result=page(self.lib,'/api/v1/native/catalog')
         self.assertEqual((len(result['items']),result['total'],result['next_offset']),(50,120,50))

@@ -13,6 +13,10 @@ public struct LibraryEntry: Codable, Identifiable, Hashable, Sendable {
     public let section: String
     public let artwork: String?
     public let trackCount: Int
+    public init(id: String, kind: String, name: String, subtitle: String = "", section: String = "", artwork: String? = nil, trackCount: Int = 0) {
+        self.id = id; self.kind = kind; self.name = name; self.subtitle = subtitle
+        self.section = section; self.artwork = artwork; self.trackCount = trackCount
+    }
     public var source: LibrarySource { LibrarySource(kind: kind, id: id) }
     public var identity: String { kind + ":" + id }
 }
@@ -38,6 +42,7 @@ public struct EntityPage: Codable, Sendable {
     public let nextOffset: Int?
 }
 public struct LibraryDetail: Codable, Sendable {
+    public var popularityPending: Bool?
     public let item: LibraryEntry
     public let items: [Track]
     public let revision: String
@@ -46,3 +51,10 @@ public struct LibraryDetail: Codable, Sendable {
 }
 
 public struct FavoriteSongs: Codable, Sendable { public let trackIds: [Int] }
+
+public struct OriginalAlbum: Decodable, Sendable {
+    public struct Album: Decodable, Sendable { public let title: String?; public let name: String?; public let artist: String? }
+    public struct Song: Decodable, Sendable { public let title: String; public let artist: String; public let localTrackId: Int? }
+    public let album: Album
+    public let items: [Song]
+}

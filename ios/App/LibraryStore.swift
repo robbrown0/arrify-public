@@ -32,6 +32,7 @@ import CryptoKit
     var tracks: [Track] = []
     var entries: [LibraryEntry] = []
     var item: LibraryEntry?
+    var popularityPending = false
     var total = 0
     var nextOffset: Int?
     var loading = false
@@ -40,6 +41,34 @@ import CryptoKit
     private var revision: String?
     private var generation = UUID()
     init(api: APIClient, kind: String = "tracks", source: LibrarySource? = nil) { self.api = api; self.kind = kind; self.source = source }
+    func refreshPopularity(query: String = "") async {
+        let token = generation
+        for _ in 0..<4 {
+            guard popularityPending, nextOffset == nil || tracks.count <= 50 else { return }
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            guard token == generation, !Task.isCancelled else { return }
+            // Enrich existing rows without changing the selection or pagination.
+            do {
+                let values: [Track]
+                let pending: Bool
+                if let source {
+                    let page = try await api.detail(source)
+                    values = page.items; pending = page.popularityPending ?? false
+                } else {
+                    let page = try await api.catalog(query: query)
+                    values = page.items; pending = page.popularityPending ?? false
+                }
+                guard token == generation, !Task.isCancelled else { return }
+                popularityPending = pending
+                let byID = Dictionary(values.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                tracks = tracks.map { byID[$0.id] ?? $0 }
+            } catch { return }
+        }
+    }
+    func resetSearch() {
+        generation = UUID(); tracks = []; entries = []; nextOffset = nil
+        revision = nil; error = nil; loading = true
+    }
     func load(query: String = "", more: Bool = false) async {
         if more && (loading || nextOffset == nil) { return }
         let token: UUID
@@ -53,11 +82,13 @@ import CryptoKit
                 let page = try await api.detail(source, offset: offset, revision: rev)
                 guard token == generation, !Task.isCancelled else { return }
                 tracks = more ? tracks + page.items : page.items
+                popularityPending = page.popularityPending ?? false
                 item = page.item; total = page.total; nextOffset = page.nextOffset; revision = page.revision
             } else if kind == "tracks" {
                 let page = try await api.catalog(query: query, offset: offset, revision: rev)
                 guard token == generation, !Task.isCancelled else { return }
                 tracks = more ? tracks + page.items : page.items
+                popularityPending = page.popularityPending ?? false
                 total = page.total ?? tracks.count; nextOffset = page.nextOffset; revision = page.revision
             } else {
                 let page = try await api.entities(kind: kind, query: query, offset: offset, revision: rev)

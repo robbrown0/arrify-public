@@ -5,6 +5,16 @@ import FoundationNetworking
 #endif
 
 final class ContractTests: XCTestCase {
+    func testTrackPopularityAndNavigationRemainBackwardCompatible() throws {
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let legacy = try decoder.decode(Track.self, from: Data(#"{"id":1,"title":"Song","artist":"Artist","album":"Album"}"#.utf8))
+        XCTAssertNil(legacy.popularity)
+        let enriched = try decoder.decode(Track.self, from: Data(#"{"id":1,"title":"Song","artist":"Artist","album":"Album","artist_id":"artist","album_id":"album","popularity":{"doubloons":2,"rising":true,"evidence":[{"source":"Chart","url":"https://example.com"}]}}"#.utf8))
+        XCTAssertEqual(enriched.popularity?.doubloons, 2)
+        XCTAssertEqual(enriched.artistId, "artist")
+        XCTAssertEqual(enriched.albumId, "album")
+    }
+
     func testEndpointRejectsCredentialAndCrossOriginPaths() throws {
         for address in ["http://home.local", "https://user:pass@example.com", "https://example.com/path", "https://example.com?token=secret"] {
             XCTAssertThrowsError(try Endpoint(address))

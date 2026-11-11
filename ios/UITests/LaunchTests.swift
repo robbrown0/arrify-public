@@ -1,5 +1,47 @@
 import XCTest
 final class LaunchTests: XCTestCase {
+    @MainActor func testSearchPopularityAndSongOptions() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Songs"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Songs"].firstMatch.tap()
+        let popularity = app.buttons["Popularity: 2 of 3. View sources"]
+        XCTAssertTrue(popularity.waitForExistence(timeout: 10))
+        popularity.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["Fixture chart"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        app.buttons["More options for Just Like a Pill"].tap()
+        for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
+            XCTAssertTrue(app.buttons[title].exists, title)
+        }
+        app.buttons["Add to Liked songs"].tap()
+        XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
+    }
+    @MainActor func testTabletNewSearchLeavesPreviousDetail() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        let search = app.textFields["tabletSearch"]
+        guard search.waitForExistence(timeout: 5) else { throw XCTSkip("iPad search navigation regression") }
+        search.tap(); search.typeText("pink")
+        app.segmentedControls.buttons["Albums"].tap()
+        // EntryRow is exposed as a navigation link; use its album text.
+        XCTAssertTrue(app.staticTexts["M!ssundaztood"].firstMatch.waitForExistence(timeout: 10))
+        app.staticTexts["M!ssundaztood"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["playCollection"].waitForExistence(timeout: 10))
+        search.tap(); search.typeText("missing")
+        XCTAssertTrue(app.staticTexts["No matching albums"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["playCollection"].exists)
+    }
     @MainActor func testSignInIsAccessibleAndDoesNotAutoplay() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
@@ -216,5 +258,55 @@ extension LaunchTests {
         let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: takeover)
         XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 10), .completed)
         XCTAssertTrue(app.buttons["Pause"].firstMatch.exists)
+    }
+}
+
+extension LaunchTests {
+    @MainActor func testLongTitlePlayerDismissalRestoresSearchResponsiveness() {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_LONG_TITLE"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Songs"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Songs"].firstMatch.tap()
+        let title = "A Very Long Song Title That Wraps Onto Two Lines in the Expanded Player During Keyboard Restoration"
+        let play = app.buttons["Play \(title) by P!nk"]
+        XCTAssertTrue(play.waitForExistence(timeout: 10)); play.tap()
+        let tabletSearch = app.textFields["tabletSearch"]
+        let search = tabletSearch.exists ? tabletSearch : app.searchFields.firstMatch
+        if !search.waitForExistence(timeout: 5) { app.buttons["Search"].firstMatch.tap() }
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap(); search.typeText("pink")
+        for _ in 0..<3 {
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+            // iPhone's system tab accessory is covered while search is editing.
+            // Submit there; iPad keeps its player visible above the keyboard.
+            if !tabletSearch.exists { search.typeText("\n") }
+            let expand = app.buttons["expandPlayer"]
+            XCTAssertTrue(expand.waitForExistence(timeout: 5))
+            XCTAssertTrue(expand.isHittable)
+            expand.tap()
+            let close = app.buttons["Close player"]
+            XCTAssertTrue(close.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts[title].firstMatch.exists)
+            let pause = app.buttons["expandedPlayPause"]
+            let output = app.descendants(matching: .any)["playerAirPlay"].firstMatch
+            XCTAssertTrue(pause.exists)
+            XCTAssertTrue(output.exists)
+            XCTAssertEqual(pause.frame.midX, output.frame.midX, accuracy: 1, "Output picker must be centered beneath play/pause")
+            close.tap()
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            XCTAssertTrue(search.isHittable, "Closing the long-title player must return a responsive search UI")
+            search.tap()
+        }
+        // An actual interaction, not just an existence query, verifies the UI
+        // still services input after keyboard restoration and dismissal.
+        search.typeText("missing")
+        XCTAssertTrue(app.staticTexts["No matching songs"].waitForExistence(timeout: 10))
     }
 }
