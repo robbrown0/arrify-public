@@ -4,8 +4,8 @@ import ArrifyCore
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
-    @MainActor func fixture() async throws -> (PlaybackCoordinator, TransitionTransport) {
-        let transport = TransitionTransport()
+    @MainActor func fixture() async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
+        let transport = CallResumeTransitionTransport()
         let api = APIClient(transport: transport, store: UITestStore())
         try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
         // Real local silent audio keeps AVQueuePlayer deterministic and offline.
@@ -113,7 +113,7 @@ final class PlaybackTransitionTests: XCTestCase {
     }
 }
 
-actor TransitionTransport: HTTPTransport {
+actor CallResumeTransitionTransport: HTTPTransport {
     struct Observation: Sendable { let current: Int; let observed: String; let afterNext: Bool }
     private let fallback = UITestTransport()
     private var owner = ""
