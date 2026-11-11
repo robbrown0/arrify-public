@@ -161,6 +161,13 @@ struct CollectionCard: View {
                         .frame(width: 34, height: 34).background(.green, in: Circle()).frame(width: 44, height: 44)
                 }.padding(6).disabled(item.trackCount == 0).accessibilityLabel("Play \(item.name)")
             }
+            .overlay {
+                if item.kind == "channels" {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
+            }
             if item.kind != "channels" {
                 Text(item.name).font(.headline).lineLimit(2)
                 if item.kind == "albums" { Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
