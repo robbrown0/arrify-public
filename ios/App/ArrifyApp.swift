@@ -130,9 +130,7 @@ struct MainView: View {
         ZStack {
             if UIDevice.current.userInterfaceIdiom == .pad {
                 TabletShell(model: model) { showPlayer = true }
-            } else if #available(iOS 26.1, *) { tabs.tabViewBottomAccessory(isEnabled: model.playback.track != nil) { miniPlayer } }
-            else if #available(iOS 26.0, *) { tabs.tabViewBottomAccessory { miniPlayer } }
-            else { tabs }
+            } else { tabs }
         }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
         .task { await model.refreshBranding(); await model.favorites.refresh() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(playback: model.playback, favorites: model.favorites) }
     }
@@ -148,8 +146,12 @@ struct MainView: View {
     }
     private func withPlayer<Content: View>(_ content: Content) -> some View {
         content.safeAreaInset(edge: .bottom, spacing: 0) {
-            if #unavailable(iOS 26.0) {
-                if UIDevice.current.userInterfaceIdiom != .pad { miniPlayer.background(.regularMaterial) }
+            if UIDevice.current.userInterfaceIdiom != .pad, model.playback.track != nil {
+                // Keep the player in a stable content inset. The system tab
+                // accessory can change its hit-testing position after scrolling
+                // or while search is editing, losing the first expansion tap.
+                miniPlayer.background(.regularMaterial, in: Capsule())
+                    .padding(.horizontal, 16).padding(.bottom, 8)
             }
         }
             .safeAreaInset(edge: .top, spacing: 0) {
