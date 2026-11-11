@@ -126,6 +126,7 @@ struct SignInView: View {
 struct MainView: View {
     @Bindable var model: AppModel
     @State private var showPlayer = false
+    @ScaledMetric(relativeTo: .subheadline) private var playerScrollClearance = 72
     var body: some View {
         ZStack {
             if UIDevice.current.userInterfaceIdiom == .pad {
@@ -145,7 +146,9 @@ struct MainView: View {
         .tabViewStyle(.sidebarAdaptable)
     }
     private func withPlayer<Content: View>(_ content: Content) -> some View {
-        content.safeAreaInset(edge: .bottom, spacing: 0) {
+        content
+        .contentMargins(.bottom, UIDevice.current.userInterfaceIdiom != .pad && model.playback.track != nil ? playerScrollClearance : 0, for: .scrollContent)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if UIDevice.current.userInterfaceIdiom != .pad, model.playback.track != nil {
                 // Keep the player in a stable content inset. The system tab
                 // accessory can change its hit-testing position after scrolling
