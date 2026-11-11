@@ -11,8 +11,16 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["Settings"].firstMatch.waitForExistence(timeout: 10))
         app.buttons["Settings"].firstMatch.tap()
         let entry = app.descendants(matching: .any)["deleteAccountSettings"].firstMatch
-        for _ in 0..<8 { if entry.exists && entry.isHittable { break }; app.swipeUp() }
-        XCTAssertTrue(entry.exists && entry.isHittable); entry.tap()
+        // SwiftUI can report off-screen Form rows as hittable on iPad.
+        // Require the entire row to be visible before tapping it.
+        for _ in 0..<8 {
+            if entry.exists && entry.isHittable && app.frame.insetBy(dx: 0, dy: 90).contains(entry.frame) { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(entry.exists && entry.isHittable)
+        XCTAssertTrue(app.frame.insetBy(dx: 0, dy: 90).contains(entry.frame))
+        entry.tap()
+        XCTAssertTrue(app.navigationBars["Delete account"].waitForExistence(timeout: 10))
         let password = app.secureTextFields["deletionPassword"]
         for _ in 0..<5 { if password.exists && password.isHittable { break }; app.swipeUp() }
         XCTAssertTrue(password.exists); password.tap(); password.typeText("wrong")
