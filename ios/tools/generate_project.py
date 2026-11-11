@@ -16,7 +16,7 @@ intent = ref('Shared/RemotePlaybackIntent.swift', 'sourcecode.swift')
 widget_source = ref('LiveActivity/ArrifyLiveActivity.swift', 'sourcecode.swift')
 files = [ref(p, 'sourcecode.swift') for p in source_files] + [shared, intent]
 test_file = ref('UITests/LaunchTests.swift', 'sourcecode.swift')
-app_test_file = ref('AppTests/NowPlayingArtworkTests.swift', 'sourcecode.swift')
+app_test_files = [ref('AppTests/' + p.name, 'sourcecode.swift') for p in sorted((ROOT/'AppTests').glob('*.swift'))]
 plist = ref('App/Info.plist', 'text.plist.xml')
 privacy = ref('App/PrivacyInfo.xcprivacy', 'text.xml')
 assets = ref('App/Assets.xcassets', 'folder.assetcatalog')
@@ -25,7 +25,7 @@ test_product = add('test-product', 'PBXFileReference', explicitFileType='wrapper
 app_test_product = add('app-test-product', 'PBXFileReference', explicitFileType='wrapper.cfbundle', path='ArrifyAppTests.xctest', sourceTree='BUILT_PRODUCTS_DIR')
 widget_product = add('widget-product', 'PBXFileReference', explicitFileType='wrapper.app-extension', path='ArrifyLiveActivity.appex', sourceTree='BUILT_PRODUCTS_DIR')
 products = add('products', 'PBXGroup', children=[product, test_product, app_test_product, widget_product], name='Products', sourceTree='<group>')
-group = add('root', 'PBXGroup', children=files + [widget_source, test_file, app_test_file, plist, privacy, assets, products], sourceTree='<group>')
+group = add('root', 'PBXGroup', children=files + [widget_source, test_file, plist, privacy, assets, products] + app_test_files, sourceTree='<group>')
 package = add('package', 'XCLocalSwiftPackageReference', relativePath='.')
 package_product = add('core', 'XCSwiftPackageProductDependency', package=package, productName='ArrifyCore')
 def phase(key, kind, refs):
@@ -58,7 +58,7 @@ objects[app]['dependencies'].append(widget_dependency)
 proxy=add('proxy','PBXContainerItemProxy',containerPortal=uid('project'),proxyType=1,remoteGlobalIDString=app,remoteInfo='Arrify')
 dependency=add('dependency','PBXTargetDependency',target=app,targetProxy=proxy)
 tests=add('tests','PBXNativeTarget', buildConfigurationList=configs('tests',{**base,'PRODUCT_BUNDLE_IDENTIFIER':'com.robnets.arrify.uitests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_TARGET_NAME':'Arrify'}),buildPhases=[phase('test-sources','PBXSourcesBuildPhase',[test_file]),phase('test-frameworks','PBXFrameworksBuildPhase',[])],buildRules=[],dependencies=[dependency],name='ArrifyUITests',productName='ArrifyUITests',productReference=test_product,productType='com.apple.product-type.bundle.ui-testing')
-app_tests=add('app-tests', 'PBXNativeTarget', buildConfigurationList=configs('app-tests',{**base,'PRODUCT_BUNDLE_IDENTIFIER':'com.robnets.arrify.apptests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_HOST':'$(BUILT_PRODUCTS_DIR)/Arrify.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Arrify','BUNDLE_LOADER':'$(TEST_HOST)'}),buildPhases=[phase('app-test-sources','PBXSourcesBuildPhase',[app_test_file]),phase('app-test-frameworks','PBXFrameworksBuildPhase',[package_product])],buildRules=[],dependencies=[dependency],name='ArrifyAppTests',packageProductDependencies=[package_product],productName='ArrifyAppTests',productReference=app_test_product,productType='com.apple.product-type.bundle.unit-test')
+app_tests=add('app-tests', 'PBXNativeTarget', buildConfigurationList=configs('app-tests',{**base,'PRODUCT_BUNDLE_IDENTIFIER':'com.robnets.arrify.apptests','PRODUCT_NAME':'$(TARGET_NAME)','GENERATE_INFOPLIST_FILE':'YES','TEST_HOST':'$(BUILT_PRODUCTS_DIR)/Arrify.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Arrify','BUNDLE_LOADER':'$(TEST_HOST)'}),buildPhases=[phase('app-test-sources','PBXSourcesBuildPhase',app_test_files),phase('app-test-frameworks','PBXFrameworksBuildPhase',[package_product])],buildRules=[],dependencies=[dependency],name='ArrifyAppTests',packageProductDependencies=[package_product],productName='ArrifyAppTests',productReference=app_test_product,productType='com.apple.product-type.bundle.unit-test')
 project=add('project','PBXProject',attributes={'LastUpgradeCheck':'2600'},buildConfigurationList=configs('project',base),compatibilityVersion='Xcode 14.0',developmentRegion='en',hasScannedForEncodings=0,knownRegions=['en','Base'],mainGroup=group,packageReferences=[package],productRefGroup=products,projectDirPath='',projectRoot='',targets=[app,tests,app_tests,widget])
 def render(v, indent=0):
     if isinstance(v,dict): return '{\n'+''.join('\t'*(indent+1)+json.dumps(k)+' = '+render(val,indent+1)+';\n' for k,val in v.items())+'\t'*indent+'}'

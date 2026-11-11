@@ -155,7 +155,7 @@ struct MainView: View {
                 TabletShell(model: model) { showPlayer = true }
             } else { tabs }
         }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
-        .task { await model.refreshBranding(); await model.favorites.refresh() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(playback: model.playback, favorites: model.favorites) }
+        .task { await model.refreshBranding(); await model.favorites.refresh() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(model: model) }
     }
     private var tabs: some View {
         TabView {

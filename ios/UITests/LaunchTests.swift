@@ -39,6 +39,24 @@ final class LaunchTests: XCTestCase {
         app.alerts["Account deleted"].buttons["OK"].tap()
         XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
     }
+    @MainActor func testHomeRecentSongsAndFullScreenSongActions() {
+        let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        let recent = app.buttons["Play recently played song Just Like a Pill by P!nk"]
+        XCTAssertTrue(recent.waitForExistence(timeout: 10))
+        recent.tap()
+        XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
+        XCTAssertTrue(app.buttons["More options for Just Like a Pill"].waitForExistence(timeout: 10))
+        app.buttons["More options for Just Like a Pill"].tap()
+        for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
+            XCTAssertTrue(app.buttons[title].exists, title)
+        }
+        app.buttons["Add to Liked songs"].tap()
+        XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
+    }
     @MainActor func testSearchPopularityAndSongOptions() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
@@ -379,6 +397,8 @@ extension LaunchTests {
         app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
         app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
         app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Library"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Browse"].firstMatch.waitForExistence(timeout: 10)); app.buttons["Browse"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Pop, 2 songs"].waitForExistence(timeout: 5) || app.staticTexts["Pop"].exists)
         app.staticTexts["Pop"].firstMatch.tap()

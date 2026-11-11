@@ -272,11 +272,7 @@ struct SongRow: View {
     let model: AppModel
     private var artwork: ArtworkStore { model.artwork }
     private var favorites: FavoritesStore { model.favorites }
-    @State private var addingToPlaylist = false
-    @State private var showQueue = false
     @State private var showPopularity = false
-    @State private var destination: LibraryEntry?
-    @State private var showOriginalAlbum = false
     let play: () -> Void
     var body: some View {
         HStack(spacing: 0) {
@@ -298,6 +294,32 @@ struct SongRow: View {
             }.buttonStyle(.plain).accessibilityLabel("Popularity: \(popularity.doubloons) of 3. View sources")
         }
         FavoriteButton(favorites: favorites, track: track)
+        SongActionsMenu(track: track, model: model)
+        }
+        .sheet(isPresented: $showPopularity) {
+            NavigationStack {
+                List {
+                    Text("1–3 coins reflect streaming reach, charts and airplay. Blank means below threshold or insufficient evidence.")
+                    ForEach(Array((track.popularity?.evidence ?? []).enumerated()), id: \.offset) { _, evidence in
+                        if let value = evidence.url, let url = URL(string: value), ["https", "http"].contains(url.scheme ?? "") {
+                            Link(evidence.source ?? "Source", destination: url)
+                        } else { Text(evidence.source ?? "Popularity evidence") }
+                    }
+                }.navigationTitle("Popularity").toolbar { Button("Done") { showPopularity = false } }
+            }
+        }
+    }
+}
+
+struct SongActionsMenu: View {
+    let track: Track
+    let model: AppModel
+    private var favorites: FavoritesStore { model.favorites }
+    @State private var addingToPlaylist = false
+    @State private var showQueue = false
+    @State private var destination: LibraryEntry?
+    @State private var showOriginalAlbum = false
+    var body: some View {
         Menu {
             Button(favorites.ids.contains(track.id) ? "Remove from Liked songs" : "Add to Liked songs", systemImage: "heart") { Task { await favorites.toggle(track.id) } }
                 .disabled(favorites.pending.contains(track.id))
@@ -317,24 +339,12 @@ struct SongRow: View {
             Button("Browse original album", systemImage: "square.stack") { showOriginalAlbum = true }
         } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44).foregroundStyle(.secondary) }
             .accessibilityLabel("More options for \(track.title)")
-        }.sheet(isPresented: $addingToPlaylist) { AddToPlaylistView(model: model, track: track) }
+        .sheet(isPresented: $addingToPlaylist) { AddToPlaylistView(model: model, track: track) }
         .sheet(isPresented: $showQueue) { UpNextView(playback: model.playback) }
         .sheet(item: $destination) { entry in
             NavigationStack { DetailScreen(model: model, entry: entry).toolbar { Button("Done") { destination = nil } } }
         }
         .sheet(isPresented: $showOriginalAlbum) { OriginalAlbumView(model: model, track: track) }
-        .sheet(isPresented: $showPopularity) {
-            NavigationStack {
-                List {
-                    Text("1–3 coins reflect streaming reach, charts and airplay. Blank means below threshold or insufficient evidence.")
-                    ForEach(Array((track.popularity?.evidence ?? []).enumerated()), id: \.offset) { _, evidence in
-                        if let value = evidence.url, let url = URL(string: value), ["https", "http"].contains(url.scheme ?? "") {
-                            Link(evidence.source ?? "Source", destination: url)
-                        } else { Text(evidence.source ?? "Popularity evidence") }
-                    }
-                }.navigationTitle("Popularity").toolbar { Button("Done") { showPopularity = false } }
-            }
-        }
     }
 }
 
@@ -404,9 +414,6 @@ struct HomeScreen: View {
                 LazyVStack(alignment: .leading, spacing: 32) {
                     Text("On the record.").font(.largeTitle.bold())
                     if UIDevice.current.userInterfaceIdiom != .pad {
-                        NavigationLink { BrowseScreen(model: model) } label: { Label("Browse", systemImage: "square.grid.2x2").font(.headline).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading) }
-                    }
-                    if UIDevice.current.userInterfaceIdiom != .pad {
                         HStack(spacing: 20) {
                             NavigationLink("Songs") { BrowserScreen(model: model, title: "Songs", kind: "tracks") }
                             NavigationLink("Albums") { BrowserScreen(model: model, title: "Albums", kind: "albums") }
@@ -414,7 +421,7 @@ struct HomeScreen: View {
                         }.frame(minHeight: 44)
                     }
                     if let overview = model.library.overview {
-                        rail("Another spin", items: overview.homeAlbums ?? [], albums: true)
+                        recentSongs(overview.recentTracks ?? [])
                         rail("Set the mood", items: overview.items.filter { $0.section == "moods" && $0.trackCount > 0 }, albums: false)
                     }
                     RefreshStatus(loading: model.library.loading, updated: model.library.updated, error: model.library.error)
@@ -425,6 +432,30 @@ struct HomeScreen: View {
                 } }
                 .task { await model.library.refresh() }
                 .refreshable { await model.library.refresh() }
+        }
+    }
+    private func recentSongs(_ tracks: [Track]) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Another spin").font(.title2.bold()); Spacer()
+                NavigationLink("View all") { DetailScreen(model: model, entry: LibraryEntry(id: "played", kind: "recent", name: "Recently played")) }
+                    .accessibilityIdentifier("recentlyPlayedAll")
+            }
+            if tracks.isEmpty { Text("Songs you listen to will appear here.").foregroundStyle(.secondary).font(.subheadline) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 18) {
+                    ForEach(tracks.prefix(6)) { track in
+                        Button { Task { await model.playback.play(track, in: tracks) } } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                RemoteCover(path: track.artwork ?? "/api/v1/artwork/\(track.id)", title: "", artwork: model.artwork)
+                                    .frame(width: cardWidth, height: cardWidth).clipShape(RoundedRectangle(cornerRadius: 12))
+                                Text(track.title).font(.headline).lineLimit(2)
+                                Text(track.artist).foregroundStyle(.secondary).lineLimit(1)
+                            }.frame(width: cardWidth, alignment: .leading)
+                        }.buttonStyle(.plain).accessibilityLabel("Play recently played song \(track.title) by \(track.artist)")
+                    }
+                }
+            }
         }
     }
     private func rail(_ title: String, items: [LibraryEntry], albums: Bool) -> some View {

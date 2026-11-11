@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Secure account deletion is available in Settings → Account → Delete account. Verify your current password and confirm to permanently erase your account and personal data and revoke all sessions. Pending or frozen accounts can also delete from the sign-in screen. Includes backup-erasure and restore protection, plus updated privacy details.'}
+    attrs = {'whatsNew': 'Improved call interruption and next-song playback recovery. Buffered songs wait for server confirmation, and stale playback responses cannot overwrite a newer transition. Another spin now shows recently played songs, the full-screen menu includes song actions, and Browse remains in Library.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:
