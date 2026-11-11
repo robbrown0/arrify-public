@@ -78,6 +78,7 @@ import Network
     var hasOtherOutput: Bool { state?.ownerDeviceId != nil && !ownsOutput }
     var showsPauseControl: Bool {
         if hasOtherOutput { return state?.playing == true }
+        if let loadedKey, completedKey == loadedKey { return false }
         return permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true)
     }
     private var pollTask: Task<Void, Never>?
@@ -90,6 +91,7 @@ import Network
     private var loadedProfile = "original"
     private var retryPreparation = false
     private var loadedKey: String?
+    private var completedKey: String?
     private var routeRecoveryTask: Task<Void, Never>?
     private var routeRecoveryItem: ObjectIdentifier?
     private var desiredKey: String?
@@ -142,6 +144,7 @@ import Network
                   ended == owner.state?.currentTrackId, !owner.endedInFlight,
                   owner.permission.allowsPlayback(ownsOutput: owner.ownsOutput, serverPlaying: owner.state?.playing == true, mediaReady: true) else { return }
             owner.controlRevision += 1
+            owner.completedKey = owner.loadedKey
             owner.endedInFlight = true
             PlaybackDiagnostics.record("track-ended awaiting-server-confirmation")
             owner.transitionTask = UIApplication.shared.beginBackgroundTask(withName: "Finish song transition") { [weak owner] in
@@ -157,10 +160,11 @@ import Network
                     if owner.state?.playId != playID { break }
                     try? await Task.sleep(for: .seconds(attempt + 1))
                 }
-                if owner.state?.playId == playID, owner.showsPauseControl {
-                    owner.player.pause(); owner.player.removeAllItems(); owner.queuedTracks = [:]
-                    owner.loadedKey = nil; owner.desiredKey = nil
-                    owner.message = "Connection interrupted at the next song. Reconnecting…"
+                if owner.state?.playId == playID, owner.state?.playing == true {
+                    // Keep the ended item fenced: reloading the unchanged server
+                    // track would replay it from an old heartbeat cursor.
+                    owner.player.pause()
+                    owner.message = "Could not confirm the next song. Tap Next to retry."
                 }
                 owner.endedInFlight = false; owner.finishBackgroundTransition(); owner.startReadAhead()
                 if owner.liveUpdatePending { await owner.reconcile(report: false) }
@@ -254,7 +258,7 @@ import Network
         pollTask?.cancel(); pollTask = nil; prepareTask?.cancel(); prepareTask = nil
         player.pause(); player.removeAllItems(); queuedTracks = [:]
         artworkTask?.cancel(); artworkTask = nil; artwork = nil; receiverArtwork = nil; systemArtwork = nil
-        loadedKey = nil; desiredKey = nil; state = nil; track = nil; position = 0; duration = 0; busy = false
+        loadedKey = nil; completedKey = nil; desiredKey = nil; state = nil; track = nil; position = 0; duration = 0; busy = false
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         nowPlayingGate = NowPlayingUpdateGate()
         try? audioSession.deactivate()
@@ -460,7 +464,7 @@ import Network
         publishNowPlaying()
     }
     private func recoverServerRoute() {
-        guard routeRecoveryTask == nil, ownsOutput, permission.enabled,
+        guard routeRecoveryTask == nil, loadedKey != completedKey, ownsOutput, permission.enabled,
               let current = player.currentItem, routeRecoveryItem != ObjectIdentifier(current),
               let url = (current.asset as? AVURLAsset)?.url, !url.isFileURL,
               let id = state?.currentTrackId, queuedTracks[ObjectIdentifier(current)] == id else { return }
@@ -578,6 +582,7 @@ import Network
         }
     }
     private func playIfAllowed() {
+        guard loadedKey != completedKey else { return }
         guard permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: loadedKey != nil) else { return }
         guard player.timeControlStatus != .playing else { return }
         do { try audioSession.activate(); refreshOutput(trigger: "playback-activated"); player.play() }
