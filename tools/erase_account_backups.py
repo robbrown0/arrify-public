@@ -37,8 +37,11 @@ def scrub(data, backups, requests=None):
             value = json.loads(path.read_text())
             if value.get('requested_by') in ids:
                 del value['requested_by']
+                original = path.stat()
                 fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.erasure-')
                 try:
+                    os.fchown(fd, original.st_uid, original.st_gid)
+                    os.fchmod(fd, original.st_mode & 0o777)
                     with os.fdopen(fd, 'w') as out:
                         json.dump(value, out);out.flush();os.fsync(out.fileno())
                     os.replace(temporary, path)
