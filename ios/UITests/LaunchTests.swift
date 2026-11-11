@@ -315,9 +315,14 @@ extension LaunchTests {
 extension LaunchTests {
     @MainActor func testCreateAccountShowsApprovalAndReturnsToSignIn() {
         let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
-        XCTAssertTrue(app.buttons["createAccount"].waitForExistence(timeout: 10))
-        if !app.buttons["createAccount"].isHittable { app.swipeUp() }
-        app.buttons["createAccount"].tap()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        let create = app.buttons["createAccount"]
+        for _ in 0..<4 {
+            if create.exists && create.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(create.exists && create.isHittable)
+        create.tap()
         app.textFields["newUsername"].tap(); app.textFields["newUsername"].typeText("newlistener")
         app.textFields["newEmail"].tap(); app.textFields["newEmail"].typeText("new@example.invalid")
         app.secureTextFields["newPassword"].tap(); app.secureTextFields["newPassword"].typeText("long-new-password")
