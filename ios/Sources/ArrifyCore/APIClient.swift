@@ -5,7 +5,15 @@ import FoundationNetworking
 
 private struct RouteUnavailable: Error { let cause: any Error }
 private struct ErrorBody: Decodable { let code: String; let message: String }
-private struct ErrorEnvelope: Decodable { let error: ErrorBody }
+private struct ErrorEnvelope: Decodable {
+    let error: ErrorBody
+    enum CodingKeys: String, CodingKey { case error }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let native = try? c.decode(ErrorBody.self, forKey: .error) { error = native }
+        else { error = ErrorBody(code: "request_failed", message: try c.decode(String.self, forKey: .error)) }
+    }
+}
 
 public actor APIClient {
     private let transport: any HTTPTransport
