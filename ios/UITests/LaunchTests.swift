@@ -218,3 +218,43 @@ extension LaunchTests {
         XCTAssertTrue(app.buttons["Pause"].firstMatch.exists)
     }
 }
+
+extension LaunchTests {
+    @MainActor func testLongTitlePlayerDismissalRestoresSearchResponsiveness() {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_LONG_TITLE"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Songs"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Songs"].firstMatch.tap()
+        let title = "A Very Long Song Title That Wraps Onto Two Lines in the Expanded Player During Keyboard Restoration"
+        let play = app.buttons["Play \(title) by P!nk"]
+        XCTAssertTrue(play.waitForExistence(timeout: 10)); play.tap()
+        let tabletSearch = app.textFields["tabletSearch"]
+        let search = tabletSearch.exists ? tabletSearch : app.searchFields.firstMatch
+        if !search.waitForExistence(timeout: 5) { app.buttons["Search"].firstMatch.tap() }
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap(); search.typeText("pink")
+        for _ in 0..<3 {
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+            let expand = app.buttons["expandPlayer"]
+            XCTAssertTrue(expand.waitForExistence(timeout: 5)); expand.tap()
+            let close = app.buttons["Close player"]
+            XCTAssertTrue(close.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts[title].firstMatch.exists)
+            close.tap()
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            XCTAssertTrue(search.isHittable, "Closing the long-title player must return a responsive search UI")
+            search.tap()
+        }
+        // An actual interaction, not just an existence query, verifies the UI
+        // still services input after keyboard restoration and dismissal.
+        search.typeText("missing")
+        XCTAssertTrue(app.staticTexts["No matching songs"].waitForExistence(timeout: 10))
+    }
+}

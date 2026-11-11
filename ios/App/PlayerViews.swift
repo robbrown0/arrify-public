@@ -44,7 +44,6 @@ struct NowPlayingView: View {
     @State private var seekPosition = 0.0
     @State private var showQueue = false
     @State private var showArtwork = false
-    @State private var controlsHeight: CGFloat = 360
     var body: some View {
         GeometryReader { proxy in
             let landscape = proxy.size.width > proxy.size.height
@@ -69,10 +68,14 @@ struct NowPlayingView: View {
                                 controls.frame(maxWidth: 480)
                             }
                         } else {
-                            cover.frame(maxWidth: min(tablet ? proxy.size.width * 0.68 : proxy.size.width - 48, max(160, proxy.size.height - controlsHeight - 132)))
-                                .padding(.bottom, 12)
-                            controls.frame(maxWidth: tablet ? 640 : 520)
-                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { PlaybackDiagnostics.record("controls-height=\($0)"); controlsHeight = $0 }
+                            PortraitPlayerLayout(
+                                availableHeight: max(0, proxy.size.height - 100),
+                                maximumArtworkWidth: tablet ? proxy.size.width * 0.68 : proxy.size.width - 48,
+                                maximumControlsWidth: tablet ? 640 : 520
+                            ) {
+                                cover
+                                controls
+                            }
                         }
                     }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 24)
                         .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .top)
@@ -425,5 +428,34 @@ struct ServerConnectionBadge: View {
             } message: {
                 Text(details)
             }
+    }
+}
+
+/// Measure controls at their final width within the layout pass. Never write a
+/// measured size into view state: doing so can oscillate during keyboard/sheet
+/// transitions and prevent the main run loop from servicing input or playback.
+struct PortraitPlayerLayout: Layout {
+    var availableHeight: CGFloat
+    var maximumArtworkWidth: CGFloat
+    var maximumControlsWidth: CGFloat
+    private let spacing: CGFloat = 32
+
+    private func dimensions(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (width: CGFloat, controlsWidth: CGFloat, controlsHeight: CGFloat, artwork: CGFloat) {
+        let width = max(0, proposal.width ?? maximumControlsWidth)
+        let controlsWidth = min(width, maximumControlsWidth)
+        let controlsHeight = subviews[1].sizeThatFits(ProposedViewSize(width: controlsWidth, height: nil)).height
+        let artwork = max(0, min(width, maximumArtworkWidth, max(160, availableHeight - controlsHeight - spacing)))
+        return (width, controlsWidth, controlsHeight, artwork)
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let d = dimensions(proposal, subviews)
+        return CGSize(width: d.width, height: d.artwork + spacing + d.controlsHeight)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let d = dimensions(ProposedViewSize(width: bounds.width, height: nil), subviews)
+        subviews[0].place(at: CGPoint(x: bounds.midX, y: bounds.minY), anchor: .top,
+                          proposal: ProposedViewSize(width: d.artwork, height: d.artwork))
+        subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.minY + d.artwork + spacing), anchor: .top,
+                          proposal: ProposedViewSize(width: d.controlsWidth, height: d.controlsHeight))
     }
 }

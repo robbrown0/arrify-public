@@ -87,7 +87,10 @@ actor UITestTransport: HTTPTransport {
             }
             value = "{\"repeat_mode\":\"\(repeatMode)\",\"queue_controls_available\":true,\"partial\":false,\"current_track_id\":\(owner == nil ? "null" : "1"),\"position_seconds\":0,\"server_time\":1,\"queue_revision\":1,\"owner_device_id\":\(owner.map { "\"\($0)\"" } ?? "null"),\"owner_epoch\":1,\"intent\":1,\"playing\":\(playing),\"observed\":\"paused\",\"seek_target_seconds\":0,\"seek_intent\":0,\"play_id\":1,\"upcoming_track_ids\":[2]}"
         }
-        return HTTPResult(status: 200, data: Data(value.utf8))
+        let response = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_TITLE"] == "1"
+            ? value.replacingOccurrences(of: "Just Like a Pill", with: "A Very Long Song Title That Wraps Onto Two Lines in the Expanded Player During Keyboard Restoration")
+            : value
+        return HTTPResult(status: 200, data: Data(response.utf8))
     }
 }
 #endif
