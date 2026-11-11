@@ -40,6 +40,8 @@ def dispatch(handler, path, data=None):
                 result = a.delete_account(data['password'], user_id=uid, username=data.get('username'))
             except PermissionError as exc:raise NativeError(403, 'verification_failed', str(exc)) from None
             uid = result.pop('_erased_id')
+            spotify = getattr(handler.server, 'spotify', None)
+            if spotify:spotify.disconnect(uid)
             live = getattr(handler.server, 'live_activities', None)
             if live:
                 with a.lock:

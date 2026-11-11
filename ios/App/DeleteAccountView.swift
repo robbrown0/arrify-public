@@ -15,7 +15,10 @@ struct DeleteAccountView: View {
                 Text("Delete your account on \(model.endpoint)")
                 Text("This permanently removes your profile, liked songs, personal and shared playlists, listening and search history, requests, hosted parties, and linked-service credentials. All devices will be signed out. This cannot be undone.")
                 Text("Shared server music and other people’s accounts are not deleted. Deleting the last administrator account leaves server administration to the server operator.").font(.footnote).foregroundStyle(.secondary)
-                Text("Backup copies expire under your server operator’s retention policy. Deleted accounts are blocked from restoration by the server’s deletion record.").font(.footnote).foregroundStyle(.secondary)
+                Text("Backup copies are erased according to your server’s privacy policy. The server keeps a non-identifying deletion record to prevent restoration.").font(.footnote).foregroundStyle(.secondary)
+            }
+            if let url = URL(string: model.endpoint)?.appendingPathComponent("privacy") {
+                Section { Link("Server privacy policy", destination: url) }
             }
             Section("Verify your identity") {
                 if !signedIn {

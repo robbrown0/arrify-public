@@ -39,6 +39,15 @@ class SpotifyTests(unittest.TestCase):
     def begin(self):return parse_qs(urlparse(self.m.begin(1,'session-one')['url']).query)
     def link(self):
         q=self.begin();self.m.complete(1,'session-one',q['state'][0],'code');return q
+    def test_disconnect_during_fetch_cannot_repopulate_personal_cache(self):
+        self.link()
+        def fetch(url, method, data, headers):
+            self.m.disconnect(1)
+            return {'items': [{'name': 'Private playlist'}]}
+        self.m.fetch = fetch
+        with self.assertRaises(PermissionError):self.m.request(1, '/v1/me/playlists', cached=True)
+        self.assertFalse(self.m.cache)
+
     def test_expired_device_is_distinct_from_unavailable_song(self):
         self.link()
         def missing(uid,path,*args,**kwargs):

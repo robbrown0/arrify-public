@@ -14,6 +14,12 @@ def tables(db):
 def erase(accounts, uid):
     db = accounts.db
     present = tables(db)
+    user = db.execute('SELECT username FROM users WHERE id=?', (uid,)).fetchone()
+    grant = accounts.directory/'recovery.json'
+    if user:
+        try: matches = json.loads(grant.read_text()).get('username') == user[0]
+        except (OSError, ValueError): matches = False
+        if matches: grant.unlink(missing_ok=True)
     # Delete guest content and credentials belonging to the user's hosted parties.
     if 'parties' in present:
         for table in ('party_entries', 'party_acquisitions', 'party_guests', 'party_wifi'):
