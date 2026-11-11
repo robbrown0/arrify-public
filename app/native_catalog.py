@@ -1,6 +1,7 @@
 """Bounded native catalog pages from one immutable search snapshot."""
 from urllib.parse import parse_qs, urlparse
 from .native_auth import NativeError
+from .native_library import track, enrich_popularity
 
 
 def page(library, request_path: str) -> dict:
@@ -29,12 +30,13 @@ def page(library, request_path: str) -> dict:
     items = []
     for row in result['items']:
         if kind == 'tracks':
-            items.append({'id': row['id'], 'title': row.get('title', ''),
-                          'artist': row.get('artist', ''), 'album': row.get('album', ''),
-                          'availability': 'local', 'artwork': row.get('artwork')})
+            items.append(track(row))
         else:
             items.append({'id': row['id'], 'name': row.get('name', ''),
                           'artist': row.get('artist', ''), 'track_count': len(row.get('track_ids', [])), 'kind': kind, 'subtitle': row.get('artist') or '', 'section': '', 'artwork': row.get('artwork')})
+    pending = False
+    if kind == 'tracks' and query.strip():
+        items, pending = enrich_popularity(library, items)
     next_offset = offset + len(items)
     return {'kind': kind, 'revision': index.revision, 'items': items,
-            'total': result['total'], 'next_offset': next_offset if next_offset < result['total'] else None}
+            'popularity_pending': pending, 'total': result['total'], 'next_offset': next_offset if next_offset < result['total'] else None}

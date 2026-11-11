@@ -11,7 +11,24 @@ from .native_moods import MOOD_GROUPS
 
 def track(row):
     return {'id': row['id'], 'title': row.get('title') or '', 'artist': row.get('artist') or '',
-            'album': row.get('album') or '', 'artwork': row.get('artwork')}
+            'album': row.get('album') or '', 'artwork': row.get('artwork'),
+            'album_id': row.get('album_id'), 'artist_id': row.get('artist_id'),
+            'popularity': row.get('popularity')}
+
+
+def enrich_popularity(library, items):
+    """Read cached evidence and enqueue refreshes; never wait on providers."""
+    service = getattr(library, 'popularity', None)
+    if service is None: return items, False
+    groups = {}
+    for item in items: groups.setdefault(item['artist'], []).append(item)
+    rated = {}; pending = False
+    for artist, rows in groups.items():
+        if not artist: continue
+        values, waiting = service.get(artist, rows)
+        pending = pending or waiting
+        rated.update((row['id'], row) for row in values)
+    return [rated.get(row['id'], row) for row in items], pending
 
 
 def entry(row, kind, section=''):
@@ -44,6 +61,11 @@ def overview(library, accounts, uid):
 
 
 def selection(library, accounts, uid, kind, key):
+    if kind in ('radio-track', 'radio-artist'):
+        result = library.radio.preview(kind.removeprefix('radio-'), key)
+        station = result['station']
+        return {'id': key, 'kind': kind, 'name': station['name'], 'subtitle': station['artist'],
+                'section': '', 'artwork': station.get('artwork'), 'track_count': len(result['tracks'])}, [t['id'] for t in result['tracks']]
     if kind == 'favorites' and key == 'liked':
         with accounts.lock:
             ids = [r[0] for r in accounts.db.execute('SELECT track_id FROM favorites WHERE user_id=? ORDER BY rowid DESC', (uid,))]
@@ -91,9 +113,10 @@ def detail(library, accounts, uid, path):
         if (offset and not supplied) or (supplied is not None and supplied != revision):
             raise NativeError(409, 'catalog_changed', 'This list changed. Refresh to continue.')
         items = [track(library.tracks[i]) for i in ids[offset:offset + limit]]
+    items, pending = enrich_popularity(library, items)
     item['track_count'] = len(ids)
     next_offset = offset + len(items)
-    return {'item': item, 'items': items, 'revision': revision, 'total': len(ids),
+    return {'item': item, 'items': items, 'revision': revision, 'total': len(ids), 'popularity_pending': pending,
             'next_offset': next_offset if next_offset < len(ids) else None}
 
 
@@ -103,6 +126,11 @@ def expand_playback(library, accounts, uid, data):
         raise NativeError(400, 'invalid_request', 'Choose a library playback source.')
     if any(k in data for k in ('ids', 'channel', 'collection', 'browse', 'radio')) or len(source['id']) > 200:
         raise NativeError(400, 'invalid_request', 'Choose one playback source.')
+    if source['kind'] in ('radio-track', 'radio-artist'):
+        station = library.radio.describe(source['kind'].removeprefix('radio-'), source['id'])
+        command = {k: v for k, v in data.items() if k not in ('source', 'shuffle')}
+        command['radio'] = {'kind': station['kind'], 'seed': station['seed']}
+        return command
     item, ids = selection(library, accounts, uid, source['kind'], source['id'])
     if not ids: raise NativeError(409, 'empty_collection', 'No local songs are available yet.')
     if len(ids) > 50000: raise NativeError(400, 'invalid_request', 'This selection is too large.')

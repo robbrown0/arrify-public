@@ -256,8 +256,10 @@ struct BrowserScreen: View {
         }.scrollContentBackground(.hidden).background(Color.black)
         .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
         .task(id: activeQuery) {
+            browser.resetSearch()
             do { try await Task.sleep(for: .milliseconds(activeQuery.isEmpty ? 0 : 300)) } catch { return }
             await browser.load(query: activeQuery)
+            await browser.refreshPopularity(query: activeQuery)
         }
         .refreshable { await browser.load(query: activeQuery) }
         .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Refresh", systemImage: "arrow.clockwise") { Task { await browser.load(query: activeQuery) } }.accessibilityIdentifier("refreshSongs") } }
@@ -270,6 +272,10 @@ struct SongRow: View {
     private var artwork: ArtworkStore { model.artwork }
     private var favorites: FavoritesStore { model.favorites }
     @State private var addingToPlaylist = false
+    @State private var showQueue = false
+    @State private var showPopularity = false
+    @State private var destination: LibraryEntry?
+    @State private var showOriginalAlbum = false
     let play: () -> Void
     var body: some View {
         HStack(spacing: 0) {
@@ -281,15 +287,53 @@ struct SongRow: View {
                     Text(track.artist).font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "play.fill").font(.caption).foregroundStyle(.green)
+
             }.frame(minHeight: 48).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel("Play \(track.title) by \(track.artist)")
+        if let popularity = track.popularity, popularity.doubloons > 0 {
+            Button { showPopularity = true } label: {
+                Text(String(repeating: "🟡", count: min(3, max(0, popularity.doubloons))) + (popularity.rising == true ? " ↗" : ""))
+                    .font(.caption).frame(minHeight: 44)
+            }.buttonStyle(.plain).accessibilityLabel("Popularity: \(popularity.doubloons) of 3. View sources")
+        }
         FavoriteButton(favorites: favorites, track: track)
         Menu {
+            Button(favorites.ids.contains(track.id) ? "Remove from Liked songs" : "Add to Liked songs", systemImage: "heart") { Task { await favorites.toggle(track.id) } }
+                .disabled(favorites.pending.contains(track.id))
             Button("Add to playlist", systemImage: "music.note.list") { addingToPlaylist = true }
+            Button("Add to queue", systemImage: "text.badge.plus") { Task { await model.playback.send("queue", ids: [track.id]) } }
+            Button("Go to song radio", systemImage: "dot.radiowaves.left.and.right") {
+                destination = LibraryEntry(id: String(track.id), kind: "radio-track", name: track.title + " Radio")
+            }
+            if let id = track.artistId {
+                Button("Go to artist radio", systemImage: "dot.radiowaves.left.and.right") { destination = LibraryEntry(id: id, kind: "radio-artist", name: track.artist + " Radio") }
+                Button("Go to artist", systemImage: "person") { destination = LibraryEntry(id: id, kind: "artists", name: track.artist) }
+            }
+            Button("Go to queue", systemImage: "list.bullet") { showQueue = true }
+            if let id = track.albumId {
+                Button("Go to album", systemImage: "square.stack") { destination = LibraryEntry(id: id, kind: "albums", name: track.album) }
+            }
+            Button("Browse original album", systemImage: "square.stack") { showOriginalAlbum = true }
         } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44).foregroundStyle(.secondary) }
             .accessibilityLabel("More options for \(track.title)")
         }.sheet(isPresented: $addingToPlaylist) { AddToPlaylistView(model: model, track: track) }
+        .sheet(isPresented: $showQueue) { UpNextView(playback: model.playback) }
+        .sheet(item: $destination) { entry in
+            NavigationStack { DetailScreen(model: model, entry: entry).toolbar { Button("Done") { destination = nil } } }
+        }
+        .sheet(isPresented: $showOriginalAlbum) { OriginalAlbumView(model: model, track: track) }
+        .sheet(isPresented: $showPopularity) {
+            NavigationStack {
+                List {
+                    Text("1–3 coins reflect streaming reach, charts and airplay. Blank means below threshold or insufficient evidence.")
+                    ForEach(Array((track.popularity?.evidence ?? []).enumerated()), id: \.offset) { _, evidence in
+                        if let value = evidence.url, let url = URL(string: value), ["https", "http"].contains(url.scheme ?? "") {
+                            Link(evidence.source ?? "Source", destination: url)
+                        } else { Text(evidence.source ?? "Popularity evidence") }
+                    }
+                }.navigationTitle("Popularity").toolbar { Button("Done") { showPopularity = false } }
+            }
+        }
     }
 }
 
@@ -329,7 +373,7 @@ struct DetailScreen: View {
             }
         }.scrollContentBackground(.hidden).background(Color.black)
         .navigationTitle(entry.kind == "channels" ? "Channel" : "Details").navigationBarTitleDisplayMode(.inline)
-        .task { await browser.load() }.refreshable { await browser.load() }
+        .task { await browser.load(); await browser.refreshPopularity() }.refreshable { await browser.load() }
     }
 }
 
@@ -395,5 +439,44 @@ struct HomeScreen: View {
                 }
             }
         }
+    }
+}
+
+struct OriginalAlbumView: View {
+    let model: AppModel
+    let track: Track
+    @Environment(\.dismiss) private var dismiss
+    @State private var result: OriginalAlbum?
+    @State private var error: String?
+    @State private var loading = false
+    var body: some View {
+        NavigationStack {
+            List {
+                if loading { ProgressView("Finding original album…") }
+                if let error { Text(error); Button("Retry") { Task { await load() } } }
+                if let result {
+                    Section(result.album.title ?? result.album.name ?? "Original album") {
+                        ForEach(Array(result.items.enumerated()), id: \.offset) { _, song in
+                            Button {
+                                if let id = song.localTrackId { Task { await model.playback.send("play", ids: [id]) } }
+                            } label: {
+                                VStack(alignment: .leading) {
+                                    Text(song.title)
+                                    Text(song.artist).font(.subheadline).foregroundStyle(.secondary)
+                                    if song.localTrackId == nil { Text("Not in your library").font(.caption).foregroundStyle(.secondary) }
+                                }
+                            }.buttonStyle(.plain).disabled(song.localTrackId == nil)
+                        }
+                    }
+                }
+            }.navigationTitle("Original album").toolbar { Button("Done") { dismiss() } }
+            .task { await load() }
+        }
+    }
+    private func load() async {
+        loading = true; error = nil
+        defer { loading = false }
+        do { result = try await model.api.originalAlbum(trackId: track.id) }
+        catch { self.error = "Couldn’t load the original album. Please try again." }
     }
 }

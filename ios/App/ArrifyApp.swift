@@ -127,7 +127,7 @@ struct MainView: View {
     @Bindable var model: AppModel
     @State private var showPlayer = false
     var body: some View {
-        Group {
+        ZStack {
             if UIDevice.current.userInterfaceIdiom == .pad {
                 TabletShell(model: model) { showPlayer = true }
             } else if #available(iOS 26.1, *) { tabs.tabViewBottomAccessory(isEnabled: model.playback.track != nil) { miniPlayer } }

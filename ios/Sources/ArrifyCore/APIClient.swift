@@ -215,6 +215,9 @@ public actor APIClient {
         if let revision { c.queryItems?.append(.init(name: "revision", value: revision)) }
         return try await call(c.string!)
     }
+    public func originalAlbum(trackId: Int) async throws -> OriginalAlbum {
+        try await call("/api/v1/discover/album?track=\(trackId)")
+    }
     public func favorites() async throws -> FavoriteSongs { try await call("/api/v1/native/favorites") }
     public func setFavorite(_ id: Int, liked: Bool) async throws -> FavoriteSongs {
         struct Input: Encodable { let trackId: Int; let liked: Bool }

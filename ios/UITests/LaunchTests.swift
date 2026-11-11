@@ -1,5 +1,47 @@
 import XCTest
 final class LaunchTests: XCTestCase {
+    @MainActor func testSearchPopularityAndSongOptions() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Songs"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Songs"].firstMatch.tap()
+        let popularity = app.buttons["Popularity: 2 of 3. View sources"]
+        XCTAssertTrue(popularity.waitForExistence(timeout: 10))
+        popularity.tap()
+        XCTAssertTrue(app.links["Fixture chart"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        app.buttons["More options for Just Like a Pill"].tap()
+        for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
+            XCTAssertTrue(app.buttons[title].exists, title)
+        }
+        app.buttons["Add to Liked songs"].tap()
+        XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
+    }
+    @MainActor func testTabletNewSearchLeavesPreviousDetail() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        let search = app.textFields["tabletSearch"]
+        guard search.waitForExistence(timeout: 5) else { throw XCTSkip("iPad search navigation regression") }
+        search.tap(); search.typeText("pink")
+        app.segmentedControls.buttons["Albums"].tap()
+        // EntryRow is exposed as a navigation link; use its album text.
+        XCTAssertTrue(app.staticTexts["M!ssundaztood"].firstMatch.waitForExistence(timeout: 10))
+        app.staticTexts["M!ssundaztood"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["playCollection"].waitForExistence(timeout: 10))
+        search.tap(); search.typeText("missing")
+        XCTAssertTrue(app.staticTexts["No matching albums"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["playCollection"].exists)
+    }
     @MainActor func testSignInIsAccessibleAndDoesNotAutoplay() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
