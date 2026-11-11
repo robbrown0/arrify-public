@@ -34,17 +34,22 @@ def summarize(text):
     termination = report.get('termination', {})
     print('Termination:', {k: termination.get(k) for k in ('namespace', 'code')})
     images = report.get('usedImages', [])
-    fault = report.get('faultingThread')
-    for index, thread in enumerate(report.get('threads', [])):
-        if index != fault and not thread.get('triggered'):
-            continue
-        print('Faulting thread:', index)
-        for frame in thread.get('frames', [])[:40]:
+    def frames(rows):
+        for frame in rows[:40]:
             image_index = frame.get('imageIndex', -1)
             image = images[image_index] if isinstance(image_index, int) and 0 <= image_index < len(images) else {}
             print(json.dumps({'image': image.get('name'), 'symbol': frame.get('symbol'),
                               'offset': frame.get('imageOffset'), 'symbolOffset': frame.get('symbolLocation'),
                               'uuid': image.get('uuid')}, ensure_ascii=True))
+    if report.get('lastExceptionBacktrace'):
+        print('Last exception backtrace:')
+        frames(report['lastExceptionBacktrace'])
+    fault = report.get('faultingThread')
+    for index, thread in enumerate(report.get('threads', [])):
+        if index != fault and not thread.get('triggered'):
+            continue
+        print('Faulting thread:', index)
+        frames(thread.get('frames', []))
 
 
 def main():
