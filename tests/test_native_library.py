@@ -27,6 +27,11 @@ class NativeLibraryTests(unittest.TestCase):
         self.assertEqual(len(result['ids']), 120)
         self.assertEqual(result['track_id'], 75)
         self.lib.discovery.select.assert_called_once_with(filters)
+        from urllib.parse import urlencode
+        page = detail(self.lib, None, 1, '/api/v1/native/library/detail?' + urlencode({'kind':'browse','id':json.dumps(filters)}))
+        self.assertEqual(page['item']['kind'], 'browse')
+        self.assertEqual(page['item']['subtitle'], '')
+        self.assertEqual(page['item']['track_count'], 120)
         for value in ['[]', '{"genre":1}', 'not-json']:
             with self.assertRaises(NativeError): expand_playback(self.lib, None, 1, {'source':{'kind':'browse','id':value}})
 

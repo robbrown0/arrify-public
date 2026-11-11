@@ -67,7 +67,7 @@ def selection(library, accounts, uid, kind, key):
         if not isinstance(filters, dict) or set(filters) != {'genre', 'decade', 'kind'} or not all(isinstance(v, str) for v in filters.values()):
             raise NativeError(400, 'invalid_request', 'Choose a Browse category.')
         ids = library.discovery.select(filters)
-        return {'name': 'Browse', 'id': key, 'kind': kind}, ids
+        return entry({'name': 'Browse', 'id': key, 'tracks': len(ids)}, kind), ids
     if kind in ('radio-track', 'radio-artist'):
 
         result = library.radio.preview(kind.removeprefix('radio-'), key)
