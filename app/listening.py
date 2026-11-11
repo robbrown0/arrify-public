@@ -66,7 +66,7 @@ class Listening:
                     pos=float(data.get('position',s['position']));duration=float(data.get('duration',0))
                     if not all(math.isfinite(v) and 0<=v<=86400 for v in (pos,duration)):raise ValueError('Invalid playback position.')
                     observed=data.get('observed','paused')
-                    if observed not in ('playing','paused','buffering','needs-gesture'):raise ValueError('Invalid playback status.')
+                    if observed not in ('playing','paused','buffering','interrupted','needs-gesture'):raise ValueError('Invalid playback status.')
                     s['position']=pos;d.update(ack=d['intent'],observed=observed,duration=duration)
                     if observed in ('playing','paused','needs-gesture'):d['playing']=observed=='playing'
                     for key in ('quality','profile','output'):d[key]=str(data.get(key,''))[:80]

@@ -1207,6 +1207,7 @@
               "playing",
               "paused",
               "buffering",
+              "interrupted",
               "needs-gesture"
             ]
           },
@@ -1273,7 +1274,8 @@
               "collections",
               "channels",
               "playlists",
-              "favorites"
+              "favorites",
+              "recent"
             ]
           },
           "id": {
@@ -1383,6 +1385,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/LibraryEntry"
+            }
+          },
+          "recent_tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Track"
             }
           }
         },

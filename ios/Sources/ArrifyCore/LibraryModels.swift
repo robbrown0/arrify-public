@@ -31,6 +31,7 @@ public struct LibraryOverview: Codable, Sendable {
     public let items: [LibraryEntry]
     public let moods: [MoodGroup]
     public let homeAlbums: [LibraryEntry]?
+    public let recentTracks: [Track]?
     public let tracks: Int
     public let albums: Int
     public let artists: Int

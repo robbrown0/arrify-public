@@ -37,8 +37,9 @@ struct MiniPlayerView: View {
 }
 
 struct NowPlayingView: View {
-    @Bindable var playback: PlaybackCoordinator
-    let favorites: FavoritesStore
+    let model: AppModel
+    private var playback: PlaybackCoordinator { model.playback }
+    private var favorites: FavoritesStore { model.favorites }
     @Environment(\.dismiss) private var dismiss
     @State private var seeking = false
     @State private var seekPosition = 0.0
@@ -56,11 +57,9 @@ struct NowPlayingView: View {
                             Button("Close player", systemImage: "chevron.down") { dismiss() }
                                 .labelStyle(.iconOnly).frame(width: 44, height: 44)
                             Text(playback.contextName).font(.subheadline.weight(.semibold)).lineLimit(1).frame(maxWidth: .infinity)
-                            Menu {
-                                Button("Show artwork", systemImage: "photo") { showArtwork = true }
-                                Button("Up next", systemImage: "list.bullet") { showQueue = true }
-                            } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                            .accessibilityLabel("More player options")
+                            if let track = playback.track {
+                                SongActionsMenu(track: track, model: model)
+                            }
                         }
                         if landscape {
                             HStack(alignment: .center, spacing: 36) {

@@ -71,7 +71,7 @@ actor UITestTransport: HTTPTransport {
             let stations = (1...12).map { n in station.replacingOccurrences(of: "sirius-80son8", with: "station-\(n)").replacingOccurrences(of: "80s on 8", with: n == 1 ? "80s on 8" : "Station \(n)") }.joined(separator: ",")
             let featured = mix.replacingOccurrences(of: "mood-feel-good", with: "featured-drive").replacingOccurrences(of: "Feel Good Favorites", with: "Driving favourites").replacingOccurrences(of: "\"section\":\"moods\"", with: "\"section\":\"playlists\"")
             let personal = playlists.isEmpty ? "" : "," + String(data: try JSONSerialization.data(withJSONObject: playlists[0]), encoding: .utf8)!
-            value = "{\"home_albums\":[\(album)],\"items\":[\(stations),\(mix),\(featured)\(personal)],\"moods\":[{\"id\":\"feel-good\",\"name\":\"Feel Good\",\"description\":\"Sunshine, soul, and familiar favorites.\",\"color\":\"#244632\",\"slugs\":[\"mood-feel-good\"]}],\"tracks\":2,\"albums\":1,\"artists\":1}"
+            value = "{\"recent_tracks\":\(songs),\"home_albums\":[\(album)],\"items\":[\(stations),\(mix),\(featured)\(personal)],\"moods\":[{\"id\":\"feel-good\",\"name\":\"Feel Good\",\"description\":\"Sunshine, soul, and familiar favorites.\",\"color\":\"#244632\",\"slugs\":[\"mood-feel-good\"]}],\"tracks\":2,\"albums\":1,\"artists\":1}"
         } else if path.hasSuffix("/library/detail") {
             if parameter("kind") == "favorites" {
                 let items = (try JSONSerialization.jsonObject(with: Data(songs.utf8)) as! [[String: Any]]).filter { favoriteIds.contains($0["id"] as! Int) }
@@ -91,7 +91,7 @@ actor UITestTransport: HTTPTransport {
         } else if path.contains("/artwork/") || path.contains("/artist-artwork/") {
             return HTTPResult(status: 404, data: Data())
         } else if path.hasSuffix("/tracks/1") {
-            value = #"{"track":{"id":1,"title":"Just Like a Pill","artist":"P!nk","album":"M!ssundaztood"}}"#
+            value = #"{"track":{"id":1,"title":"Just Like a Pill","artist":"P!nk","album":"M!ssundaztood","artist_id":"bbbbbbbbbbbbbbbbbbbbbbbb","album_id":"aaaaaaaaaaaaaaaaaaaaaaaa"}}"#
         } else if path.hasSuffix("/tracks/2") {
             value = #"{"track":{"id":2,"title":"Family Portrait","artist":"P!nk","album":"M!ssundaztood"}}"#
         } else if path.hasSuffix("/playback/queue") {

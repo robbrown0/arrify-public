@@ -10,6 +10,24 @@ class ListeningTests(unittest.TestCase):
         self.clock=1000
         return Listening(self.p,now=lambda:self.clock)
     def call(self,l,action,device='a'*32,uid=1,**data):return l.command(uid,{'expected_revision':l.state(uid)['listening']['revision'],'action':action,'device_id':device,'device_name':'iPhone' if device[0]=='a' else 'iPad',**data})
+    def test_ten_minute_interruption_freezes_cursor_without_rewriting_play_intent(self):
+        l=self.session(); first=self.call(l,'play',ids=[1,2]); d=first['listening']
+        args=dict(owner_epoch=d['epoch'],intent=d['intent'],expected_current=1,position=81,duration=180)
+        self.call(l,'heartbeat',observed='playing',report_seq=1,**args)
+        self.call(l,'heartbeat',observed='interrupted',report_seq=2,**args)
+        self.clock += 600
+        stopped=l.state(1)
+        self.assertEqual(stopped['current'],1); self.assertEqual(stopped['position'],81)
+        self.assertEqual(l.position(l.load(1)),81)
+        self.assertTrue(stopped['listening']['playing'])
+        self.assertEqual(stopped['listening']['intent'],d['intent'])
+        self.call(l,'heartbeat',observed='playing',report_seq=3,**args)
+        self.assertEqual(self.a.db.execute('SELECT count(*) FROM history').fetchone()[0],1)
+        paused=self.call(l,'pause','b'*32)
+        self.call(l,'heartbeat',observed='interrupted',report_seq=4,**args)
+        self.assertFalse(l.state(1)['listening']['playing'])
+        self.assertEqual(l.state(1)['listening']['intent'],paused['listening']['intent'])
+
     def test_buffer_observation_is_owner_scoped_and_keeps_original_sample_time(self):
         import json
         l=self.session();first=self.call(l,'play',ids=[1,2,3]);d=first['listening']

@@ -49,18 +49,24 @@ def overview(library, accounts, uid):
     available = {x['id'] for x in items if x['track_count'] > 0 and x['kind'] == 'collections'}
     moods = [{**g, 'slugs': [s for s in g['slugs'] if s in available]} for g in MOOD_GROUPS]
     with accounts.lock:
-        recent = accounts.db.execute('SELECT track_id,max(played_at) played FROM history WHERE user_id=? GROUP BY track_id ORDER BY played DESC LIMIT 12', (uid,)).fetchall()
+        recent = accounts.db.execute('SELECT track_id,max(played_at) played FROM history WHERE user_id=? GROUP BY track_id ORDER BY played DESC,track_id DESC LIMIT 12', (uid,)).fetchall()
     with library.index_lock:
         album_ids = list(dict.fromkeys(library.tracks[r[0]].get('album_id') for r in recent if r[0] in library.tracks))
         albums = [library.albums[i] for i in album_ids if i in library.albums][:6]
         if not albums:
             albums = [library.albums[x['id']] for x in library.suggestions() if x['id'] in library.albums]
         home_albums = [entry(x, 'albums') for x in albums]
-        return {'home_albums': home_albums, 'items': items, 'moods': [g for g in moods if g['slugs']],
+        return {'recent_tracks': [track(library.tracks[r[0]]) for r in recent if r[0] in library.tracks], 'home_albums': home_albums, 'items': items, 'moods': [g for g in moods if g['slugs']],
                 'tracks': len(library.tracks), 'albums': len(library.albums), 'artists': len(library.artists)}
 
 
 def selection(library, accounts, uid, kind, key):
+    if kind == 'recent' and key == 'played':
+        with accounts.lock:
+            rows = accounts.db.execute('SELECT track_id,MAX(played_at) played FROM history WHERE user_id=? GROUP BY track_id ORDER BY played DESC,track_id DESC LIMIT 500', (uid,)).fetchall()
+        with library.index_lock:
+            ids = [r[0] for r in rows if r[0] in library.tracks]
+        return {'id': key, 'kind': kind, 'name': 'Recently played', 'subtitle': 'Songs you played', 'section': 'personal', 'artwork': None, 'track_count': len(ids)}, ids
     if kind == 'browse':
         try: filters = json.loads(key)
         except (ValueError, TypeError): raise NativeError(400, 'invalid_request', 'Choose a Browse category.') from None

@@ -1,7 +1,7 @@
 /* Read-only admin activity; existing heartbeats supply presence information. */
 'use strict';
 function connectionsMarkup(d){
- const labels={playing:'Playing',paused:'Paused',buffering:'Buffering','needs-gesture':'Tap to resume',offline:'Offline'};
+ const labels={playing:'Playing',paused:'Paused',buffering:'Buffering',interrupted:'Interrupted','needs-gesture':'Tap to resume',offline:'Offline'};
  const age=at=>{const seconds=Math.max(0,Math.floor(d.server_time-at));return seconds<20?'just now':seconds<60?seconds+'s ago':seconds<3600?Math.floor(seconds/60)+'m ago':Math.floor(seconds/3600)+'h ago'};
  const renderUser=u=>{
   const id=Number(u.id),name=u.display_name||u.username,b=u.buffer,ready=b?.items?.slice(1).filter(x=>x.state==='ready').length||0,retrying=b?.items?.some(x=>x.state==='retrying');
