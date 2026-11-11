@@ -441,7 +441,7 @@ struct PortraitPlayerLayout: Layout {
     private let spacing: CGFloat = 32
 
     private func dimensions(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (width: CGFloat, controlsWidth: CGFloat, controlsHeight: CGFloat, artwork: CGFloat) {
-        let width = max(0, proposal.width ?? maximumControlsWidth)
+        let width = max(0, proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? maximumControlsWidth)
         let controlsWidth = min(width, maximumControlsWidth)
         let controlsHeight = subviews[1].sizeThatFits(ProposedViewSize(width: controlsWidth, height: nil)).height
         let artwork = max(0, min(width, maximumArtworkWidth, max(160, availableHeight - controlsHeight - spacing)))
