@@ -475,7 +475,10 @@ final class PlaybackDiagnosticsTests: XCTestCase {
     func testLogSurvivesWriterRecreationAndRotates() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let writer = DiagnosticWriter(directory: directory, limit: 1024)
-        for n in 0..<100 { writer.record("test-event-\(n)") }
+        for n in 0..<100 {
+            writer.record("test-event-\(n)")
+            if n % 20 == 0 { _ = try await writer.export() }
+        }
         let export = try await writer.export()
         let data = try Data(contentsOf: export)
         XCTAssertLessThan(data.count, 2200)

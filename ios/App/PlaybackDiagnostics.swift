@@ -17,11 +17,24 @@ final class DiagnosticWriter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "arrify.diagnostics", qos: .utility)
     private let directory: URL
     private let limit: Int
+    private let pendingLock = NSLock()
+    private var pendingWrites = 0
     private var timer: DispatchSourceTimer?
     private var pendingSince: TimeInterval?
     private var generation = 0
     init(directory: URL, limit: Int = 128 * 1024) { self.directory = directory; self.limit = limit }
-    func record(_ event: String) { queue.async { self.append(event) } }
+    func record(_ event: String) {
+        // A runaway layout must not create an unbounded diagnostic work queue.
+        let accepted = pendingLock.withLock {
+            guard pendingWrites < 64 else { return false }
+            pendingWrites += 1; return true
+        }
+        guard accepted else { return }
+        queue.async {
+            self.append(event)
+            self.pendingLock.withLock { self.pendingWrites -= 1 }
+        }
+    }
     private func append(_ event: String) {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
