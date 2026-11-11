@@ -1,5 +1,36 @@
 import XCTest
 final class LaunchTests: XCTestCase {
+    @MainActor func testAccountDeletionRequiresConfirmationAndPassword() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Settings"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Settings"].firstMatch.tap()
+        let entry = app.descendants(matching: .any)["deleteAccountSettings"].firstMatch
+        for _ in 0..<8 { if entry.exists && entry.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(entry.exists && entry.isHittable); entry.tap()
+        let password = app.secureTextFields["deletionPassword"]
+        for _ in 0..<5 { if password.exists && password.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(password.exists); password.tap(); password.typeText("wrong")
+        let submit = app.buttons["requestAccountDeletion"]
+        for _ in 0..<4 { if submit.isHittable { break }; app.swipeUp() }
+        submit.tap()
+        app.buttons["Cancel"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Delete account"].exists)
+        submit.tap(); app.buttons["Permanently delete account"].tap()
+        XCTAssertTrue(app.staticTexts["deletionError"].waitForExistence(timeout: 10))
+        for _ in 0..<4 { if password.isHittable { break }; app.swipeDown() }
+        password.tap(); password.typeText("fixture")
+        for _ in 0..<4 { if submit.isHittable { break }; app.swipeUp() }
+        submit.tap(); app.buttons["Permanently delete account"].tap()
+        XCTAssertTrue(app.alerts["Account deleted"].waitForExistence(timeout: 10))
+        app.alerts["Account deleted"].buttons["OK"].tap()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+    }
     @MainActor func testSearchPopularityAndSongOptions() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"

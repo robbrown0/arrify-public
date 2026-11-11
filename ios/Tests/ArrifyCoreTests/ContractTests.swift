@@ -165,3 +165,37 @@ private actor EventTransport: HTTPTransport {
         eventRequest = request; await changed()
     }
 }
+
+extension ContractTests {
+    func testDeletionUsesPasswordInBodyAndOnlyCurrentAuthenticatedAccount() async throws {
+        let transport = DeletionTransport()
+        let api = APIClient(transport: transport, store: MemoryStore())
+        try await api.login(endpoint: "https://example.com", username: "test", password: "test", deviceName: "test")
+        _ = try await api.deleteAccount(password: "current-secret")
+        let request = await transport.deletion!
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertNil(request.url?.query)
+        XCTAssertNotNil(request.value(forHTTPHeaderField: "Authorization"))
+        let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+        XCTAssertEqual(Set(body.keys), Set(["password", "confirm"]))
+        XCTAssertEqual(body["password"] as? String, "current-secret")
+        XCTAssertEqual(body["confirm"] as? Bool, true)
+        _ = try await api.deleteAccount(endpoint: "https://example.com", username: "pending", password: "pending-secret")
+        let pending = await transport.deletion!
+        XCTAssertNil(pending.value(forHTTPHeaderField: "Authorization"))
+        let pendingBody = try JSONSerialization.jsonObject(with: pending.httpBody!) as! [String: Any]
+        XCTAssertEqual(pendingBody["username"] as? String, "pending")
+        XCTAssertEqual(Set(pendingBody.keys), Set(["username", "password", "confirm"]))
+    }
+}
+private actor DeletionTransport: HTTPTransport {
+    let base = FakeTransport()
+    var deletion: URLRequest?
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        if request.url?.path == "/api/v1/native/account/delete" {
+            deletion = request
+            return HTTPResult(status: 200, data: Data(#"{"message":"Account deleted."}"#.utf8))
+        }
+        return try await base.send(request)
+    }
+}

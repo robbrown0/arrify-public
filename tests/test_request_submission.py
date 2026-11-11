@@ -37,6 +37,7 @@ class SubmissionTests(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=2) as workers:
                 results=list(workers.map(lambda _:create(),range(2)))
             self.assertCountEqual(results,['accepted','limited']);self.assertEqual(len(calls),1)
+            self.assertEqual(calls[0]['user_id'],0)  # No account ID leaves the Arrify server.
             a.db.close()
 
 class BrowseSubmissionTests(unittest.TestCase):

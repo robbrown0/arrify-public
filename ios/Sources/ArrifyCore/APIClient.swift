@@ -290,6 +290,15 @@ public actor APIClient {
         let response = try await transport.send(Self.request(endpoint: endpoint, path: "/api/v1/native/register", method: "POST", body: body))
         return try Self.decode(response, as: AccountRegistration.self)
     }
+    public func deleteAccount(password: String) async throws -> AccountRegistration {
+        struct Input: Encodable { let password: String; let confirm = true }
+        return try await call("/api/v1/native/account/delete", method: "POST", body: Self.encoder().encode(Input(password: password)))
+    }
+    public func deleteAccount(endpoint text: String, username: String, password: String) async throws -> AccountRegistration {
+        struct Input: Encodable { let username: String; let password: String; let confirm = true }
+        let request = try Self.request(endpoint: Endpoint(text), path: "/api/v1/native/account/delete", method: "POST", body: Self.encoder().encode(Input(username: username, password: password)))
+        return try Self.decode(await transport.send(request), as: AccountRegistration.self)
+    }
     public func browse() async throws -> BrowseOverview { try await call("/api/v1/browse") }
     public func browsePage(_ filters: BrowseFilters, offset: Int = 0) async throws -> BrowsePage {
         var q = URLComponents()

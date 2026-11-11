@@ -138,7 +138,7 @@ def main():
     detail = api(f'/v1/apps/{app}/betaAppReviewDetail')['data']
     notes = ('Review server: '+DEMO+'. On the sign-in screen replace the Server address with this URL, then use the supplied review login. '
              'Open Library > Songs and play First Light by Arrify Studio. The isolated server contains six original synthesized instrumentals across Daylight and Afterglow albums, original artwork, two demo channels, and Feel Good / Unwind mood playlists. No commercial recordings or external music services are used on the demo server. '
-             'Test browsing, search, next/previous, shuffle, repeat, seeking, background audio, lock-screen controls, and AirPlay. Privacy policy: https://arrify.robnets.com/privacy. The policy is also linked on sign-in and in Settings. Other users connect to their own Arrify server and approved account. No purchase or subscription is required.')
+             'Test browsing, search, next/previous, shuffle, repeat, seeking, background audio, lock-screen controls, and AirPlay. Privacy policy: https://arrify.robnets.com/privacy. The policy is also linked on sign-in and in Settings. Other users connect to their own Arrify server and approved account. No purchase or subscription is required. Account deletion: Settings > Account > Delete account, current password, permanent confirmation. Pending accounts can use Delete an existing account on sign-in. Deletion is real and irreversible, including for the review account.')
     attrs = {'contactFirstName': config['first_name'], 'contactLastName': config['last_name'], 'contactEmail': config['email'], 'contactPhone': config['phone'],
              'demoAccountRequired': True, 'demoAccountName': config['username'], 'demoAccountPassword': config['password'], 'notes': notes}
     api('/v1/betaAppReviewDetails/'+detail['id'], 'PATCH', resource('betaAppReviewDetails', attrs, detail['id']))
@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Browse now brings What’s New, What’s Hot, decades, genres, Essentials, songs, albums, and artists to iPhone and iPad. Request missing chart albums from Browse. Create an account from sign-in, with administrator approval before listening. Remote Lock Screen controls register only while on Wi-Fi. Settings now shows the app version and build. Moods matches the web icon, and local network connections use a distinct router icon.'}
+    attrs = {'whatsNew': 'Secure account deletion is available in Settings → Account → Delete account. Verify your current password and confirm to permanently erase your account and personal data and revoke all sessions. Pending or frozen accounts can also delete from the sign-in screen. Includes backup-erasure and restore protection, plus updated privacy details.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:

@@ -173,7 +173,7 @@ def submit(config,data):
     rid=hashlib.sha256(selection.encode()).hexdigest()[:32]
     path=ROOT/'inbox'/f'{rid}.json'
     if not path.exists():
-        atomic(path,{'id':rid,'selection':item,'created':now(),'state':'queued','requested_by':int(data['user_id'])})
+        atomic(path,{'id':rid,'selection':item,'created':now(),'state':'queued'})
     result=status(rid)
     return {'id':rid,'state':result.get('state','queued'),**{k:result.get(k,'') for k in ('title','artist','album')}}
 
