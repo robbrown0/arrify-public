@@ -11,7 +11,7 @@ public struct ServerConnection: Equatable, Sendable {
     public var detail: String {
         if !connected { return "The server could not be reached. Cached playback may continue. Check your connection or server." }
         if degraded { return "Recent server requests were slow or temporarily failed. This measures server responsiveness, not Wi-Fi signal strength." }
-        return "Connected via " + (home ? "your home address." : "your public server address.")
+        return "Connected via " + (home ? "your local network." : "your public server address.")
     }
     public var address: String?
     public var home: Bool
@@ -75,10 +75,10 @@ actor ServerRouter {
                     status = ServerConnection(address: home.url.absoluteString, home: true, connected: true)
                     lastCheck = Date(); return home
                 } catch is CancellationError { throw CancellationError() }
-                catch APIError.serverChanged { notice = "Home address did not verify as this server. Using public." }
-                catch APIError.unsupportedServer { notice = "Update your server to enable verified home connections." }
-                catch { notice = "Home address unavailable. Using public." }
-            } else if home != nil { notice = "Home address unavailable. Using public." }
+                catch APIError.serverChanged { notice = "Local network address did not verify as this server. Using public." }
+                catch APIError.unsupportedServer { notice = "Update your server to enable verified local network connections." }
+                catch { notice = "Local network address unavailable. Using public." }
+            } else if home != nil { notice = "Local network address unavailable. Using public." }
             try await Self.verify(primary, id: serverID, key: publicKey, transport: transport)
             guard token == generation, !Task.isCancelled else { throw CancellationError() }
             status = ServerConnection(address: primary.url.absoluteString, home: false, connected: true, homeNotice: notice)

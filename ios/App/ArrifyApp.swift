@@ -98,10 +98,10 @@ struct SignInView: View {
                     TextField("Public server address", text: $model.endpoint)
                         .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never)
                         .autocorrectionDisabled().accessibilityIdentifier("serverAddress")
-                    DisclosureGroup("Home address (optional)") {
-                        TextField("https://home.example.com", text: $model.homeEndpoint)
+                    DisclosureGroup("Local network address (optional)") {
+                        TextField("https://local.example.com", text: $model.homeEndpoint)
                             .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        Text("Use HTTPS. Arrify verifies and prefers home when reachable, then falls back to public.").font(.footnote).foregroundStyle(.secondary)
+                        Text("Use HTTPS. Arrify verifies and prefers the local network address when reachable, then falls back to public.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
                 Section("Account") {
@@ -191,7 +191,7 @@ struct SettingsView: View {
                 }
                 Section("Lock Screen") {
                     Toggle("Automatic Lock Screen controls", isOn: Binding(get: { model.playback.remoteActivity.automatic }, set: { model.playback.remoteActivity.automatic = $0 }))
-                    Text("Follow playback from another device on the same account and home network. Open Arrify once to connect; iOS manages Lock Screen availability.").font(.footnote)
+                    Text("Follow playback from another device on the same account and local network. Open Arrify once to connect; iOS manages Lock Screen availability.").font(.footnote)
                     Text(model.playback.remoteActivity.status).font(.footnote).foregroundStyle(.secondary)
                     if model.playback.remoteActivity.active {
                         Button("Stop Lock Screen controls") { model.playback.remoteActivity.automatic = false }
@@ -232,8 +232,8 @@ struct ServerAddressesView: View {
                 TextField("https://music.example.com", text: $publicAddress)
                     .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
             }
-            Section("Home server · optional") {
-                TextField("https://home.example.com", text: $homeAddress)
+            Section("Local network server · optional") {
+                TextField("https://local.example.com", text: $homeAddress)
                     .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                 Text("Arrify uses this address only after verifying it is the same server. Both addresses need a valid HTTPS certificate.").font(.footnote)
             }

@@ -414,15 +414,14 @@ struct ServerConnectionBadge: View {
         var lines = [connection.detail]
         if let address = connection.address { lines.append(address) }
         if let notice = connection.homeNotice { lines.append(notice) }
-        lines.append("This is your connection to Arrify, not your AirPlay speaker.")
         return lines.joined(separator: "\n\n")
     }
     var body: some View {
         Button { showDetails = true } label: {
-            Image(systemName: connection.home ? "house.fill" : "globe")
+            Image(systemName: connection.home ? "network" : "globe")
                 .font(.callout).foregroundStyle(color).frame(width: 44, height: 44)
         }.buttonStyle(.plain)
-            .accessibilityLabel("Server connection: " + (!connection.connected ? "unreachable" : connection.degraded ? "slow or interrupted" : connection.home ? "home" : "public"))
+            .accessibilityLabel("Server connection: " + (!connection.connected ? "unreachable" : connection.degraded ? "slow or interrupted" : connection.home ? "local network" : "public"))
             .alert("Server connection", isPresented: $showDetails) {
                 Button("OK", role: .cancel) {}
             } message: {
