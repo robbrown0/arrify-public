@@ -330,6 +330,7 @@ import Network
     func send(_ action: String, ids: [Int]? = nil, seek: Double? = nil, automatic: Bool = false,
               source: LibrarySource? = nil, trackId: Int? = nil, shuffle: Bool? = nil, mode: String? = nil, index: Int? = nil, from: Int? = nil, to: Int? = nil, revision: Int? = nil) async {
         guard !commandInFlight else { return }
+        let action = action == "resume" && loadedKey != nil && completedKey == loadedKey ? "next" : action
         if action == "pause" { player.pause(); permission.userPause() }
         let endedTrack = state?.currentTrackId
         let endedPlay = state?.playId

@@ -62,6 +62,29 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertFalse(observations.contains { $0.current == 1 && $0.afterNext })
     }
 
+    @MainActor func testFailedTransitionCannotReplayEndedSongAtOldCursor() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.failTransitions(true)
+        let first = try XCTUnwrap(player.player.currentItem)
+        player.player.pause()
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: first)
+        for _ in 0..<500 where player.message != "Could not confirm the next song. Tap Next to retry." {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(player.message, "Could not confirm the next song. Tap Next to retry.")
+        await player.reconcile()
+        XCTAssertTrue(player.player.currentItem === first)
+        XCTAssertFalse(player.showsPauseControl)
+        XCTAssertEqual(player.player.rate, 0)
+        await transport.failTransitions(false)
+        let resume = Task { await player.send("resume") }
+        for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        await transport.releaseNext()
+        await resume.value
+        XCTAssertEqual(player.state?.currentTrackId, 2)
+    }
+
     @MainActor func testCallInterruptionPreservesItemAndDoesNotOverrideUserPause() async throws {
         let (player, transport) = try await fixture()
         defer { player.stop() }
@@ -98,6 +121,8 @@ actor TransitionTransport: HTTPTransport {
     private var revision = 1
     private var playing = true
     private var delayOnePoll = false
+    private var failingTransitions = false
+    func failTransitions(_ value: Bool) { failingTransitions = value }
     private var pendingPoll: CheckedContinuation<Void, Never>?
     private var pendingNext: CheckedContinuation<Void, Never>?
     private(set) var pollWaiting = false
@@ -124,6 +149,7 @@ actor TransitionTransport: HTTPTransport {
                let value = try JSONSerialization.jsonObject(with: body) as? [String: Any] {
                 let action = value["action"] as? String
                 if action == "next" {
+                    if failingTransitions { throw URLError(.networkConnectionLost) }
                     nextWaiting = true
                     await withCheckedContinuation { pendingNext = $0 }
                     current = 2; revision += 1
