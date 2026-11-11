@@ -37,7 +37,7 @@ struct DeleteAccountView: View {
             .toolbar { if !signedIn { Button("Cancel", role: .cancel) { dismiss() }.disabled(busy) } }
             .interactiveDismissDisabled(busy)
             .navigationBarBackButtonHidden(busy)
-            .confirmationDialog("Permanently delete your account?", isPresented: $confirming, titleVisibility: .visible) {
+            .alert("Permanently delete your account?", isPresented: $confirming) {
                 Button("Permanently delete account", role: .destructive) {
                     busy = true; error = nil
                     Task {
