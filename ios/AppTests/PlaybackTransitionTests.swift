@@ -13,6 +13,7 @@ final class PlaybackTransitionTests: XCTestCase {
         let format = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8000 * 180)!
         buffer.frameLength = buffer.frameCapacity
+        buffer.floatChannelData![0].initialize(repeating: 0, count: Int(buffer.frameLength))
         do {
             let file = try AVAudioFile(forWriting: audio, settings: format.settings)
             try file.write(from: buffer)

@@ -175,7 +175,7 @@ import Network
                   let kind = AVAudioSession.InterruptionType(rawValue: raw) else { return }
             if kind == .began {
                 owner.controlRevision += 1
-                owner.permission.interruptionBegan(wasPlaying: owner.showsPauseControl, ownsOutput: owner.ownsOutput)
+                owner.permission.interruptionBegan(wasPlaying: owner.state?.playing == true, ownsOutput: owner.ownsOutput)
                 owner.player.pause()
                 PlaybackDiagnostics.record("audio-interruption began")
                 Task { await owner.reconcile() }
