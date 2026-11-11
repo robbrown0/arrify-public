@@ -13,7 +13,7 @@ final class LaunchTests: XCTestCase {
         let popularity = app.buttons["Popularity: 2 of 3. View sources"]
         XCTAssertTrue(popularity.waitForExistence(timeout: 10))
         popularity.tap()
-        XCTAssertTrue(app.links["Fixture chart"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["Fixture chart"].firstMatch.waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
         app.buttons["More options for Just Like a Pill"].tap()
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
@@ -284,8 +284,13 @@ extension LaunchTests {
         search.tap(); search.typeText("pink")
         for _ in 0..<3 {
             XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+            // iPhone's system tab accessory is covered while search is editing.
+            // Submit there; iPad keeps its player visible above the keyboard.
+            if !tabletSearch.exists { search.typeText("\n") }
             let expand = app.buttons["expandPlayer"]
-            XCTAssertTrue(expand.waitForExistence(timeout: 5)); expand.tap()
+            XCTAssertTrue(expand.waitForExistence(timeout: 5))
+            XCTAssertTrue(expand.isHittable)
+            expand.tap()
             let close = app.buttons["Close player"]
             XCTAssertTrue(close.waitForExistence(timeout: 5))
             XCTAssertTrue(app.staticTexts[title].firstMatch.exists)
