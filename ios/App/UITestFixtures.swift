@@ -29,7 +29,21 @@ actor UITestTransport: HTTPTransport {
         let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func parameter(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
         let value: String
-        if path.hasSuffix("/local-presence") {
+        if path.hasSuffix("/native/register") {
+            value = #"{"message":"Account created. An administrator must approve it before you can listen."}"#
+        } else if path == "/api/v1/browse/charts" {
+            value = #"{"items":[{"title":"Unavailable fixture song","artist":"Fixture artist","rank":1,"request_key":"012345678901234567890123","track":null,"requested":null}],"source":"Fixture chart","pending":false,"stale":false}"#
+        } else if path == "/api/v1/browse/request" {
+            value = #"{"available":false}"#
+        } else if path == "/api/v1/browse" {
+            if parameter("page") == "1" {
+                if parameter("kind") == "albums" || parameter("kind") == "artists" {
+                    value = #"{"name":"Pop","total":1,"next_offset":1,"indexing":false,"genre_counts":[],"items":[{"id":"aaaaaaaaaaaaaaaaaaaaaaaa","name":"M!ssundaztood","artist":"P!nk","tracks":2}]}"#
+                } else {
+                    value = "{\"name\":\"Pop\",\"total\":2,\"next_offset\":2,\"indexing\":false,\"genre_counts\":[],\"tracks\":\(songs)}"
+                }
+            } else { value = #"{"genres":[{"id":"pop","name":"Pop","count":2}],"decades":[{"id":"2000","name":"2000s","count":2}],"indexing":false,"error":false}"# }
+        } else if path.hasSuffix("/local-presence") {
             return HTTPResult(status: 403, data: Data(#"{"error":{"code":"local_network_required","message":"The playing device is not available for local verification."}}"#.utf8))
         } else if path.hasSuffix("capabilities") {
             value = #"{"server_id":"fixture","features":["rotating_refresh","native_media_manifest_v1","native_catalog_v1","native_playback_v1","native_library_v1"]}"#

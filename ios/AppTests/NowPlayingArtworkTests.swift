@@ -97,6 +97,7 @@ private struct ArtworkRequest: @unchecked Sendable {
 }
 
 private actor RestoredOwnerTransport: HTTPTransport {
+    private(set) var lockScreenRequests = 0
     private(set) var artworkRequests = 0
     private var owner = ""
     private var networkFailure = false
@@ -111,6 +112,7 @@ private actor RestoredOwnerTransport: HTTPTransport {
     func setOwner(_ value: String) { owner = value }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
+        if path.hasSuffix("/local-presence") || path.hasSuffix("/live-activity") { lockScreenRequests += 1 }
         if path.hasSuffix("/native/playback") {
             if networkFailure { throw URLError(.networkConnectionLost) }
             if request.httpMethod == "POST", let body = request.httpBody,
@@ -528,5 +530,33 @@ final class PlaybackDiagnosticsTests: XCTestCase {
         _ = try await writer.export()
         await writer.clear()
         try FileManager.default.removeItem(at: directory)
+    }
+}
+
+
+extension NowPlayingArtworkTests {
+    @MainActor func testRemoteLockScreenDoesNotAttemptRegistrationWithoutWiFi() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        await transport.setOwner("other-device")
+        let state = try await api.state()
+        let track = try await api.track(1)
+        let remote = RemotePlaybackActivity(api: api)
+        remote.automatic = true
+        await remote.networkChanged(wifi: false)
+        for _ in 0..<3 {
+            await remote.update(state: state, track: track, destination: "Other device", ownsOutput: false)
+            await remote.start(state: state, track: track, destination: "Other device")
+        }
+        let requests = await transport.lockScreenRequests
+        XCTAssertEqual(requests, 0)
+        XCTAssertFalse(remote.active)
+        XCTAssertNil(remote.error)
+        XCTAssertTrue(remote.status.contains("Wi-Fi"))
+        await remote.networkChanged(wifi: true)
+        XCTAssertTrue(remote.wifiAvailable)
+        await remote.networkChanged(wifi: false)
+        XCTAssertFalse(remote.wifiAvailable)
     }
 }

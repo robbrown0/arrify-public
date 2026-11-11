@@ -53,6 +53,25 @@ class NativeHTTPTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
+    def test_registration_requires_approval_and_never_issues_session(self):
+        status, result = self.call('/api/v1/native/register', {'username':'newlistener','email':'new@example.invalid','password':'long-new-password'})
+        self.assertEqual(status, 200)
+        self.assertIn('approve', result['message'])
+        self.assertNotIn('access_token', result)
+        with self.assertRaises(PermissionError): self.a.login('newlistener', 'long-new-password', 'native')
+        self.a.approve('newlistener')
+        self.assertTrue(self.a.login('newlistener', 'long-new-password', 'native'))
+
+    def test_registration_validation_duplicates_and_rate_limit(self):
+        path = '/api/v1/native/register'
+        valid = {'username':'newlistener','email':'new@example.invalid','password':'long-new-password'}
+        self.assertEqual(self.call(path, dict(valid, password='short'))[0], 400)
+        self.assertEqual(self.call(path, dict(valid, admin=True))[0], 400)
+        self.assertEqual(self.call(path, valid)[0], 200)
+        self.assertEqual(self.call(path, valid)[0], 400)
+        self.assertEqual(self.call(path, dict(valid, username='another'))[0], 400)
+        self.assertEqual(self.call(path, valid)[0], 429)
+
     def tearDown(self):
         self.server.shutdown(); self.server.server_close(); self.thread.join()
         self.a.db.close(); self.tmp.cleanup()

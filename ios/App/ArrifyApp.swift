@@ -85,6 +85,7 @@ struct SignInView: View {
     @State private var username = ""
     @State private var password = ""
     @State private var submitting = false
+    @State private var creatingAccount = false
     var body: some View {
         NavigationStack {
             Form {
@@ -118,7 +119,9 @@ struct SignInView: View {
                         HStack { Spacer(); if submitting { ProgressView() }; Text("Sign in").bold(); Spacer() }
                     }.disabled(submitting || username.isEmpty || password.isEmpty).accessibilityIdentifier("signIn")
                 }
+                Section { Button("Create account") { creatingAccount = true }.accessibilityIdentifier("createAccount") }
             }.navigationTitle("Arrify")
+                .sheet(isPresented: $creatingAccount) { CreateAccountView(model: model) }
         }
     }
 }
@@ -196,7 +199,7 @@ struct SettingsView: View {
                 }
                 Section("Lock Screen") {
                     Toggle("Automatic Lock Screen controls", isOn: Binding(get: { model.playback.remoteActivity.automatic }, set: { model.playback.remoteActivity.automatic = $0 }))
-                    Text("Follow playback from another device on the same account and local network. Open Arrify once to connect; iOS manages Lock Screen availability.").font(.footnote)
+                    Text("Follow playback from another device on the same account while connected to Wi-Fi on the same local network. Open Arrify once to connect; iOS manages Lock Screen availability.").font(.footnote)
                     Text(model.playback.remoteActivity.status).font(.footnote).foregroundStyle(.secondary)
                     if model.playback.remoteActivity.active {
                         Button("Stop Lock Screen controls") { model.playback.remoteActivity.automatic = false }
@@ -209,7 +212,7 @@ struct SettingsView: View {
                 }
                 Section("Device cache") { CacheStatusView(cache: model.playback.cache) }
                 Section { Button("Sign out", role: .destructive) { Task { await model.logout() } } }
-                Section { Text("Arrify • 0.3.0").foregroundStyle(.secondary) }
+                Section { Text("Arrify • \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown") (build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"))").foregroundStyle(.secondary) }
             }.navigationTitle("Settings").task { await model.refreshBranding() }
         }
     }

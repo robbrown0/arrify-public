@@ -5,6 +5,17 @@ import FoundationNetworking
 #endif
 
 final class ContractTests: XCTestCase {
+    func testBrowseChartHandlesRequestedObjectsAndMissingLocalSongs() throws {
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let chart = try decoder.decode(BrowseChart.self, from: Data(#"{"items":[{"title":"Song","artist":"Artist","rank":1,"request_key":"key","requested":{"id":42},"track":null}],"pending":false,"stale":true}"#.utf8))
+        XCTAssertTrue(chart.items[0].requested)
+        XCTAssertNil(chart.items[0].track)
+        XCTAssertTrue(chart.stale)
+        let filters = BrowseFilters(genre: "r&b", decade: "1990", kind: "songs")
+        let decoded = try JSONDecoder().decode(BrowseFilters.self, from: Data(filters.source.id.utf8))
+        XCTAssertEqual(decoded, filters)
+    }
+
     func testTrackPopularityAndNavigationRemainBackwardCompatible() throws {
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
         let legacy = try decoder.decode(Track.self, from: Data(#"{"id":1,"title":"Song","artist":"Artist","album":"Album"}"#.utf8))

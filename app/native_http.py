@@ -24,7 +24,14 @@ def dispatch(handler, path, data=None):
                 result['media_profiles'] = ['original', 'aac', 'mp3']
                 result['media_leveling_modes'] = ['off']
                 result['native_prefetch_tracks'] = 3
-        elif path == PREFIX + 'server-proof' and data is not None:
+        elif path == PREFIX + 'register' and data is not None:
+            try:a.rate_limit(('native-register', handler.client_address[0]), 5, 900)
+            except ValueError:raise NativeError(429, 'rate_limited', 'Too many attempts. Try again later.') from None
+            if not isinstance(data, dict) or set(data) != {'username', 'password', 'email'}:
+                raise NativeError(400, 'invalid_request', 'Provide a username, email and password.')
+            try:result = a.register(data['username'], data['password'], data['email'])
+            except ValueError as exc:raise NativeError(400, 'invalid_registration', str(exc)) from None
+        elif path == PREFIX + 'server-proof'  and data is not None:
             try:a.rate_limit(('server-proof', handler.client_address[0]), 120, 60)
             except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
             if not isinstance(data,dict) or set(data) != {'nonce'}:raise NativeError(400, 'invalid_request', 'Invalid server verification request.')

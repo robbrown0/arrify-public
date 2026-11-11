@@ -20,6 +20,7 @@ struct TabletShell: View {
                             Text("Arrify").font(.title2.bold())
                         }.padding(.vertical, 24)
                         navigation("Home", "house")
+                        navigation("Browse", "square.grid.2x2")
                         navigation("Songs", "music.note")
                         navigation("Albums", "square.stack")
                         navigation("Artists", "music.mic")
@@ -31,7 +32,7 @@ struct TabletShell: View {
                         navigation("Library", "books.vertical")
                         navigation("Liked songs", "heart")
                         navigation("Playlists", "music.note.list")
-                        navigation("Moods", "sparkles")
+                        navigation("Moods", "circle.lefthalf.filled")
                         navigation("Channels", "antenna.radiowaves.left.and.right")
                         ForEach(model.library.overview?.items.filter { $0.section == "personal" } ?? [], id: \.identity) { item in
                             navigation(item.name, "music.note.list", key: item.identity)
@@ -80,6 +81,7 @@ struct TabletShell: View {
     @ViewBuilder private var content: some View {
         switch destination {
         case "Home": HomeScreen(model: model)
+        case "Browse": BrowseScreen(model: model)
         case "Library": LibraryHome(model: model)
         case "Moods": MoodScreen(model: model)
         case "Settings": SettingsView(model: model)
