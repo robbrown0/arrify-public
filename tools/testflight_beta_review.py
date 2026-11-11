@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Fixes the expanded-player layout hang during dismissal. AirPlay output is centered below play/pause, and channel cards have subtle borders. Search and detail rows show popularity with sources and expanded song actions; tap a song to play without a separate play icon. Changing an iPad search returns to fresh results. Server connection indicators now use a local-network icon and local-network wording.'}
+    attrs = {'whatsNew': 'Browse now brings What’s New, What’s Hot, decades, genres, Essentials, songs, albums, and artists to iPhone and iPad. Request missing chart albums from Browse. Create an account from sign-in, with administrator approval before listening. Remote Lock Screen controls register only while on Wi-Fi. Settings now shows the app version and build. Moods matches the web icon, and local network connections use a distinct router icon.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:

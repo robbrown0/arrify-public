@@ -310,3 +310,47 @@ extension LaunchTests {
         XCTAssertTrue(app.staticTexts["No matching songs"].waitForExistence(timeout: 10))
     }
 }
+
+
+extension LaunchTests {
+    @MainActor func testCreateAccountShowsApprovalAndReturnsToSignIn() {
+        let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        let create = app.buttons["createAccount"]
+        for _ in 0..<4 {
+            if create.exists && create.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(create.exists && create.isHittable)
+        create.tap()
+        app.textFields["newUsername"].tap(); app.textFields["newUsername"].typeText("newlistener")
+        app.textFields["newEmail"].tap(); app.textFields["newEmail"].typeText("new@example.invalid")
+        app.secureTextFields["newPassword"].tap(); app.secureTextFields["newPassword"].typeText("long-new-password")
+        app.secureTextFields["confirmPassword"].tap(); app.secureTextFields["confirmPassword"].typeText("long-new-password")
+        if !app.buttons["submitAccount"].isHittable { app.swipeUp() }
+        app.buttons["submitAccount"].tap()
+        XCTAssertTrue(app.staticTexts["registrationMessage"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["registrationMessage"].label.contains("approve"))
+        app.buttons["Return to sign in"].tap()
+        XCTAssertTrue(app.buttons["signIn"].waitForExistence(timeout: 5))
+    }
+    @MainActor func testBrowseCategoriesChartsAndRequests() {
+        let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Browse"].firstMatch.waitForExistence(timeout: 10)); app.buttons["Browse"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Pop, 2 songs"].waitForExistence(timeout: 5) || app.staticTexts["Pop"].exists)
+        app.staticTexts["Pop"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
+        app.segmentedControls.buttons["Albums"].tap()
+        XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["What’s Hot"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Unavailable fixture song"].waitForExistence(timeout: 10))
+        app.buttons["Request"].tap()
+        XCTAssertTrue(app.buttons["Requested"].waitForExistence(timeout: 10))
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Native Browse chart"; shot.lifetime = .keepAlways; add(shot)
+    }
+}

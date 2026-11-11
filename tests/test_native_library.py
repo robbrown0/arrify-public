@@ -18,6 +18,23 @@ class NativeLibraryTests(unittest.TestCase):
         self.lib=SimpleNamespace(index_lock=contextlib.nullcontext(), tracks={t['id']:t for t in tracks}, albums={album['id']:album}, artists={}, search=Search(tracks,[album],[]))
         self.lib.collections=lambda:[{'slug':'station','name':'Station','section':'channels','tracks':120},{'slug':'mix','name':'Mix','section':'playlists','tracks':120}]
         self.lib.collection_ids=lambda slug:list(range(1,121))
+    def test_browse_playback_expands_entire_filtered_selection(self):
+        from unittest.mock import Mock
+        self.lib.discovery = Mock()
+        self.lib.discovery.select.return_value = list(range(1, 121))
+        filters = {'genre':'pop', 'decade':'2000', 'kind':'songs'}
+        result = expand_playback(self.lib, None, 1, {'action':'play','source':{'kind':'browse','id':json.dumps(filters)},'track_id':75})
+        self.assertEqual(len(result['ids']), 120)
+        self.assertEqual(result['track_id'], 75)
+        self.lib.discovery.select.assert_called_once_with(filters)
+        from urllib.parse import urlencode
+        page = detail(self.lib, None, 1, '/api/v1/native/library/detail?' + urlencode({'kind':'browse','id':json.dumps(filters)}))
+        self.assertEqual(page['item']['kind'], 'browse')
+        self.assertEqual(page['item']['subtitle'], '')
+        self.assertEqual(page['item']['track_count'], 120)
+        for value in ['[]', '{"genre":1}', 'not-json']:
+            with self.assertRaises(NativeError): expand_playback(self.lib, None, 1, {'source':{'kind':'browse','id':value}})
+
     def test_search_popularity_preserves_navigation_and_page_order(self):
         from unittest.mock import Mock
         self.lib.popularity = Mock()

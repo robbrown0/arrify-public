@@ -7,6 +7,15 @@ import ArrifyCore
 /// A remote control card; never activates audio on the controlling device.
 @MainActor @Observable final class RemotePlaybackActivity {
     let api: APIClient
+    private(set) var wifiAvailable = false
+    func networkChanged(wifi: Bool) async {
+        wifiAvailable = wifi
+        if !wifi {
+            waitingReason = "Connect to Wi-Fi to use remote Lock Screen controls."
+            error = nil
+            await stop()
+        } else { lastAttempt = .distantPast }
+    }
     var active = false
     var automatic = UserDefaults.standard.object(forKey: "remoteLockScreenAutomatic") as? Bool ?? true {
         didSet {
@@ -37,7 +46,7 @@ import ArrifyCore
     private var generation = UUID()
     init(api: APIClient) { self.api = api }
     func start(state: PlaybackState?, track: Track?, destination: String) async {
-        guard automatic, UIApplication.shared.applicationState == .active, !starting, let state, let owner = state.ownerDeviceId, let track, track.id == state.currentTrackId else { return }
+        guard wifiAvailable, automatic, UIApplication.shared.applicationState == .active, !starting, let state, let owner = state.ownerDeviceId, let track, track.id == state.currentTrackId else { return }
         guard dismissedOwner != "\(owner):\(state.ownerEpoch)" else { return }
         starting = true
         defer { starting = false }
@@ -45,20 +54,22 @@ import ArrifyCore
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { error = "Enable Live Activities for Arrify in Settings."; return }
         do {
             let (nonce, proof) = try await LocalPeerVerification.proof(api: api, owner: owner, epoch: state.ownerEpoch, purpose: "status")
+            guard wifiAvailable, requestedGeneration == generation, !Task.isCancelled else { return }
             guard try await api.verifyLocalPresence(owner: owner, epoch: state.ownerEpoch, nonce: nonce, proof: proof) else {
                 error = "Lock Screen controls need both devices on the same local network and server push notifications."; return
             }
-            guard requestedGeneration == generation, !Task.isCancelled else { return }
+            guard wifiAvailable, requestedGeneration == generation, !Task.isCancelled else { return }
             let stoppedGeneration = await stop()
             guard stoppedGeneration == generation, !Task.isCancelled else { return }
             let content = content(state: state, track: track, destination: destination)
             let scope = try await api.sessionScope()
-            guard automatic, UIApplication.shared.applicationState == .active, stoppedGeneration == generation else { return }
+            guard wifiAvailable, automatic, UIApplication.shared.applicationState == .active, stoppedGeneration == generation else { return }
             let new = try Activity.request(attributes: PlaybackActivityAttributes(owner: owner, ownerEpoch: state.ownerEpoch, sessionScope: scope), content: content, pushType: .token)
             activity = new; active = true; error = nil
             observePushToken(new)
             requestThumbnail(track.id)
         } catch {
+            guard wifiAvailable, requestedGeneration == generation, !Task.isCancelled else { return }
             let detail = error as NSError
             if let apiError = error as? APIError {
                 self.error = apiError.localizedDescription
@@ -72,7 +83,7 @@ import ArrifyCore
         let token = generation
         tokenTask = Task { [weak self, api] in
             for await bytes in observedActivity.pushTokenUpdates {
-                guard let self, self.generation == token, !Task.isCancelled else { return }
+                guard let self, self.wifiAvailable, self.generation == token, !Task.isCancelled else { return }
                 do {
                     try await api.registerLiveActivity(id: observedActivity.id, token: bytes.map { String(format: "%02x", $0) }.joined(), owner: observedActivity.attributes.owner)
                 } catch {
@@ -84,6 +95,7 @@ import ArrifyCore
         }
     }
     func update(state: PlaybackState?, track: Track?, destination: String, ownsOutput: Bool) async {
+        guard wifiAvailable else { waitingReason = "Connect to Wi-Fi to use remote Lock Screen controls."; error = nil; if active { await stop() }; return }
         guard automatic else { if active { await stop() }; return }
         guard !ownsOutput else {
             waitingReason = "This device owns playback. Automatic controls follow playback owned by another device."
@@ -148,7 +160,7 @@ import ArrifyCore
     func restoreForSession() async {
         let scope = try? await api.sessionScope()
         for old in Activity<PlaybackActivityAttributes>.activities {
-            if automatic, old.activityState != .ended, old.activityState != .dismissed, old.attributes.sessionScope == scope, activity == nil {
+            if wifiAvailable, automatic, old.activityState != .ended, old.activityState != .dismissed, old.attributes.sessionScope == scope, activity == nil {
                 activity = old; active = true; observePushToken(old)
             } else {
                 await old.end(nil, dismissalPolicy: .immediate)

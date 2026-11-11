@@ -61,7 +61,15 @@ def overview(library, accounts, uid):
 
 
 def selection(library, accounts, uid, kind, key):
+    if kind == 'browse':
+        try: filters = json.loads(key)
+        except (ValueError, TypeError): raise NativeError(400, 'invalid_request', 'Choose a Browse category.') from None
+        if not isinstance(filters, dict) or set(filters) != {'genre', 'decade', 'kind'} or not all(isinstance(v, str) for v in filters.values()):
+            raise NativeError(400, 'invalid_request', 'Choose a Browse category.')
+        ids = library.discovery.select(filters)
+        return entry({'name': 'Browse', 'id': key, 'tracks': len(ids)}, kind), ids
     if kind in ('radio-track', 'radio-artist'):
+
         result = library.radio.preview(kind.removeprefix('radio-'), key)
         station = result['station']
         return {'id': key, 'kind': kind, 'name': station['name'], 'subtitle': station['artist'],

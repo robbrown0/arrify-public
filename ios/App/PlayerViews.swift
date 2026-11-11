@@ -418,7 +418,7 @@ struct ServerConnectionBadge: View {
     }
     var body: some View {
         Button { showDetails = true } label: {
-            Image(systemName: connection.home ? "network" : "globe")
+            Image(systemName: connection.home ? "wifi.router" : "globe")
                 .font(.callout).foregroundStyle(color).frame(width: 44, height: 44)
         }.buttonStyle(.plain)
             .accessibilityLabel("Server connection: " + (!connection.connected ? "unreachable" : connection.degraded ? "slow or interrupted" : connection.home ? "local network" : "public"))

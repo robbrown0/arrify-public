@@ -52,12 +52,13 @@ struct LibraryHome: View {
         NavigationStack {
             List {
                 Section("Your library") {
+                    NavigationLink { BrowseScreen(model: model) } label: { Label("Browse", systemImage: "square.grid.2x2") }
                     NavigationLink { LikedSongsView(model: model) } label: { Label("Liked songs", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
                     NavigationLink { BrowserScreen(model: model, title: "Songs", kind: "tracks") } label: { Label("Songs", systemImage: "music.note") }
                     NavigationLink { BrowserScreen(model: model, title: "Albums", kind: "albums") } label: { Label("Albums", systemImage: "square.stack") }
                     NavigationLink { BrowserScreen(model: model, title: "Artists", kind: "artists") } label: { Label("Artists", systemImage: "music.mic") }
                     NavigationLink { PlaylistLibraryView(model: model) } label: { Label("Playlists", systemImage: "music.note.list") }
-                    NavigationLink { MoodScreen(model: model) } label: { Label("Moods", systemImage: "sparkles") }
+                    NavigationLink { MoodScreen(model: model) } label: { Label("Moods", systemImage: "circle.lefthalf.filled") }
                 }.font(.title3).listRowBackground(Color.white.opacity(0.04))
                 if let overview = model.library.overview {
                     let featured = Array(overview.items.filter { $0.section == "playlists" }.prefix(8))
@@ -402,6 +403,9 @@ struct HomeScreen: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 32) {
                     Text("On the record.").font(.largeTitle.bold())
+                    if UIDevice.current.userInterfaceIdiom != .pad {
+                        NavigationLink { BrowseScreen(model: model) } label: { Label("Browse", systemImage: "square.grid.2x2").font(.headline).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading) }
+                    }
                     if UIDevice.current.userInterfaceIdiom != .pad {
                         HStack(spacing: 20) {
                             NavigationLink("Songs") { BrowserScreen(model: model, title: "Songs", kind: "tracks") }

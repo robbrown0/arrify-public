@@ -5,7 +5,15 @@ import FoundationNetworking
 
 private struct RouteUnavailable: Error { let cause: any Error }
 private struct ErrorBody: Decodable { let code: String; let message: String }
-private struct ErrorEnvelope: Decodable { let error: ErrorBody }
+private struct ErrorEnvelope: Decodable {
+    let error: ErrorBody
+    enum CodingKeys: String, CodingKey { case error }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let native = try? c.decode(ErrorBody.self, forKey: .error) { error = native }
+        else { error = ErrorBody(code: "request_failed", message: try c.decode(String.self, forKey: .error)) }
+    }
+}
 
 public actor APIClient {
     private let transport: any HTTPTransport
@@ -274,6 +282,27 @@ public actor APIClient {
     public func addToPlaylist(id: Int, trackId: Int) async throws -> LibraryEntry {
         struct Input: Encodable { let id: Int; let addTrackId: Int }
         return try await call("/api/v1/native/playlists", method: "POST", body: Self.encoder().encode(Input(id: id, addTrackId: trackId)))
+    }
+    public func register(endpoint text: String, username: String, email: String, password: String) async throws -> AccountRegistration {
+        let endpoint = try Endpoint(text)
+        struct Signup: Encodable { let username: String; let email: String; let password: String }
+        let body = try Self.encoder().encode(Signup(username: username, email: email, password: password))
+        let response = try await transport.send(Self.request(endpoint: endpoint, path: "/api/v1/native/register", method: "POST", body: body))
+        return try Self.decode(response, as: AccountRegistration.self)
+    }
+    public func browse() async throws -> BrowseOverview { try await call("/api/v1/browse") }
+    public func browsePage(_ filters: BrowseFilters, offset: Int = 0) async throws -> BrowsePage {
+        var q = URLComponents()
+        q.queryItems = [URLQueryItem(name: "page", value: "1"), URLQueryItem(name: "genre", value: filters.genre), URLQueryItem(name: "decade", value: filters.decade), URLQueryItem(name: "kind", value: filters.kind), URLQueryItem(name: "offset", value: String(offset)), URLQueryItem(name: "limit", value: "50")]
+        return try await call("/api/v1/browse?" + (q.percentEncodedQuery ?? ""))
+    }
+    public func browseChart(genre: String, recent: Bool) async throws -> BrowseChart {
+        var q = URLComponents(); q.queryItems = [URLQueryItem(name: "genre", value: genre), URLQueryItem(name: "new", value: recent ? "1" : "0")]
+        return try await call("/api/v1/browse/charts?" + (q.percentEncodedQuery ?? ""))
+    }
+    public func requestChartSong(genre: String, entry: String) async throws -> BrowseRequestResult {
+        struct Request: Encodable { let genre: String; let entry: String }
+        return try await call("/api/v1/browse/request", method: "POST", body: Self.encoder().encode(Request(genre: genre, entry: entry)))
     }
     public func library() async throws -> LibraryOverview { try await call("/api/v1/native/library") }
     public func entities(kind: String, query: String, offset: Int = 0, revision: String? = nil) async throws -> EntityPage {

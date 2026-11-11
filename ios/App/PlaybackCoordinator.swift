@@ -203,9 +203,11 @@ import Network
     func start() {
         guard pollTask == nil else { return }
         let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] _ in
+        monitor.pathUpdateHandler = { [weak self] path in
+            let wifi = path.status == .satisfied && path.usesInterfaceType(.wifi)
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                await self.remoteActivity.networkChanged(wifi: wifi)
                 await self.api.networkChanged()
                 await self.reconcile()
             }
