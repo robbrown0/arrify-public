@@ -121,6 +121,7 @@ import Network
                 self.position = time.seconds.isFinite ? time.seconds : 0
                 let seconds = self.player.currentItem?.duration.seconds ?? 0
                 self.duration = seconds.isFinite ? seconds : 0
+                PlaybackDiagnostics.record("playback-tick position=\(self.position) duration=\(self.duration)")
                 self.publishNowPlaying()
                 if self.player.currentItem?.status == .failed { self.recoverServerRoute() }
             }

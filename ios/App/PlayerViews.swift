@@ -72,13 +72,17 @@ struct NowPlayingView: View {
                             cover.frame(maxWidth: min(tablet ? proxy.size.width * 0.68 : proxy.size.width - 48, max(160, proxy.size.height - controlsHeight - 132)))
                                 .padding(.bottom, 12)
                             controls.frame(maxWidth: tablet ? 640 : 520)
-                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { PlaybackDiagnostics.record("controls-height=\($0)"); controlsHeight = $0 }
                         }
                     }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 24)
                         .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .top)
                 }
             }.accessibilityIdentifier("fullScreenPlayer").foregroundStyle(.white).tint(.white)
-        }.sheet(isPresented: $showQueue) { UpNextView(playback: playback) }
+        }.onAppear { PlaybackDiagnostics.record("expanded-player-appeared") }
+            .onDisappear { PlaybackDiagnostics.record("expanded-player-disappeared") }
+            .onChange(of: showQueue) { PlaybackDiagnostics.record("queue-presented=\(showQueue)") }
+            .onChange(of: showArtwork) { PlaybackDiagnostics.record("artwork-presented=\(showArtwork)") }
+            .sheet(isPresented: $showQueue) { UpNextView(playback: playback) }
             .fullScreenCover(isPresented: $showArtwork) { ArtworkPresentationView(playback: playback) }
     }
     private var cover: some View {

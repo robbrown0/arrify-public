@@ -56,6 +56,7 @@ import AVKit
 
 @main struct ArrifyApp: App {
     @State private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
     var body: some Scene {
         WindowGroup {
             Group {
@@ -64,7 +65,17 @@ import AVKit
                 else { SignInView(model: model) }
             }
             .tint(.green).preferredColorScheme(.dark)
-            .task { await model.restore() }
+            .task {
+                PlaybackDiagnostics.record("launch build=" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"))
+                PlaybackDiagnostics.configure(active: scenePhase == .active)
+                await model.restore()
+            }
+            .onChange(of: scenePhase) {
+                PlaybackDiagnostics.record("scene=\(scenePhase)")
+                PlaybackDiagnostics.configure(active: scenePhase == .active)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in PlaybackDiagnostics.record("keyboard-frame-change") }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in PlaybackDiagnostics.record("keyboard-hidden") }
         }
     }
 }
@@ -122,7 +133,7 @@ struct MainView: View {
             } else if #available(iOS 26.1, *) { tabs.tabViewBottomAccessory(isEnabled: model.playback.track != nil) { miniPlayer } }
             else if #available(iOS 26.0, *) { tabs.tabViewBottomAccessory { miniPlayer } }
             else { tabs }
-        }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
+        }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
         .task { await model.refreshBranding(); await model.favorites.refresh() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(playback: model.playback, favorites: model.favorites) }
     }
     private var tabs: some View {
@@ -175,6 +186,7 @@ struct SettingsView: View {
                         Text("Original").tag("original"); Text("AAC").tag("aac"); Text("MP3").tag("mp3")
                     }
                     Text("Applies to the next song.").font(.footnote).foregroundStyle(.secondary)
+                    NavigationLink("Playback diagnostics") { PlaybackDiagnosticsView() }
                     NavigationLink("Audio output diagnostics") { AudioRouteDiagnosticsView(playback: model.playback) }
                 }
                 Section("Lock Screen") {
