@@ -20,6 +20,16 @@ class LiveActivityTests(unittest.TestCase):
         self.service = LiveActivities(self.a, SimpleNamespace(state=lambda uid:self.state), self.tmp.name,
             sender=SimpleNamespace(send=lambda *args:self.calls.append(args) or (self.code, self.reason)), start_worker=False)
         self.addCleanup(self.service.close)
+    def test_account_erasure_during_push_does_not_retain_activity_cache(self):
+        self.a.db.execute('INSERT INTO live_activities VALUES(?,?,?,?,?)', (self.login['session_id'], 'first', 'a'*64, 'player', int(time.time())+1000))
+        def send(*args):
+            self.a.delete_account('long-test-password', user_id=self.uid)
+            return 200, ''
+        self.service.sender = SimpleNamespace(send=send)
+        self.service.tick()
+        self.assertFalse(self.service.sent)
+        self.assertEqual(self.a.db.execute('SELECT count(*) FROM live_activities').fetchone()[0], 0)
+
     def register(self, activity='first', token='a'*64, owner='player'):
         return self.service.dispatch(self.uid,self.login['access_token'],{'action':'register','activity_id':activity,'token':token,'owner_device_id':owner})
     def test_push_coalescing_pause_and_owner_change_end(self):

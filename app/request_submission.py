@@ -57,7 +57,7 @@ class RequestSubmissions:
             with a.lock:
                 count=a.db.execute('SELECT count(*) FROM music_requests WHERE user_id=? AND created>?',(uid,int(time.time())-86400)).fetchone()[0]
                 if cap and count>=cap:raise RequestLimit(f'You can request up to {cap} selections per day.')
-            result=self.submit('/requests',{'selection':selection,'user_id':uid})
+            result=self.submit('/requests',{'selection':selection,'user_id':0})
             with a.lock:
                 a.db.execute('INSERT OR IGNORE INTO music_requests(user_id,request_id,created,metadata) VALUES(?,?,?,?)',(uid,result['id'],int(time.time()),json.dumps({**{k:result.get(k,'') for k in ('title','artist','album')},**({'browse_key':source['browse_key']} if source and source.get('browse_key') else {})})))
                 if source and source.get('browse_key'):

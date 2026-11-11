@@ -29,7 +29,13 @@ actor UITestTransport: HTTPTransport {
         let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func parameter(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
         let value: String
-        if path.hasSuffix("/native/register") {
+        if path.hasSuffix("/native/account/delete") {
+            let input = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            if input?["password"] as? String != "fixture" {
+                return HTTPResult(status: 403, data: Data(#"{"error":{"code":"verification_failed","message":"The account details could not be verified."}}"#.utf8))
+            }
+            value = #"{"message":"Your account and personal data have been deleted. You are signed out on all devices."}"#
+        } else if path.hasSuffix("/native/register") {
             value = #"{"message":"Account created. An administrator must approve it before you can listen."}"#
         } else if path == "/api/v1/browse/charts" {
             value = #"{"items":[{"title":"Unavailable fixture song","artist":"Fixture artist","rank":1,"request_key":"012345678901234567890123","track":null,"requested":null}],"source":"Fixture chart","pending":false,"stale":false}"#

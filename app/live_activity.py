@@ -179,6 +179,8 @@ class LiveActivities:
             if not ended and previous and previous[0] == fingerprint and now - previous[1] < 60: continue
             aps = {'timestamp': now, 'event': 'end' if ended else 'update', 'content-state': content, 'stale-date': now + 90}
             if ended: aps['dismissal-date'] = now
+            with self.a.lock:
+                if not self.a.db.execute('SELECT 1 FROM native_families WHERE id=?', (row['family'],)).fetchone():continue
             try: code, reason = self.sender.send(row['token'], {'aps': aps}, row['activity'])
             except (OSError, ValueError, subprocess.SubprocessError):
                 self.retry_after = now + 30; return
@@ -187,7 +189,9 @@ class LiveActivities:
                 if ended or invalid_token:
                     with self.a.lock:self.a.db.execute('DELETE FROM live_activities WHERE family=? AND activity=?', key)
                     self.sent.pop(key, None)
-                else:self.sent[key] = (fingerprint, now)
+                else:
+                    with self.a.lock:
+                        if self.a.db.execute('SELECT 1 FROM native_families WHERE id=?', (row['family'],)).fetchone():self.sent[key] = (fingerprint, now)
             else:
                 # BadTopic and other provider errors are not invalid device tokens.
                 # Keep subscriptions so correcting configuration can restore updates.

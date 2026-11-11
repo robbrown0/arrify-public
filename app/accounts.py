@@ -23,6 +23,9 @@ class Accounts:
         self.db.executescript('''
           PRAGMA journal_mode=WAL;
           PRAGMA foreign_keys=ON;
+          PRAGMA secure_delete=ON;
+          CREATE TABLE IF NOT EXISTS deleted_account_ids(id INTEGER PRIMARY KEY);
+          CREATE TABLE IF NOT EXISTS account_lifecycle(id INTEGER PRIMARY KEY CHECK(id=1), setup_complete INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, admin INTEGER NOT NULL DEFAULT 0,
             created INTEGER NOT NULL);
@@ -69,6 +72,10 @@ class Accounts:
         if not duplicates:self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS profiles_unique_email ON profiles(lower(trim(email))) WHERE trim(email)<>''")
         from .native_auth import migrate
         migrate(self.db)
+        self.db.execute('INSERT OR IGNORE INTO account_lifecycle VALUES(1,0)')
+        self.db.execute('UPDATE account_lifecycle SET setup_complete=1 WHERE EXISTS(SELECT 1 FROM users WHERE admin=1 OR deleted_at>0)')
+        from .account_deletion import restore
+        restore(self)
         self.attempts = {}
         # Equal work for nonexistent usernames.
         self.dummy = self.hash_password(secrets.token_urlsafe(24))
@@ -137,11 +144,42 @@ class Accounts:
         try:
             with self.transaction():
                 self.check_email_available(email)
-                uid=self.db.execute('INSERT INTO users(username,password,created) VALUES(?,?,?)',(username,encoded,int(time.time()))).lastrowid
+                uid=self.db.execute('SELECT coalesce(max(id),0)+1 FROM (SELECT id FROM users UNION ALL SELECT id FROM deleted_account_ids)').fetchone()[0]
+                self.db.execute('INSERT INTO users(id,username,password,created) VALUES(?,?,?,?)',(uid,username,encoded,int(time.time())))
                 self.update_profile(uid,'',email)
         except sqlite3.IntegrityError:
             raise ValueError('That username or email is already in use.') from None
         return {'message': 'Account created. An administrator must approve it before you can listen.'}
+
+    def delete_account(self, password, *, user_id=None, username=None):
+        """Password reauthentication works even for pending/frozen accounts."""
+        from .account_deletion import record, erase, install_guards
+        if not isinstance(password, str) or not 1 <= len(password) <= 128:
+            raise PermissionError('The account details could not be verified.')
+        with self.lock:
+            row = self.db.execute('SELECT * FROM users WHERE deleted_at=0 AND '+('id=?' if user_id is not None else 'username=?'),
+                                  (user_id if user_id is not None else str(username).strip().lower(),)).fetchone()
+        stored = row['password'] if row else self.dummy
+        valid = hmac.compare_digest(self.hash_password(password, stored.split(':')[0]), stored)
+        if not row or not valid:
+            raise PermissionError('The account details could not be verified.')
+        with self.recovery_lock(), self.transaction():
+            current = self.db.execute('SELECT * FROM users WHERE id=? AND deleted_at=0', (row['id'],)).fetchone()
+            if not current or not hmac.compare_digest(current['password'], stored):
+                raise PermissionError('The account details changed. Try again.')
+            uid = row['id']
+            # Write-ahead erasure intent survives restoring an older database.
+            record(self, uid)
+            self.db.execute('INSERT OR IGNORE INTO deleted_account_ids VALUES(?)', (uid,))
+            if row['admin']:
+                self.db.execute('UPDATE account_lifecycle SET setup_complete=1 WHERE id=1')
+            grant = self.directory/'recovery.json'
+            try: matches = json.loads(grant.read_text()).get('username') == row['username']
+            except (OSError, ValueError): matches = False
+            if matches: grant.unlink(missing_ok=True)
+            erase(self, uid)
+            install_guards(self)
+        return {'message': 'Your account and personal data have been deleted. You are signed out on all devices.', '_erased_id': uid}
 
     def login(self, username, password, kind='web'):
         if not isinstance(password, str) or len(password) > 128:
@@ -309,10 +347,11 @@ class Accounts:
             result = self.db.execute('UPDATE users SET approved=1,admin=max(admin,?) WHERE username=?', (int(admin), username))
             if not result.rowcount:
                 raise ValueError('Account not found. Register it first.')
+            if admin:self.db.execute('UPDATE account_lifecycle SET setup_complete=1 WHERE id=1')
 
     def needs_setup(self):
         with self.lock:
-            return not self.db.execute('SELECT 1 FROM users WHERE admin=1 LIMIT 1').fetchone()
+            return not self.db.execute('SELECT setup_complete FROM account_lifecycle WHERE id=1').fetchone()[0] and not self.db.execute('SELECT 1 FROM users WHERE admin=1 LIMIT 1').fetchone()
 
     def bootstrap(self, username, password, email=None):
         """Explicit LAN-only owner setup; ordinary signup never self-promotes."""

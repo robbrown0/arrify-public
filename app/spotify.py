@@ -186,6 +186,7 @@ class Spotify:
     def request(self,uid,path,method='GET',data=None,cached=False):
         if not path.startswith('/v1/') or any(c in path for c in ('\r','\n','#')):raise ValueError('Invalid Spotify request.')
         key=(uid,path)
+        with self.lock:generation=self.generations.get(uid,0)
         if cached:
             with self.lock:
                 found=self.cache.get(key)
@@ -193,6 +194,7 @@ class Spotify:
         value=self.raw('https://api.spotify.com'+path,method,data,self.token(uid)['access_token'])
         if cached:
             with self.lock:
+                if generation!=self.generations.get(uid,0):raise PermissionError('Spotify was disconnected.')
                 self.cache[key]=(self.now(),value);self.cache.move_to_end(key)
                 while len(self.cache)>128:self.cache.popitem(last=False)
         return value

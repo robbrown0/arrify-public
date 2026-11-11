@@ -14,6 +14,7 @@ import AVKit
     var endpoint = "https://arrify.robnets.com"
     var homeEndpoint = ""
     var error: String?
+    var accountDeleted = false
     init() {
         #if DEBUG
         if ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] == "1" {
@@ -51,6 +52,16 @@ import AVKit
         guard signedIn else { return }
         brandIcon = data.flatMap { ArtworkDecoder.image($0, pixels: 192) }
     }
+    func finishAccountDeletion() async {
+        await playback.remoteActivity.stop()
+        playback.stop()
+        await artwork.clearPersistentCache()
+        UserDefaults.standard.set(false, forKey: "playbackDiagnostics")
+        PlaybackDiagnostics.configure(active: false)
+        await PlaybackDiagnostics.writer.clear()
+        await logout()
+        accountDeleted = true
+    }
     func logout() async { await playback.remoteActivity.stop(); brandIcon = nil; playback.stop(); library.clear(); favorites.clear(); artwork.clear(); signedIn = false; await api.logout() }
 }
 
@@ -65,6 +76,9 @@ import AVKit
                 else { SignInView(model: model) }
             }
             .tint(.green).preferredColorScheme(.dark)
+            .alert("Account deleted", isPresented: $model.accountDeleted) {
+                Button("OK", role: .cancel) {}
+            } message: { Text("Your account and personal data have been deleted. You are signed out on all devices.") }
             .task {
                 PlaybackDiagnostics.record("launch build=" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"))
                 PlaybackDiagnostics.configure(active: scenePhase == .active)
@@ -86,6 +100,7 @@ struct SignInView: View {
     @State private var password = ""
     @State private var submitting = false
     @State private var creatingAccount = false
+    @State private var deletingAccount = false
     var body: some View {
         NavigationStack {
             Form {
@@ -119,9 +134,13 @@ struct SignInView: View {
                         HStack { Spacer(); if submitting { ProgressView() }; Text("Sign in").bold(); Spacer() }
                     }.disabled(submitting || username.isEmpty || password.isEmpty).accessibilityIdentifier("signIn")
                 }
-                Section { Button("Create account") { creatingAccount = true }.accessibilityIdentifier("createAccount") }
+                Section {
+                    Button("Create account") { creatingAccount = true }.accessibilityIdentifier("createAccount")
+                    Button("Delete an existing account", role: .destructive) { deletingAccount = true }.accessibilityIdentifier("deleteExistingAccount")
+                }
             }.navigationTitle("Arrify")
                 .sheet(isPresented: $creatingAccount) { CreateAccountView(model: model) }
+                .sheet(isPresented: $deletingAccount) { NavigationStack { DeleteAccountView(model: model, signedIn: false) } }
         }
     }
 }
@@ -211,7 +230,10 @@ struct SettingsView: View {
                     Button("Clear artwork cache") { Task { await model.artwork.clearPersistentCache() } }
                 }
                 Section("Device cache") { CacheStatusView(cache: model.playback.cache) }
-                Section { Button("Sign out", role: .destructive) { Task { await model.logout() } } }
+                Section("Account") {
+                    NavigationLink { DeleteAccountView(model: model, signedIn: true) } label: { Text("Delete account").foregroundStyle(.red) }.accessibilityIdentifier("deleteAccountSettings")
+                    Button("Sign out", role: .destructive) { Task { await model.logout() } }
+                }
                 Section { Text("Arrify • \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown") (build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"))").foregroundStyle(.secondary) }
             }.navigationTitle("Settings").task { await model.refreshBranding() }
         }
