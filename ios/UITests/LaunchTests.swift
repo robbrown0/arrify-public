@@ -247,6 +247,11 @@ extension LaunchTests {
             let close = app.buttons["Close player"]
             XCTAssertTrue(close.waitForExistence(timeout: 5))
             XCTAssertTrue(app.staticTexts[title].firstMatch.exists)
+            let pause = app.buttons["expandedPlayPause"]
+            let output = app.descendants(matching: .any)["playerAirPlay"].firstMatch
+            XCTAssertTrue(pause.exists)
+            XCTAssertTrue(output.exists)
+            XCTAssertEqual(pause.frame.midX, output.frame.midX, accuracy: 1, "Output picker must be centered beneath play/pause")
             close.tap()
             XCTAssertTrue(search.waitForExistence(timeout: 5))
             XCTAssertTrue(search.isHittable, "Closing the long-title player must return a responsive search UI")

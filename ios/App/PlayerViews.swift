@@ -140,7 +140,7 @@ struct NowPlayingView: View {
                         if playback.busy { ProgressView().tint(.black) }
                         else { Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill").font(.system(size: 30, weight: .semibold)).foregroundStyle(.black) }
                     }.frame(width: 68, height: 68).padding(5).overlay { PlaybackProgressRing(progress: playback.progress) }
-                }.accessibilityLabel(playback.showsPauseControl ? "Pause" : "Play")
+                }.accessibilityLabel(playback.showsPauseControl ? "Pause" : "Play").accessibilityIdentifier("expandedPlayPause")
                 Spacer(minLength: 4)
                 Button { Task { await playback.send("next") } } label: {
                     Image(systemName: "forward.end.fill").font(.system(size: 27)).frame(width: 44, height: 44)
@@ -154,20 +154,20 @@ struct NowPlayingView: View {
                     .disabled(playback.state?.queueControlsAvailable != true)
             }.buttonStyle(.plain)
             SystemVolumeSlider(retainedView: playback.expandedVolumeView).frame(height: 44).padding(.top, 6)
-            HStack {
+            HStack(spacing: 0) {
                 HStack(spacing: 4) {
                     ServerConnectionBadge(connection: playback.serverConnection)
                     Button { showArtwork = true } label: { Image(systemName: "photo").frame(width: 44, height: 44) }
                         .accessibilityLabel("Show artwork").accessibilityIdentifier("artworkDisplayButton")
-                }
-                Spacer()
+                }.frame(width: 92, alignment: .leading)
                 VStack(spacing: 0) {
                     AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")
                     Text(playback.routeDescription).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer()
+                        .accessibilityIdentifier("playerOutputDescription")
+                }.frame(maxWidth: .infinity)
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }
                     .accessibilityLabel("Up next").accessibilityIdentifier("upNext")
+                    .frame(width: 92, alignment: .trailing)
             }.font(.title3)
         }
     }
