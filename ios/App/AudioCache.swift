@@ -29,8 +29,16 @@ import ArrifyCore
     }
     private func key(_ item: MediaItem) -> String { "\(item.trackId):\(item.sourceRevision ?? ""):\(item.profile)" }
     func file(for item: MediaItem) -> URL? {
-        guard let entry = files[item.trackId], entry.key == key(item) else { return nil }
+        guard let entry = files[item.trackId] else { return nil }
+        guard entry.key == key(item) else { invalidate(item.trackId); return nil }
+        guard let bytes = try? FileManager.default.attributesOfItem(atPath: entry.url.path)[.size] as? NSNumber,
+              bytes.intValue == entry.bytes else { invalidate(item.trackId); return nil }
         return entry.url
+    }
+    func invalidate(_ id: Int, matching url: URL? = nil) {
+        if let url, files[id]?.url != url { return }
+        if let entry = files.removeValue(forKey: id) { try? FileManager.default.removeItem(at: entry.url) }
+        update(id, state: "retrying")
     }
     func reset() {
         generation = UUID(); files = [:]; items = []
@@ -62,7 +70,7 @@ import ArrifyCore
                 guard epoch == generation, !Task.isCancelled else { return }
                 guard let http = response as? HTTPURLResponse, http.statusCode == 200,
                       (try FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.intValue == size else { throw APIError.invalidResponse }
-                let suffix = item.mimeType == "audio/flac" || item.mimeType == "audio/x-flac" ? ".flac" : item.mimeType == "audio/mpeg" ? ".mp3" : item.mimeType == "audio/mp4" ? ".m4a" : ".audio"
+                let suffix = item.mimeType == "audio/flac" || item.mimeType == "audio/x-flac" ? ".flac" : item.mimeType == "audio/mpeg" ? ".mp3" : item.mimeType == "audio/mp4" ? ".m4a" : ["audio/wav", "audio/x-wav", "audio/wave"].contains(item.mimeType ?? "") ? ".wav" : ".audio"
                 let target = directory.appendingPathComponent(UUID().uuidString + suffix)
                 try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: temporary.path)
                 try FileManager.default.moveItem(at: temporary, to: target)

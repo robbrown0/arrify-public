@@ -33,6 +33,9 @@ import AVKit
         favorites = FavoritesStore(api: api)
         library = LibraryStore(api: api)
         artwork = ArtworkStore(api: api)
+        playback.onHistoryRecorded = { [weak library] in
+            library?.scheduleRefresh()
+        }
         RemoteControlRuntime.api = api
     }
     func restore() async {
@@ -171,24 +174,28 @@ struct MainView: View {
         content
         .contentMargins(.bottom, UIDevice.current.userInterfaceIdiom != .pad && model.playback.track != nil ? playerScrollClearance : 0, for: .scrollContent)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if UIDevice.current.userInterfaceIdiom != .pad, model.playback.track != nil {
-                // Keep the player in a stable content inset. The system tab
-                // accessory can change its hit-testing position after scrolling
-                // or while search is editing, losing the first expansion tap.
-                miniPlayer.background(.regularMaterial, in: Capsule())
-                    .padding(.horizontal, 16).padding(.bottom, 8)
-            }
-        }
-            .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 8) {
+                // Keep status beside playback controls. A top inset outside the
+                // navigation stack can cover its search field and consume taps.
                 if model.playback.hasOtherOutput {
-                    HStack { Text("Playing on another device").font(.footnote); Spacer(); Button("Play here") { Task { await model.playback.send("takeover") } } }.padding().background(.thinMaterial)
+                    HStack { Text("Playing on another device").font(.footnote); Spacer(); Button("Play here") { Task { await model.playback.send("takeover") } } }
+                        .padding().background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
                 if model.playback.connectionInterrupted {
                     Label("Reconnecting… Playback continues where possible.", systemImage: "wifi.exclamationmark")
-                        .font(.footnote).padding().frame(maxWidth: .infinity).background(.thinMaterial)
+                        .font(.footnote).padding().frame(maxWidth: .infinity).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
-                if let message = model.playback.message { Text(message).font(.footnote).padding().frame(maxWidth: .infinity).background(.thinMaterial) }
-            }
+                if let message = model.playback.message {
+                    Text(message).font(.footnote).padding().frame(maxWidth: .infinity)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .accessibilityIdentifier("playbackStatusMessage")
+                }
+                if UIDevice.current.userInterfaceIdiom != .pad, model.playback.track != nil {
+                    // A stable content inset keeps the player usable while searching.
+                    miniPlayer.background(.regularMaterial, in: Capsule())
+                }
+            }.padding(.horizontal, 16).padding(.bottom, 8)
+        }
     }
     private var miniPlayer: some View {
         MiniPlayerView(playback: model.playback) { showPlayer = true }

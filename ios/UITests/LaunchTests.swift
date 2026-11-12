@@ -47,6 +47,9 @@ final class LaunchTests: XCTestCase {
         app.buttons["signIn"].tap()
         let recent = app.buttons["Play recently played song Just Like a Pill by P!nk"]
         XCTAssertTrue(recent.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Playlists"].exists)
+        XCTAssertFalse(app.staticTexts["Set the mood"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["homePlaylistsAll"].exists)
         recent.tap()
         XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
         XCTAssertTrue(app.buttons["More options for Just Like a Pill"].waitForExistence(timeout: 10))
@@ -54,7 +57,10 @@ final class LaunchTests: XCTestCase {
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
         }
-        app.buttons["Add to Liked songs"].tap()
+        let likeAction = app.buttons["Add to Liked songs"]
+        XCTAssertTrue(likeAction.isHittable)
+        likeAction.press(forDuration: 0.15)
+        XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
         XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
     }
     @MainActor func testSearchPopularityAndSongOptions() {
@@ -76,7 +82,10 @@ final class LaunchTests: XCTestCase {
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
         }
-        app.buttons["Add to Liked songs"].tap()
+        let likeAction = app.buttons["Add to Liked songs"]
+        XCTAssertTrue(likeAction.isHittable)
+        likeAction.press(forDuration: 0.15)
+        XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
         XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
     }
     @MainActor func testTabletNewSearchLeavesPreviousDetail() throws {
@@ -357,8 +366,18 @@ extension LaunchTests {
             XCTAssertTrue(output.exists)
             XCTAssertEqual(pause.frame.midX, output.frame.midX, accuracy: 1, "Output picker must be centered beneath play/pause")
             close.tap()
+            XCTAssertTrue(close.waitForNonExistence(timeout: 5), "Wait for full-screen dismissal before focusing the underlying search")
             XCTAssertTrue(search.waitForExistence(timeout: 5))
             XCTAssertTrue(search.isHittable, "Closing the long-title player must return a responsive search UI")
+            search.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        }
+        // The fixture intentionally never finishes preparation. Its timeout
+        // banner must not cover the navigation search field or intercept input.
+        if !tabletSearch.exists {
+            let status = app.staticTexts["playbackStatusMessage"]
+            XCTAssertTrue(status.waitForExistence(timeout: 35))
+            XCTAssertGreaterThan(status.frame.minY, search.frame.maxY)
             search.tap()
         }
         // An actual interaction, not just an existence query, verifies the UI

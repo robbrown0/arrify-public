@@ -22,6 +22,13 @@ import CryptoKit
             if generation == token { self.error = error.localizedDescription }
         }
     }
+    func scheduleRefresh() {
+        let token = generation
+        Task { @MainActor [weak self] in
+            guard let self, self.generation == token else { return }
+            await self.refresh()
+        }
+    }
     func clear() { generation = UUID(); overview = nil; error = nil; updated = nil; loading = false }
 }
 
