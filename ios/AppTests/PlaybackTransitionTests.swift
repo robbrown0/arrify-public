@@ -58,6 +58,7 @@ final class PlaybackTransitionTests: XCTestCase {
         // Wait for the real-start heartbeat to finish so the deliberately held
         // GET belongs to this task, not a coalesced background reconciliation.
         for _ in 0..<500 where player.reconciling || player.historyRevision == 0 {
+            if !player.reconciling { await player.reconcile() }
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertFalse(player.reconciling)
