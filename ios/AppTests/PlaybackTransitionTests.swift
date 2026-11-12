@@ -4,7 +4,7 @@ import ArrifyCore
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
-    @MainActor func fixture() async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
+    @MainActor func fixture(onHistoryRecorded: (@MainActor () -> Void)? = nil) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
         let transport = CallResumeTransitionTransport()
         let api = APIClient(transport: transport, store: UITestStore())
         try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
@@ -27,6 +27,7 @@ final class PlaybackTransitionTests: XCTestCase {
             return (target, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
         let coordinator = PlaybackCoordinator(api: api, audioSession: UITestAudioSession(), cache: cache)
+        coordinator.onHistoryRecorded = onHistoryRecorded
         await transport.setOwner(coordinator.deviceId)
         let manifest = try await api.manifest(deviceId: coordinator.deviceId, epoch: 1, profile: "original")
         await cache.fill(manifest, api: api)
@@ -172,10 +173,9 @@ final class PlaybackTransitionTests: XCTestCase {
     }
 
     @MainActor func testConfirmedHistoryRefreshesOncePerPlayAndMediaResetRequiresUser() async throws {
-        let (player, _) = try await fixture()
-        defer { player.stop() }
         var refreshes = 0
-        player.onHistoryRecorded = { refreshes += 1 }
+        let (player, _) = try await fixture(onHistoryRecorded: { refreshes += 1 })
+        defer { player.stop() }
         for _ in 0..<100 where !player.isPlaying { try await Task.sleep(for: .milliseconds(20)) }
         await player.reconcile(); await player.reconcile()
         XCTAssertEqual(refreshes, 1)

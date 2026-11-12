@@ -77,7 +77,7 @@ import Network
     var ownsOutput: Bool { state?.ownerDeviceId == deviceId }
     var hasOtherOutput: Bool { state?.ownerDeviceId != nil && !ownsOutput }
     var showsPauseControl: Bool {
-        if hasOtherOutput { return state?.playing == true }
+        if hasOtherOutput { return state?.playing == true && state?.observed != "failed" }
         if playbackFailed || (loadedKey != nil && completedKey == loadedKey) { return false }
         return permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true)
     }
@@ -88,6 +88,8 @@ import Network
     private var liveUpdatePending = false
     private var liveConnected = false
     private var prepareTask: Task<Void, Never>?
+    private var preparationGeneration = UUID()
+    private var endedTransitionID: String?
     private var loadedProfile = "original"
     private var retryPreparation = false
     private var loadedKey: String?
@@ -114,6 +116,11 @@ import Network
     private var heartbeatSequence: HeartbeatSequence
     private var observers: [NSObjectProtocol] = []
     private var timeObserver: Any?
+    @ObservationIgnored private var statusObservation: NSKeyValueObservation?
+    @ObservationIgnored private var itemObservation: NSKeyValueObservation?
+    @ObservationIgnored private var currentObservation: NSKeyValueObservation?
+    private var diagnosticState: String?
+    private var historyRequestKey: String?
     private var permission = PlaybackPermission()
     private var commandInFlight = false
     private var endedInFlight = false
@@ -162,6 +169,7 @@ import Network
             owner.cancelRecovery()
             owner.controlRevision += 1
             owner.completedKey = owner.loadedKey
+            owner.endedTransitionID = UUID().uuidString.lowercased()
             owner.endedInFlight = true
             PlaybackDiagnostics.record("track-ended awaiting-server-confirmation")
             owner.transitionTask = UIApplication.shared.beginBackgroundTask(withName: "Finish song transition") { [weak owner] in
@@ -247,6 +255,18 @@ import Network
         }
     }
     private func installTimeObserver() {
+        statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.playerStateChanged() }
+        }
+        currentObservation = player.observe(\.currentItem, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.itemObservation = self.player.currentItem?.observe(\.status, options: [.new]) { [weak self] _, _ in
+                    Task { @MainActor [weak self] in self?.playerStateChanged() }
+                }
+                self.playerStateChanged()
+            }
+        }
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { @Sendable [weak self] time in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -258,6 +278,26 @@ import Network
                 self.publishNowPlaying()
                 if self.player.currentItem?.status == .failed { self.recoverServerRoute() }
             }
+        }
+    }
+    private func playerStateChanged() {
+        let item = player.currentItem
+        let waiting: String
+        switch player.reasonForWaitingToPlay {
+        case .toMinimizeStalls: waiting = "buffer"
+        case .evaluatingBufferingRate: waiting = "evaluating"
+        case .noItemToPlay: waiting = "no-item"
+        case nil: waiting = "none"
+        default: waiting = "other"
+        }
+        let snapshot = "player-state status=\(item?.status.rawValue ?? -1) time=\(player.timeControlStatus.rawValue) waiting=\(waiting) empty=\(item?.isPlaybackBufferEmpty ?? true)"
+        if snapshot != diagnosticState { diagnosticState = snapshot; PlaybackDiagnostics.record(snapshot) }
+        publishNowPlaying()
+        if item?.status == .failed, !busy, !recovering, !playbackFailed { recoverServerRoute() }
+        // Record actual starts promptly; short songs must not depend on the polling interval.
+        if isPlaying, loadedKey != nil, historyRequestKey != loadedKey, !recovering {
+            historyRequestKey = loadedKey
+            Task { [weak self] in await self?.reconcile() }
         }
     }
     private func resetProgressClock() {
@@ -324,7 +364,7 @@ import Network
         }
     }
     func stop() {
-        cancelRecovery(); resumeCheckpoint = nil; preparationSeeking = false; playbackFailed = false; recoveryUsed = false; mediaWindow = [:]; pendingPause = false; reportedHistoryKey = nil
+        cancelRecovery(); resumeCheckpoint = nil; preparationSeeking = false; playbackFailed = false; recoveryUsed = false; mediaWindow = [:]; pendingPause = false; reportedHistoryKey = nil; historyRequestKey = nil
         networkMonitor?.cancel(); networkMonitor = nil; serverConnection = ServerConnection()
         localPeer.stop()
         outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
@@ -469,7 +509,7 @@ import Network
             command.source = source; command.trackId = trackId; command.shuffle = shuffle
             command.ids = ids; command.position = seek; command.expectedCurrent = state?.currentTrackId
             if action == "next" {
-                command.transitionId = UUID().uuidString.lowercased()
+                command.transitionId = automatic ? (endedTransitionID ?? UUID().uuidString.lowercased()) : UUID().uuidString.lowercased()
                 command.expectedNext = state?.upcomingTrackIds?.first; command.automatic = automatic
                 if automatic && !ownsOutput { return }
             }
@@ -596,7 +636,7 @@ import Network
     }
     /// This only replaces the authorized current item; it never advances the queue.
     func recoverServerRoute() {
-        guard routeRecoveryTask == nil, loadedKey != nil, loadedKey != completedKey,
+        guard routeRecoveryTask == nil, !busy, loadedKey != nil, loadedKey != completedKey,
               permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true),
               let current = player.currentItem, let id = state?.currentTrackId,
               queuedTracks[ObjectIdentifier(current)] == id, let epoch = state?.ownerEpoch else { return }
@@ -686,9 +726,10 @@ import Network
     private func prepare(key: String, id: Int, epoch: Int) async {
         let requestedProfile = profile
         let explicitRetry = retryPreparation; retryPreparation = false
+        let preparationToken = UUID(); preparationGeneration = preparationToken
         let deadline = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(30)) } catch { return }
-            guard let self, self.desiredKey == key, self.busy else { return }
+            guard let self, self.desiredKey == key, self.preparationGeneration == preparationToken, self.busy else { return }
             self.prepareTask?.cancel(); self.player.currentItem?.cancelPendingSeeks()
             self.busy = false; self.preparationSeeking = false; self.playbackFailed = true
             self.message = "This song could not be prepared. Tap Retry or choose another song."
