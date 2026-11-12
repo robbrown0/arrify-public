@@ -57,7 +57,10 @@ final class LaunchTests: XCTestCase {
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
         }
-        app.buttons["Add to Liked songs"].tap()
+        let likeAction = app.buttons["Add to Liked songs"]
+        XCTAssertTrue(likeAction.isHittable)
+        likeAction.press(forDuration: 0.15)
+        XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
         XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
     }
     @MainActor func testSearchPopularityAndSongOptions() {
@@ -79,7 +82,10 @@ final class LaunchTests: XCTestCase {
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
         }
-        app.buttons["Add to Liked songs"].tap()
+        let likeAction = app.buttons["Add to Liked songs"]
+        XCTAssertTrue(likeAction.isHittable)
+        likeAction.press(forDuration: 0.15)
+        XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
         XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
     }
     @MainActor func testTabletNewSearchLeavesPreviousDetail() throws {
@@ -365,6 +371,14 @@ extension LaunchTests {
             XCTAssertTrue(search.isHittable, "Closing the long-title player must return a responsive search UI")
             search.tap()
             XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        }
+        // The fixture intentionally never finishes preparation. Its timeout
+        // banner must not cover the navigation search field or intercept input.
+        if !tabletSearch.exists {
+            let status = app.staticTexts["playbackStatusMessage"]
+            XCTAssertTrue(status.waitForExistence(timeout: 35))
+            XCTAssertGreaterThan(status.frame.minY, search.frame.maxY)
+            search.tap()
         }
         // An actual interaction, not just an existence query, verifies the UI
         // still services input after keyboard restoration and dismissal.

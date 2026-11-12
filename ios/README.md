@@ -343,7 +343,9 @@ are invalidated. This is not a promise of full decode integrity or offline right
 
 Home refreshes account-scoped recent songs after acknowledged actual playback and
 on foreground entry. Home features saved and curated Playlists; Moods remains
-available in Library.
+available in Library. On iPhone, connection and playback status sit beside the
+mini-player rather than over the navigation search field, so failure messages
+cannot block a new search.
 
 Validation includes real AVQueuePlayer tests using generated local audio, delayed
 server responses, failed preparation, cached replacement at a saved position,
