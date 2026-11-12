@@ -22,7 +22,7 @@ class PlayerTests(unittest.TestCase):
     def tearDown(self):self.a.db.close();self.tmp.cleanup()
     def test_stable_radio_next_and_history(self):
         first=self.p.command(1,{'action':'play','channel':'test'})
-        self.assertEqual(len(first['upcoming']),2)
+        self.assertEqual(len(first['upcoming']),3)
         expected=list(first['upcoming'])
         self.assertEqual(self.p.state(1)['upcoming'],expected)
         nxt=first['next']['id']

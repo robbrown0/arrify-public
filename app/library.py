@@ -417,6 +417,8 @@ class Player:
     def preview(self, state):
         if state.get('station'):
             with self.lib.index_lock:available=self.lib.radio_index.tracks
+            if state.get('shuffle') and len(state.get('shuffle_order',[]))==len(state['upcoming']):
+                state['shuffle_order']=[rank for rank,tid in zip(state['shuffle_order'],state['upcoming']) if tid in available]
             state['upcoming']=[i for i in state['upcoming'] if i in available]
         if state.get('station') and state['station'].get('mode')!='mix' and not state['upcoming']:
             chosen=self.lib.radio.pick(state['station'],state['history']+([state['current']] if state['current'] else []))

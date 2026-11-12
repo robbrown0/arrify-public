@@ -177,6 +177,11 @@ actor ArtworkDiskCache {
     private let root: URL
     private let limit = 100 * 1024 * 1024
     init(root: URL? = nil) {
+        if root == nil {
+            // v1 retained only small thumbnails; retire it rather than doubling the disk budget.
+            let legacy = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ArrifyArtwork-v1", isDirectory: true)
+            try? FileManager.default.removeItem(at: legacy)
+        }
         self.root = root ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ArrifyArtwork-v2", isDirectory: true)
     }
     private func file(scope: String, path: String) -> URL {
