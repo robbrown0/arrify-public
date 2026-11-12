@@ -56,8 +56,22 @@ final class PlaybackTransitionTests: XCTestCase {
         let first = try XCTUnwrap(player.player.currentItem)
         let next = player.player.items()[1]
         await transport.delayPoll()
-        let poll = Task { await player.reconcile() }
-        for _ in 0..<100 { if await transport.pollWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        // A real-start heartbeat may still be reconciling when the fixture becomes
+        // audible. Retry coalesced calls until this test's delayed GET is in flight.
+        let poll = Task {
+            for _ in 0..<100 {
+                await player.reconcile()
+                if await transport.pollWaiting { return }
+                do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
+            }
+        }
+        for _ in 0..<500 { if await transport.pollWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        let delayedPollStarted = await transport.pollWaiting
+        XCTAssertTrue(delayedPollStarted, "Establish the delayed response before simulating the track ending")
+        guard delayedPollStarted else {
+            poll.cancel(); await transport.releasePoll(); await poll.value
+            return
+        }
         player.player.pause()
         NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: first)
         for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
