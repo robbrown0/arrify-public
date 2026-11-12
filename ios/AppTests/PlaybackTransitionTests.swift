@@ -111,6 +111,93 @@ final class PlaybackTransitionTests: XCTestCase {
                        AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue])
         XCTAssertFalse(player.showsPauseControl)
     }
+    @MainActor func testRecoveryUsesReplacementCacheAtSamePositionWithoutQueueAdvance() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        player.player.pause()
+        await player.player.seek(to: CMTime(seconds: 75, preferredTimescale: 600))
+        let old = try XCTUnwrap(player.player.currentItem)
+        // A fresh completed cache entry can rescue an older unusable asset.
+        player.cache.invalidate(1)
+        let manifest = try await player.api.manifest(deviceId: player.deviceId, epoch: 1, profile: "original")
+        await player.cache.fill(manifest, api: player.api)
+        await transport.failMedia(true)
+        player.recoverServerRoute()
+        for _ in 0..<150 where player.recovering { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertFalse(player.recovering)
+        XCTAssertFalse(player.playbackFailed)
+        XCTAssertNil(player.message)
+        XCTAssertFalse(player.player.currentItem === old)
+        XCTAssertEqual(player.state?.currentTrackId, 1)
+        XCTAssertEqual(player.player.currentTime().seconds, 75, accuracy: 2)
+        let nextWaiting = await transport.nextWaiting
+        XCTAssertFalse(nextWaiting)
+    }
+
+    @MainActor func testRecoveryExhaustsAndPauseCancelsRetryWithoutAutoplay() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.failMedia(true)
+        player.recoverServerRoute()
+        for _ in 0..<250 where !player.playbackFailed { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(player.playbackFailed)
+        XCTAssertFalse(player.showsPauseControl)
+        XCTAssertEqual(player.player.rate, 0)
+        await player.reconcile()
+        let observations = await transport.observations
+        XCTAssertEqual(observations.last?.observed, "failed")
+        XCTAssertEqual(player.state?.currentTrackId, 1)
+        player.retry()
+        XCTAssertTrue(player.recovering)
+        await player.send("pause")
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(player.recovering)
+        XCTAssertFalse(player.showsPauseControl)
+        XCTAssertEqual(player.player.rate, 0)
+    }
+
+    @MainActor func testPauseTakesEffectWhileNextCommandAwaitsServer() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        let next = Task { await player.send("next") }
+        for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        await player.send("pause")
+        XCTAssertEqual(player.player.rate, 0)
+        XCTAssertFalse(player.showsPauseControl)
+        await transport.releaseNext()
+        await next.value
+        for _ in 0..<100 where player.state?.playing != false { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertFalse(player.state?.playing ?? true)
+        XCTAssertEqual(player.player.rate, 0)
+    }
+
+    @MainActor func testConfirmedHistoryRefreshesOncePerPlayAndMediaResetRequiresUser() async throws {
+        let (player, _) = try await fixture()
+        defer { player.stop() }
+        var refreshes = 0
+        player.onHistoryRecorded = { refreshes += 1 }
+        for _ in 0..<100 where !player.isPlaying { try await Task.sleep(for: .milliseconds(20)) }
+        await player.reconcile(); await player.reconcile()
+        XCTAssertEqual(refreshes, 1)
+        let oldEngine = player.player
+        NotificationCenter.default.post(name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+        XCTAssertFalse(player.player === oldEngine)
+        XCTAssertTrue(player.playbackFailed)
+        XCTAssertFalse(player.showsPauseControl)
+        await player.reconcile()
+        XCTAssertEqual(player.player.rate, 0)
+    }
+
+    @MainActor func testCacheRejectsTruncatedFile() async throws {
+        let (player, _) = try await fixture()
+        defer { player.stop() }
+        let manifest = try await player.api.manifest(deviceId: player.deviceId, epoch: 1, profile: "original")
+        let media = try XCTUnwrap(manifest.items.first)
+        let file = try XCTUnwrap(player.cache.file(for: media))
+        try Data([0]).write(to: file)
+        XCTAssertNil(player.cache.file(for: media))
+    }
+
 }
 
 actor CallResumeTransitionTransport: HTTPTransport {
@@ -122,6 +209,8 @@ actor CallResumeTransitionTransport: HTTPTransport {
     private var revision = 1
     private var playing = true
     private var delayOnePoll = false
+    private var failingMedia = false
+    func failMedia(_ value: Bool) { failingMedia = value }
     private var failingTransitions = false
     func failTransitions(_ value: Bool) { failingTransitions = value }
     private var pendingPoll: CheckedContinuation<Void, Never>?
@@ -169,6 +258,7 @@ actor CallResumeTransitionTransport: HTTPTransport {
             return try state()
         }
         if path.hasSuffix("/manifest") {
+            if failingMedia { throw URLError(.notConnectedToInternet) }
             return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: [
                 "owner_epoch": 1, "queue_revision": revision, "retry_after_seconds": 1,
                 "items": [1,2].map { ["track_id": $0, "profile": "original", "state": "ready",

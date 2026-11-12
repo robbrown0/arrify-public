@@ -33,6 +33,9 @@ import AVKit
         favorites = FavoritesStore(api: api)
         library = LibraryStore(api: api)
         artwork = ArtworkStore(api: api)
+        playback.onHistoryRecorded = { [weak library] in
+            Task { await library?.refresh() }
+        }
         RemoteControlRuntime.api = api
     }
     func restore() async {

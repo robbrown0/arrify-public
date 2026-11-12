@@ -403,9 +403,10 @@ struct SearchScreen: View {
     }
 }
 
-/// The two Home rails mirror the website's account-scoped history and mood collections.
+/// Home shows account-scoped listening history and playlists.
 struct HomeScreen: View {
     let model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var sizeClass
     private var cardWidth: CGFloat { sizeClass == .regular ? 210 : 165 }
     var body: some View {
@@ -422,7 +423,7 @@ struct HomeScreen: View {
                     }
                     if let overview = model.library.overview {
                         recentSongs(overview.recentTracks ?? [])
-                        rail("Set the mood", items: overview.items.filter { $0.section == "moods" && $0.trackCount > 0 }, albums: false)
+                        rail("Playlists", items: overview.items.filter { ["personal", "playlists"].contains($0.section) }, albums: false)
                     }
                     RefreshStatus(loading: model.library.loading, updated: model.library.updated, error: model.library.error)
                 }.padding(24)
@@ -431,6 +432,7 @@ struct HomeScreen: View {
                     Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.library.refresh() } }.accessibilityIdentifier("refreshLibrary")
                 } }
                 .task { await model.library.refresh() }
+                .onChange(of: scenePhase) { if scenePhase == .active { Task { await model.library.refresh() } } }
                 .refreshable { await model.library.refresh() }
         }
     }
@@ -463,9 +465,9 @@ struct HomeScreen: View {
             HStack {
                 Text(title).font(.title2.bold()); Spacer()
                 if albums { NavigationLink("View all") { BrowserScreen(model: model, title: "Albums", kind: "albums") } }
-                else { NavigationLink("View all") { MoodScreen(model: model) } }
+                else { NavigationLink("View all") { PlaylistLibraryView(model: model) }.accessibilityIdentifier("homePlaylistsAll") }
             }
-            if items.isEmpty { Text(albums ? "Albums you listen to will appear here." : "Mood playlists will appear as your library grows.").foregroundStyle(.secondary).font(.subheadline) }
+            if items.isEmpty { Text(albums ? "Albums you listen to will appear here." : "Create a playlist to keep your favorite songs together.").foregroundStyle(.secondary).font(.subheadline) }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 18) {
                     ForEach(Array(items.prefix(6)), id: \.identity) { item in

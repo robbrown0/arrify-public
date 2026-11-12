@@ -47,6 +47,9 @@ final class LaunchTests: XCTestCase {
         app.buttons["signIn"].tap()
         let recent = app.buttons["Play recently played song Just Like a Pill by P!nk"]
         XCTAssertTrue(recent.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Playlists"].exists)
+        XCTAssertFalse(app.staticTexts["Set the mood"].exists)
+        XCTAssertTrue(app.buttons["homePlaylistsAll"].exists)
         recent.tap()
         XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
         XCTAssertTrue(app.buttons["More options for Just Like a Pill"].waitForExistence(timeout: 10))

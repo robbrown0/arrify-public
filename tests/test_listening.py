@@ -28,6 +28,22 @@ class ListeningTests(unittest.TestCase):
         self.assertFalse(l.state(1)['listening']['playing'])
         self.assertEqual(l.state(1)['listening']['intent'],paused['listening']['intent'])
 
+    def test_recovery_and_failure_freeze_position_without_duplicate_history_or_advancing(self):
+        l=self.session(); first=self.call(l,'play',ids=[1,2]); d=first['listening']
+        args=dict(owner_epoch=d['epoch'],intent=d['intent'],expected_current=1,position=177,duration=180)
+        self.call(l,'heartbeat',observed='playing',report_seq=1,**args)
+        for seq,observed in enumerate(('recovering','failed'),2):
+            self.call(l,'heartbeat',observed=observed,report_seq=seq,**args)
+            self.clock += 30
+            self.assertEqual(l.position(l.load(1)),177)
+            self.assertEqual(l.state(1)['current'],1)
+            self.assertEqual(l.state(1)['listening']['observed'],observed)
+            self.assertTrue(l.state(1)['listening']['playing'])
+        self.call(l,'heartbeat',observed='playing',report_seq=4,**args)
+        self.assertEqual(self.a.db.execute('SELECT count(*) FROM history').fetchone()[0],1)
+        with self.assertRaises(PlaybackConflict):
+            self.call(l,'heartbeat',device='b'*32,observed='recovering',report_seq=5,**args)
+
     def test_buffer_observation_is_owner_scoped_and_keeps_original_sample_time(self):
         import json
         l=self.session();first=self.call(l,'play',ids=[1,2,3]);d=first['listening']

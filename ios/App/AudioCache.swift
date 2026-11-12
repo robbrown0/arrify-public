@@ -30,7 +30,14 @@ import ArrifyCore
     private func key(_ item: MediaItem) -> String { "\(item.trackId):\(item.sourceRevision ?? ""):\(item.profile)" }
     func file(for item: MediaItem) -> URL? {
         guard let entry = files[item.trackId], entry.key == key(item) else { return nil }
+        guard let bytes = try? FileManager.default.attributesOfItem(atPath: entry.url.path)[.size] as? NSNumber,
+              bytes.intValue == entry.bytes else { invalidate(item.trackId); return nil }
         return entry.url
+    }
+    func invalidate(_ id: Int, matching url: URL? = nil) {
+        if let url, files[id]?.url != url { return }
+        if let entry = files.removeValue(forKey: id) { try? FileManager.default.removeItem(at: entry.url) }
+        update(id, state: "retrying")
     }
     func reset() {
         generation = UUID(); files = [:]; items = []

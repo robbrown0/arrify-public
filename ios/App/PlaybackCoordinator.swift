@@ -10,7 +10,7 @@ import Network
     let remoteActivity: RemotePlaybackActivity
     private let localPeer = LocalPeerVerification()
     private let audioSession: any PlaybackAudioSession
-    let player = AVQueuePlayer()
+    private(set) var player = AVQueuePlayer()
     let cache: AudioCache
     // Retain the receiver-owned volume control across full-screen presentations.
     // A newly created slider must not substitute the phone's local volume.
@@ -78,7 +78,7 @@ import Network
     var hasOtherOutput: Bool { state?.ownerDeviceId != nil && !ownsOutput }
     var showsPauseControl: Bool {
         if hasOtherOutput { return state?.playing == true }
-        if let loadedKey, completedKey == loadedKey { return false }
+        if playbackFailed || (loadedKey != nil && completedKey == loadedKey) { return false }
         return permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true)
     }
     private var pollTask: Task<Void, Never>?
@@ -93,7 +93,22 @@ import Network
     private var loadedKey: String?
     private var completedKey: String?
     private var routeRecoveryTask: Task<Void, Never>?
-    private var routeRecoveryItem: ObjectIdentifier?
+    private var recoveryGeneration = UUID()
+    private var recoveryDeadlineTask: Task<Void, Never>?
+    private var watchdogTask: Task<Void, Never>?
+    private var lastProgressTime = ProcessInfo.processInfo.systemUptime
+    private var lastProgressPosition = 0.0
+    private var mediaWindow: [Int: MediaItem] = [:]
+    private var resumeCheckpoint: Double?
+    private var recoveryUsed = false
+    private var recoveryStableSince: TimeInterval?
+    private var pendingPause = false
+    private var preparationSeeking = false
+    private(set) var recovering = false
+    private(set) var playbackFailed = false
+    private(set) var historyRevision = 0
+    private var reportedHistoryKey: String?
+    @ObservationIgnored var onHistoryRecorded: (@MainActor () -> Void)?
     private var desiredKey: String?
     private var seekIntent = -1
     private var heartbeatSequence: HeartbeatSequence
@@ -121,28 +136,30 @@ import Network
         // the transition. A delayed/failed command must never play B then reload A.
         player.actionAtItemEnd = .pause
         configureSystemControls()
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { @Sendable [weak self] time in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                guard self.ownsOutput else { return }
-                self.position = time.seconds.isFinite ? time.seconds : 0
-                let seconds = self.player.currentItem?.duration.seconds ?? 0
-                self.duration = seconds.isFinite ? seconds : 0
-                PlaybackDiagnostics.record("playback-tick position=\(self.position) duration=\(self.duration)")
-                self.publishNowPlaying()
-                if self.player.currentItem?.status == .failed { self.recoverServerRoute() }
+        installTimeObserver()
+        watchdogTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                self?.checkPlaybackProgress()
             }
         }
         observe(AVPlayerItem.failedToPlayToEndTimeNotification) { owner, note in
-            if note.itemId == owner.player.currentItem.map(ObjectIdentifier.init) { owner.recoverServerRoute() }
+            if note.itemId == owner.player.currentItem.map(ObjectIdentifier.init) {
+                PlaybackDiagnostics.record("item-failed code=\(note.errorCode ?? 0) domain=\(note.errorDomain)")
+                owner.recoverServerRoute()
+            }
         }
         observe(AVPlayerItem.playbackStalledNotification) { owner, note in
-            if note.itemId == owner.player.currentItem.map(ObjectIdentifier.init) { owner.recoverServerRoute() }
+            if note.itemId == owner.player.currentItem.map(ObjectIdentifier.init) {
+                PlaybackDiagnostics.record("item-stalled")
+                // AVPlayer may recover on its own; the progress watchdog bounds waiting.
+            }
         }
         observe(AVPlayerItem.didPlayToEndTimeNotification) { owner, note in
             guard let identity = note.itemId, let ended = owner.queuedTracks[identity],
                   ended == owner.state?.currentTrackId, !owner.endedInFlight,
                   owner.permission.allowsPlayback(ownsOutput: owner.ownsOutput, serverPlaying: owner.state?.playing == true, mediaReady: true) else { return }
+            owner.cancelRecovery()
             owner.controlRevision += 1
             owner.completedKey = owner.loadedKey
             owner.endedInFlight = true
@@ -174,6 +191,7 @@ import Network
             guard let raw = note.interruptionType,
                   let kind = AVAudioSession.InterruptionType(rawValue: raw) else { return }
             if kind == .began {
+                owner.cancelRecovery()
                 owner.controlRevision += 1
                 owner.permission.interruptionBegan(wasPlaying: owner.state?.playing == true, ownsOutput: owner.ownsOutput)
                 owner.player.pause()
@@ -184,8 +202,14 @@ import Network
                 let shouldResume = AVAudioSession.InterruptionOptions(rawValue: rawOptions).contains(.shouldResume)
                 owner.controlRevision += 1
                 owner.permission.interruptionEnded(shouldResume: shouldResume)
+                owner.resetProgressClock()
                 PlaybackDiagnostics.record("audio-interruption ended resume=\(shouldResume)")
-                Task { await owner.reconcile(); owner.playIfAllowed() }
+                Task {
+                    await owner.reconcile()
+                    if shouldResume, owner.resumeCheckpoint != nil {
+                        owner.recoveryUsed = false; owner.recoverServerRoute()
+                    } else { owner.playIfAllowed() }
+                }
             }
         }
         observe(UIApplication.didBecomeActiveNotification) { owner, _ in
@@ -195,15 +219,67 @@ import Network
                 await owner.api.networkChanged(); await owner.reconcile()
             }
         }
+        observe(AVAudioSession.mediaServicesWereLostNotification) { owner, _ in
+            owner.cancelRecovery(); owner.permission.userPause(); owner.player.pause()
+            owner.playbackFailed = true; owner.message = "Audio service interrupted. Tap Play to resume."
+            PlaybackDiagnostics.record("media-services-lost")
+        }
+        observe(AVAudioSession.mediaServicesWereResetNotification) { owner, _ in
+            owner.cancelRecovery(); owner.controlRevision += 1; owner.permission.userPause()
+            owner.prepareTask?.cancel(); owner.aheadTask?.cancel(); owner.aheadTask = nil
+            if let observer = owner.timeObserver { owner.player.removeTimeObserver(observer) }
+            owner.player = AVQueuePlayer(); owner.player.allowsExternalPlayback = false
+            owner.player.actionAtItemEnd = .pause; owner.installTimeObserver()
+            owner.loadedKey = nil; owner.desiredKey = nil; owner.queuedTracks = [:]
+            owner.busy = false; owner.preparationSeeking = false; owner.playbackFailed = true
+            owner.message = "Audio service restarted. Tap Play to resume."
+            PlaybackDiagnostics.record("media-services-reset")
+        }
         observe(AVAudioSession.routeChangeNotification) { owner, note in
             owner.outputSelectionChanged(trigger: "route-change", reason: note.routeReason, previousOutputs: note.previousOutputs)
             owner.updateReceiverMetadata()
             owner.publishNowPlaying()
             let reason = note.routeReason
             if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue {
-                owner.player.pause(); owner.permission.userPause()
+                owner.cancelRecovery(); owner.player.pause(); owner.permission.userPause()
                 Task { await owner.send("pause") }
             }
+        }
+    }
+    private func installTimeObserver() {
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { @Sendable [weak self] time in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard self.ownsOutput else { return }
+                if !self.recovering && self.resumeCheckpoint == nil { self.position = time.seconds.isFinite ? time.seconds : 0 }
+                let seconds = self.player.currentItem?.duration.seconds ?? 0
+                self.duration = seconds.isFinite ? seconds : 0
+                PlaybackDiagnostics.record("playback-tick position=\(self.position) duration=\(self.duration)")
+                self.publishNowPlaying()
+                if self.player.currentItem?.status == .failed { self.recoverServerRoute() }
+            }
+        }
+    }
+    private func resetProgressClock() {
+        lastProgressTime = ProcessInfo.processInfo.systemUptime
+        lastProgressPosition = player.currentTime().seconds.isFinite ? player.currentTime().seconds : position
+    }
+    /// Wall-clock observation still runs when AVPlayer's media-time observer stops.
+    func checkPlaybackProgress(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        guard ownsOutput, loadedKey != nil, loadedKey != completedKey, !busy, !recovering, !playbackFailed,
+              permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true),
+              let item = player.currentItem else { resetProgressClock(); return }
+        if item.status == .failed { recoverServerRoute(); return }
+        let sample = player.currentTime().seconds
+        if sample.isFinite, sample > lastProgressPosition + 0.1 {
+            position = sample; lastProgressPosition = sample; lastProgressTime = now
+            if recoveryUsed {
+                if recoveryStableSince == nil { recoveryStableSince = now }
+                if now - (recoveryStableSince ?? now) >= 15 { recoveryUsed = false }
+            }
+        } else if now - lastProgressTime >= 8 {
+            recoveryStableSince = nil
+            recoverServerRoute()
         }
     }
     private func observe(_ name: Notification.Name, action: @escaping @MainActor (PlaybackCoordinator, AudioNotice) -> Void) {
@@ -248,7 +324,7 @@ import Network
         }
     }
     func stop() {
-        routeRecoveryTask?.cancel(); routeRecoveryTask = nil; routeRecoveryItem = nil
+        cancelRecovery(); resumeCheckpoint = nil; preparationSeeking = false; playbackFailed = false; recoveryUsed = false; mediaWindow = [:]; pendingPause = false; reportedHistoryKey = nil
         networkMonitor?.cancel(); networkMonitor = nil; serverConnection = ServerConnection()
         localPeer.stop()
         outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
@@ -286,7 +362,7 @@ import Network
             if report, ownsOutput, permission.enabled, loadedKey != nil, loadedKey == desiredKey,
                let current = player.currentItem, queuedTracks[ObjectIdentifier(current)] == state?.currentTrackId {
                 let sample = player.currentTime().seconds
-                if sample.isFinite { position = max(0, sample) }
+                if sample.isFinite, !recovering, resumeCheckpoint == nil { position = max(0, sample) }
                 let length = current.duration.seconds
                 if length.isFinite { duration = max(0, length) }
                 var heartbeat = PlaybackCommand(action: "heartbeat", deviceId: deviceId)
@@ -299,12 +375,15 @@ import Network
                 UserDefaults.standard.set(sequence, forKey: "arrify.native.heartbeat-sequence")
                 heartbeat.reportSeq = sequence
                 // A temporary audio-session pause is not a new user Pause intent.
-                heartbeat.observed = permission.interrupted ? "interrupted" : (isPlaying ? "playing" : (showsPauseControl ? "buffering" : "paused"))
+                heartbeat.observed = permission.interrupted ? "interrupted" : (playbackFailed ? "failed" : (recovering ? "recovering" : (isPlaying ? "playing" : (showsPauseControl ? "buffering" : "paused"))))
                 heartbeat.profile = loadedProfile; heartbeat.output = audioSession.outputName
                 heartbeat.quality = loadedProfile == "original" ? "Original" : loadedProfile.uppercased()
                 let ack = try await api.command(heartbeat)
                 guard generation == sessionGeneration, revision == controlRevision, !endedInFlight, !commandInFlight else { return }
                 state = PlaybackState.merging(ack, into: state)
+                if heartbeat.observed == "playing", reportedHistoryKey != loadedKey {
+                    reportedHistoryKey = loadedKey; historyRevision += 1; onHistoryRecorded?()
+                }
             }
             if ownsOutput { refreshOutput() }
             connectionFailures = 0; connectionInterrupted = false
@@ -329,7 +408,22 @@ import Network
     }
     func send(_ action: String, ids: [Int]? = nil, seek: Double? = nil, automatic: Bool = false,
               source: LibrarySource? = nil, trackId: Int? = nil, shuffle: Bool? = nil, mode: String? = nil, index: Int? = nil, from: Int? = nil, to: Int? = nil, revision: Int? = nil) async {
-        guard !commandInFlight else { return }
+        if action == "resume", !commandInFlight, ownsOutput, state?.playing == true,
+           loadedKey != nil, loadedKey != completedKey, playbackFailed || player.currentItem?.status == .failed {
+            retry(); return
+        }
+        let requestGeneration = sessionGeneration
+        if action == "pause" {
+            cancelRecovery(); player.pause(); permission.userPause(); controlRevision += 1
+            publishNowPlaying()
+            if commandInFlight { pendingPause = true; return }
+        } else if !automatic && ["play", "resume", "takeover", "next", "previous", "queue_jump", "seek"].contains(action) {
+            cancelRecovery()
+        }
+        while commandInFlight {
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
+            guard requestGeneration == sessionGeneration else { return }
+        }
         let action = action == "resume" && loadedKey != nil && completedKey == loadedKey ? "next" : action
         if action == "pause" { player.pause(); permission.userPause() }
         let endedTrack = state?.currentTrackId
@@ -339,6 +433,13 @@ import Network
         commandInFlight = true
         defer {
             commandInFlight = false
+            if pendingPause {
+                pendingPause = false
+                Task { [weak self] in
+                    guard let self, self.sessionGeneration == requestGeneration else { return }
+                    await self.send("pause")
+                }
+            }
             if liveUpdatePending { Task { [weak self] in await self?.reconcile(report: false) } }
         }
         let generation = sessionGeneration
@@ -349,9 +450,9 @@ import Network
                 message = "Audio output is unavailable. Tap Play to try again."
                 return
             }
-            permission.userPlayAfterSessionActivation()
+            permission.userPlayAfterSessionActivation(); recoveryUsed = false; resetProgressClock()
             // AVPlayer cannot recover a failed item by calling play() on it again.
-            if player.currentItem?.status == .failed || (!busy && desiredKey != nil && loadedKey == nil) {
+            if !busy && desiredKey != nil && loadedKey == nil {
                 prepareTask?.cancel(); prepareTask = nil
                 desiredKey = nil; loadedKey = nil; retryPreparation = true
             }
@@ -376,13 +477,20 @@ import Network
             guard generation == sessionGeneration else { return }
             message = nil; connectionFailures = 0; connectionInterrupted = false
             await apply(update)
+            if action == "resume", playbackFailed, loadedKey != nil { recoverServerRoute() }
         } catch {
             guard generation == sessionGeneration, !Task.isCancelled, !RequestCancellation.matches(error) else { return }
             message = error.localizedDescription
             await reconcile()
         }
     }
-    func retry() { desiredKey = nil; loadedKey = nil; retryPreparation = true; Task { await send("resume") } }
+    func retry() {
+        if ownsOutput, state?.playing == true, loadedKey != nil, loadedKey != completedKey {
+            do { try audioSession.activate(); permission.userPlayAfterSessionActivation() }
+            catch { message = "Audio output is unavailable. Tap Play to try again."; return }
+            recoveryUsed = false; playbackFailed = false; recoverServerRoute()
+        } else { retryPreparation = true; Task { await send("resume") } }
+    }
     private func apply(_ update: PlaybackState) async {
         let generation = sessionGeneration
         let revision = controlRevision
@@ -393,7 +501,7 @@ import Network
             // A remote queue edit must not wait for an obsolete read-ahead download.
             aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil
         }
-        if permission.enabled, !permission.interrupted, let previous,
+        if permission.enabled, !permission.interrupted, !pendingPause, let previous,
            !previous.playing, metadataState.playing, metadataState.intent > previous.intent {
             permission.userPlay()
         }
@@ -432,6 +540,7 @@ import Network
         }
         if hasOtherOutput { position = state.positionSeconds; duration = state.durationSeconds ?? 0 }
         guard ownsOutput, permission.enabled, let id = state.currentTrackId else {
+            cancelRecovery(); mediaWindow = [:]
             aheadTask?.cancel(); aheadTask = nil
             prepareTask?.cancel(); prepareTask = nil; player.pause(); player.removeAllItems(); queuedTracks = [:]
             loadedKey = nil; desiredKey = nil; busy = false
@@ -440,6 +549,9 @@ import Network
             return
         }
         let key = "\(id):\(state.ownerEpoch):\(state.playId)"
+        if desiredKey != key {
+            cancelRecovery(); resumeCheckpoint = nil; playbackFailed = false; recoveryUsed = false; resetProgressClock()
+        }
         if desiredKey != key, endedInFlight, profile == loadedProfile, queuedEpoch == state.ownerEpoch,
            let next = player.items().dropFirst().first, queuedTracks[ObjectIdentifier(next)] == id {
             // Only a confirmed server transition releases the prebuffered next item.
@@ -456,54 +568,139 @@ import Network
             prepareTask = Task { [weak self] in await self?.prepare(key: key, id: id, epoch: state.ownerEpoch) }
         }
         if loadedKey == key, seekIntent != state.seekIntent {
+            cancelRecovery(); resumeCheckpoint = nil; resetProgressClock()
             seekIntent = state.seekIntent
             player.seek(to: CMTime(seconds: max(0, state.seekTargetSeconds), preferredTimescale: 600), completionHandler: { _ in })
         }
-        if !state.playing { player.pause(); aheadTask?.cancel(); aheadTask = nil } else { playIfAllowed() }
+        if !state.playing { cancelRecovery(); player.pause(); aheadTask?.cancel(); aheadTask = nil } else { playIfAllowed() }
         synchronizeQueuedItems()
         if loadedKey != nil, state.playing { startReadAhead() }
         publishNowPlaying()
     }
-    private func recoverServerRoute() {
-        guard routeRecoveryTask == nil, loadedKey != completedKey, ownsOutput, permission.enabled,
-              let current = player.currentItem, routeRecoveryItem != ObjectIdentifier(current),
-              let url = (current.asset as? AVURLAsset)?.url, !url.isFileURL,
-              let id = state?.currentTrackId, queuedTracks[ObjectIdentifier(current)] == id else { return }
-        routeRecoveryItem = ObjectIdentifier(current)
+    private func cancelRecovery() {
+        if recovering { playbackFailed = true }
+        recoveryGeneration = UUID()
+        routeRecoveryTask?.cancel(); routeRecoveryTask = nil
+        recoveryDeadlineTask?.cancel(); recoveryDeadlineTask = nil
+        player.currentItem?.cancelPendingSeeks()
+        recovering = false; resetProgressClock()
+    }
+    private func failRecovery() {
+        cancelRecovery(); playbackFailed = true; player.pause()
+        message = "Playback stopped. Tap Retry to reconnect."
+        PlaybackDiagnostics.record("recovery-exhausted")
+        publishNowPlaying()
+    }
+    private func remember(_ manifest: Manifest) {
+        mediaWindow = Dictionary(manifest.items.map { ($0.trackId, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+    /// This only replaces the authorized current item; it never advances the queue.
+    func recoverServerRoute() {
+        guard routeRecoveryTask == nil, loadedKey != nil, loadedKey != completedKey,
+              permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true),
+              let current = player.currentItem, let id = state?.currentTrackId,
+              queuedTracks[ObjectIdentifier(current)] == id, let epoch = state?.ownerEpoch else { return }
+        guard !recoveryUsed else { failRecovery(); return }
+        recoveryUsed = true; recoveryStableSince = nil; recovering = true; playbackFailed = false
+        let token = UUID(); recoveryGeneration = token
         let key = loadedKey
-        let resumePosition = position
-        routeRecoveryTask = Task { [weak self, api] in
-            guard let self else { return }
-            defer { self.routeRecoveryTask = nil }
-            do {
-                guard let alternate = try await api.alternateMediaURL(url), !Task.isCancelled,
-                      self.ownsOutput, self.loadedKey == key, self.player.currentItem === current else {
-                    if current.status == .failed { self.message = "Playback stopped. Tap Retry to reconnect." }
-                    return
-                }
-                self.aheadTask?.cancel(); self.aheadTask = nil; self.aheadGeneration = UUID(); self.aheadCompletedRevision = nil
-                let replacement = AVPlayerItem(url: alternate)
-                self.player.pause(); self.player.removeAllItems()
-                self.queuedTracks = [ObjectIdentifier(replacement): id]
-                self.player.insert(replacement, after: nil)
-                self.player.seek(to: CMTime(seconds: max(0, resumePosition), preferredTimescale: 600), completionHandler: { _ in })
-                self.serverConnection = await api.connection()
-                self.updateReceiverMetadata(); self.playIfAllowed(); self.startReadAhead()
-                self.message = nil
-            } catch {
-                if !Task.isCancelled, self.player.currentItem === current { self.message = "Playback stopped. Tap Retry to reconnect." }
-            }
+        let sample = player.currentTime().seconds
+        let resumePosition = resumeCheckpoint ?? (sample.isFinite ? max(0, sample) : position)
+        resumeCheckpoint = resumePosition
+        let originalURL = (current.asset as? AVURLAsset)?.url
+        if originalURL?.isFileURL == true { cache.invalidate(id, matching: originalURL) }
+        aheadTask?.cancel(); aheadTask = nil; aheadGeneration = UUID(); aheadCompletedRevision = nil
+        player.pause(); message = "Reconnecting playback…"
+        PlaybackDiagnostics.record("recovery-start cached=\(mediaWindow[id].flatMap { cache.file(for: $0) } != nil)")
+        recoveryDeadlineTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            guard let self, self.recoveryGeneration == token else { return }
+            self.failRecovery()
         }
+        routeRecoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for attempt in 0..<3 {
+                do {
+                    try Task.checkCancellation()
+                    let url: URL
+                    if attempt == 0, let media = self.mediaWindow[id], let local = self.cache.file(for: media) {
+                        url = local
+                    } else if attempt == 2, let originalURL, !originalURL.isFileURL,
+                              let alternate = try await self.api.alternateMediaURL(originalURL) {
+                        url = alternate
+                    } else {
+                        let manifest = try await self.api.manifest(deviceId: self.deviceId, epoch: epoch, profile: self.loadedProfile, retry: true)
+                        guard manifest.ownerEpoch == epoch,
+                              let media = manifest.items.first(where: { $0.trackId == id && $0.state == "ready" }) else { throw PlaybackFailure() }
+                        guard self.recoveryGeneration == token, !Task.isCancelled else { return }
+                        self.remember(manifest)
+                        url = try await self.api.mediaURL(media)
+                    }
+                    guard self.recoveryGeneration == token, self.loadedKey == key, self.ownsOutput, !Task.isCancelled else { return }
+                    let replacement = AVPlayerItem(url: url)
+                    self.player.removeAllItems(); self.queuedTracks = [ObjectIdentifier(replacement): id]
+                    self.player.insert(replacement, after: nil)
+                    do { try await self.readyAndSeek(replacement, position: resumePosition) }
+                    catch {
+                        if url.isFileURL { self.cache.invalidate(id) }
+                        throw error
+                    }
+                    guard self.recoveryGeneration == token, !Task.isCancelled else { return }
+                    self.recoveryDeadlineTask?.cancel(); self.recoveryDeadlineTask = nil
+                    self.routeRecoveryTask = nil; self.recovering = false; self.message = nil
+                    self.position = resumePosition; self.resumeCheckpoint = nil; self.resetProgressClock()
+                    self.updateReceiverMetadata(); self.playIfAllowed(); self.publishNowPlaying(); self.startReadAhead()
+                    PlaybackDiagnostics.record("recovery-ready attempt=\(attempt + 1) cached=\(url.isFileURL)")
+                    return
+                } catch {
+                    guard self.recoveryGeneration == token, !Task.isCancelled else { return }
+                    PlaybackDiagnostics.record("recovery-attempt-failed attempt=\(attempt + 1)")
+                    do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                }
+            }
+            if self.recoveryGeneration == token { self.failRecovery() }
+        }
+    }
+    private func readyAndSeek(_ item: AVPlayerItem, position: Double) async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + 8
+        while item.status == .unknown {
+            try Task.checkCancellation()
+            guard player.currentItem === item, ProcessInfo.processInfo.systemUptime < deadline else { throw PlaybackFailure() }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        guard item.status == .readyToPlay else {
+            PlaybackDiagnostics.record("item-not-ready code=\((item.error as NSError?)?.code ?? 0)")
+            throw PlaybackFailure()
+        }
+        let completion = PlaybackSeekCompletion()
+        player.seek(to: CMTime(seconds: max(0, position), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { finished in
+            Task { @MainActor in completion.finished = finished }
+        }
+        while completion.finished == nil {
+            try Task.checkCancellation()
+            guard player.currentItem === item, ProcessInfo.processInfo.systemUptime < deadline else { item.cancelPendingSeeks(); throw PlaybackFailure() }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        guard completion.finished == true else { throw PlaybackFailure() }
     }
     private func prepare(key: String, id: Int, epoch: Int) async {
         let requestedProfile = profile
         let explicitRetry = retryPreparation; retryPreparation = false
+        let deadline = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            guard let self, self.desiredKey == key, self.busy else { return }
+            self.prepareTask?.cancel(); self.player.currentItem?.cancelPendingSeeks()
+            self.busy = false; self.preparationSeeking = false; self.playbackFailed = true
+            self.message = "This song could not be prepared. Tap Retry or choose another song."
+        }
+        defer { deadline.cancel() }
         do {
-            for attempt in 0..<65 {
+            for attempt in 0..<8 {
                 try Task.checkCancellation()
                 let manifest = try await api.manifest(deviceId: deviceId, epoch: epoch, profile: requestedProfile, retry: attempt == 0 && explicitRetry)
                 guard !Task.isCancelled, desiredKey == key, ownsOutput,
                       manifest.ownerEpoch == epoch else { return }
+                remember(manifest)
                 guard let item = manifest.items.first(where: { $0.trackId == id }) else { throw APIError.invalidResponse }
                 if item.state == "ready" {
                     let url: URL
@@ -513,11 +710,12 @@ import Network
                     player.removeAllItems(); queuedTracks = [ObjectIdentifier(current): id]; queuedEpoch = epoch
                     player.insert(current, after: nil)
                     updateReceiverMetadata()
-                    loadedKey = key; loadedProfile = requestedProfile; busy = false; message = nil
-                    if let state {
-                        seekIntent = state.seekIntent
-                        player.seek(to: CMTime(seconds: max(0, state.positionSeconds), preferredTimescale: 600), completionHandler: { _ in })
-                    }
+                    loadedKey = key; loadedProfile = requestedProfile; message = nil
+                    preparationSeeking = true
+                    seekIntent = state?.seekIntent ?? -1
+                    try await readyAndSeek(current, position: state?.positionSeconds ?? 0)
+                    guard !Task.isCancelled, desiredKey == key else { return }
+                    preparationSeeking = false; busy = false; playbackFailed = false; resumeCheckpoint = nil; resetProgressClock()
                     playIfAllowed(); publishNowPlaying(); startReadAhead(); return
                 }
                 if ["failed", "unavailable"].contains(item.state) { throw PlaybackFailure() }
@@ -525,7 +723,7 @@ import Network
             }
             throw PlaybackFailure()
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
-            if desiredKey == key { busy = false; message = "This song could not be prepared. Tap Retry or choose another song." }
+            if desiredKey == key { preparationSeeking = false; busy = false; playbackFailed = true; message = "This song could not be prepared. Tap Retry or choose another song." }
         }
     }
     private func synchronizeQueuedItems() {
@@ -543,7 +741,7 @@ import Network
         for id in next.dropFirst(count) {
             guard let media = manifest.items.first(where: { $0.trackId == id && $0.state == "ready" }) else { break }
             let url: URL
-            if let file = cache.file(for: media) { url = file } else { url = try await api.mediaURL(media) }
+            if let file = cache.file(for: media) { url = file } else { break }
             guard !Task.isCancelled, ownsOutput, state?.ownerEpoch == manifest.ownerEpoch, state?.queueRevision == manifest.queueRevision else { return }
             let item = AVPlayerItem(url: url)
             if player.canInsert(item, after: player.items().last) {
@@ -552,7 +750,7 @@ import Network
         }
     }
     private func startReadAhead() {
-        guard aheadTask == nil, !endedInFlight, ownsOutput, permission.enabled, state?.playing == true, aheadCompletedRevision != state?.queueRevision else { return }
+        guard aheadTask == nil, !endedInFlight, !recovering, !playbackFailed, !busy, ownsOutput, permission.enabled, state?.playing == true, aheadCompletedRevision != state?.queueRevision else { return }
         let generation = UUID(); aheadGeneration = generation
         aheadTask = Task { [weak self] in
             guard let self else { return }
@@ -561,7 +759,8 @@ import Network
                 do {
                     let manifest = try await self.api.manifest(deviceId: self.deviceId, epoch: state.ownerEpoch, profile: self.loadedProfile)
                     guard !Task.isCancelled, !self.endedInFlight, self.state?.ownerEpoch == manifest.ownerEpoch, self.state?.queueRevision == manifest.queueRevision else { return }
-                    try await self.enqueueAhead(manifest)
+                    self.remember(manifest)
+                    // Download current first. Do not open duplicate remote players for future songs.
                     await self.cache.fill(manifest, api: self.api)
                     guard !Task.isCancelled, !self.endedInFlight, self.state?.ownerEpoch == manifest.ownerEpoch, self.state?.queueRevision == manifest.queueRevision else { return }
                     // Replace only future items with verified local files; never interrupt current audio.
@@ -583,7 +782,8 @@ import Network
         }
     }
     private func playIfAllowed() {
-        guard loadedKey != completedKey else { return }
+        guard loadedKey != completedKey, !busy, !preparationSeeking, !recovering, !playbackFailed else { return }
+        if player.currentItem?.status == .failed { recoverServerRoute(); return }
         guard permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: loadedKey != nil) else { return }
         guard player.timeControlStatus != .playing else { return }
         do { try audioSession.activate(); refreshOutput(trigger: "playback-activated"); player.play() }
@@ -627,15 +827,22 @@ import Network
         }
     }
 }
+@MainActor private final class PlaybackSeekCompletion { var finished: Bool? }
 private struct PlaybackFailure: Error {}
 
 private struct AudioNotice: Sendable {
+    let errorCode: Int?
+    let errorDomain: String
     let itemId: ObjectIdentifier?
     let interruptionType: UInt?
     let interruptionOptions: UInt?
     let routeReason: UInt?
     let previousOutputs: [RoutePortDetails]?
     init(_ note: Notification) {
+        let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
+        errorCode = error?.code
+        // Never log localized descriptions, URLs or arbitrary userInfo.
+        errorDomain = [NSURLErrorDomain, AVFoundationErrorDomain, NSOSStatusErrorDomain].contains(error?.domain ?? "") ? error!.domain : "other"
         itemId = (note.object as? AVPlayerItem).map(ObjectIdentifier.init)
         interruptionType = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
         interruptionOptions = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
