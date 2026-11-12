@@ -333,7 +333,15 @@ extension LaunchTests {
         takeover.tap()
         let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: takeover)
         XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 10), .completed)
-        XCTAssertTrue(app.buttons["Pause"].firstMatch.exists)
+        // This fixture never supplies playable media. Takeover must succeed,
+        // then preparation must time out with truthful, retryable controls.
+        // Waiting for this state also avoids depending on simulator speed.
+        let status = app.staticTexts["playbackStatusMessage"]
+        XCTAssertTrue(status.waitForExistence(timeout: 35))
+        XCTAssertEqual(status.label, "This song could not be prepared. Tap Retry or choose another song.")
+        XCTAssertTrue(app.buttons["Play"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["Pause"].firstMatch.exists)
+        XCTAssertFalse(takeover.exists)
     }
 }
 
