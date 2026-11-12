@@ -35,14 +35,18 @@ jobs:
         run: xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build/device CODE_SIGNING_ALLOWED=NO build
       - name: Verify archive capability preservation
         run: bash ios/tools/prepare_entitlements.sh build/device/Build/Products/Release-iphoneos/Arrify.app ios/App/Arrify.entitlements
-      - name: Simulator UI test
+      - name: Simulator playback tests
         if: ${{ inputs.ipad_only != true }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith("iPhone")))')
           xcrun simctl shutdown all || true
           xcrun simctl boot "$DEVICE"
           xcrun simctl bootstatus "$DEVICE" -b
-          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/UITests.xcresult CODE_SIGNING_ALLOWED=NO test
+          echo "ARRIFY_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
+          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/PlaybackTests.xcresult -only-testing:ArrifyAppTests CODE_SIGNING_ALLOWED=NO test
+      - name: Simulator UI test
+        if: ${{ inputs.ipad_only != true }}
+        run: xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$ARRIFY_SIMULATOR" -derivedDataPath build/simulator -resultBundlePath build/UITests.xcresult -only-testing:ArrifyUITests CODE_SIGNING_ALLOWED=NO test
       - name: iPad launch and accessibility smoke test
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith("iPad")))')
@@ -66,6 +70,7 @@ jobs:
           name: arrify-prototype-${{ github.sha }}
           path: |
             build/screenshots
+            build/PlaybackTests.xcresult
             build/UITests.xcresult
             build/iPadTests.xcresult
             build/simulator/Build/Products/Debug-iphonesimulator/Arrify.app

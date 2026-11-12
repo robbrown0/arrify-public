@@ -15,7 +15,10 @@ final class PlaybackTransitionTests: XCTestCase {
         buffer.frameLength = buffer.frameCapacity
         buffer.floatChannelData![0].initialize(repeating: 0, count: Int(buffer.frameLength))
         do {
-            let file = try AVAudioFile(forWriting: audio, settings: format.settings)
+            let file = try AVAudioFile(forWriting: audio, settings: [
+                AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 8000, AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false
+            ])
             try file.write(from: buffer)
         }
         let bytes = try Data(contentsOf: audio)
@@ -32,8 +35,17 @@ final class PlaybackTransitionTests: XCTestCase {
         let manifest = try await api.manifest(deviceId: coordinator.deviceId, epoch: 1, profile: "original")
         await cache.fill(manifest, api: api)
         await coordinator.send("resume")
-        for _ in 0..<100 where coordinator.player.items().count < 2 { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertEqual(coordinator.player.items().count, 2)
+        for _ in 0..<500 where coordinator.player.items().count < 2 || !coordinator.isPlaying {
+            if coordinator.playbackFailed { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        guard coordinator.player.items().count == 2, coordinator.isPlaying else {
+            let error = coordinator.player.currentItem?.error as NSError?
+            let detail = "Fixture failed to play: \(error?.domain ?? "none") / \(error?.code ?? 0), \(coordinator.message ?? "no message")"
+            coordinator.stop()
+            XCTFail(detail)
+            throw NSError(domain: "PlaybackFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: detail])
+        }
         return (coordinator, transport)
     }
 
@@ -342,7 +354,7 @@ actor CallResumeTransitionTransport: HTTPTransport {
             return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: [
                 "owner_epoch": 1, "queue_revision": revision, "retry_after_seconds": 1,
                 "items": [1,2].map { ["track_id": $0, "profile": "original", "state": "ready",
-                    "url": "/api/v1/stream/\($0)", "size_bytes": size, "source_revision": "fixture"] as [String: Any] }
+                    "url": "/api/v1/stream/\($0)", "mime_type": "audio/wav", "size_bytes": size, "source_revision": "fixture"] as [String: Any] }
             ] as [String: Any]))
         }
         return try await fallback.send(request)

@@ -360,9 +360,11 @@ extension LaunchTests {
             XCTAssertTrue(output.exists)
             XCTAssertEqual(pause.frame.midX, output.frame.midX, accuracy: 1, "Output picker must be centered beneath play/pause")
             close.tap()
+            XCTAssertTrue(close.waitForNonExistence(timeout: 5), "Wait for full-screen dismissal before focusing the underlying search")
             XCTAssertTrue(search.waitForExistence(timeout: 5))
             XCTAssertTrue(search.isHittable, "Closing the long-title player must return a responsive search UI")
             search.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         }
         // An actual interaction, not just an existence query, verifies the UI
         // still services input after keyboard restoration and dismissal.

@@ -319,6 +319,8 @@ callbacks stop. A transient stall may recover naturally. Recovery has one
 30-second budget: prefer a completed, size-checked cache entry; otherwise refresh
 media authorization and retry, then try the verified alternate server origin.
 The replacement must become ready and finish seeking before playback resumes.
+Preparation and recovery hold finite system background tasks, ending on success,
+cancellation, expiry or their 30-second deadline; no silent audio keeps the app alive.
 Fifteen seconds of advancing audio is required before another automatic recovery
 cycle is permitted. Explicit Retry starts a new bounded cycle.
 
