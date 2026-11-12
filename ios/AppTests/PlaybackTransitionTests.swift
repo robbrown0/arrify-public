@@ -245,6 +245,20 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(player.state?.currentTrackId, 1)
     }
 
+    @MainActor func testQueuedHistoryRefreshCannotRepopulateClearedAccountLibrary() async throws {
+        let (player, _) = try await fixture()
+        defer { player.stop() }
+        let library = LibraryStore(api: player.api)
+        library.refreshAfterPlayback()
+        library.clear()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(library.overview)
+        XCTAssertNil(library.updated)
+        library.refreshAfterPlayback()
+        for _ in 0..<100 where library.overview == nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertNotNil(library.overview)
+    }
+
     @MainActor func testCacheRejectsTruncatedFile() async throws {
         let (player, _) = try await fixture()
         defer { player.stop() }
