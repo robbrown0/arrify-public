@@ -33,6 +33,7 @@ class RadioTests(unittest.TestCase):
             rng.return_value.shuffle.side_effect=lambda queue:queue.reverse()
             shuffled=self.player.command(1,{'action':'shuffle'})
         self.assertEqual(shuffled['upcoming'],[4,2,3,2])
+        self.assertNotIn('shuffle_order',shuffled)
         self.assertEqual(self.player.command(1,{'action':'next'})['current'],4)
         self.player.command(1,{'action':'remove','index':0})
         self.player.command(1,{'action':'queue','ids':[6]})

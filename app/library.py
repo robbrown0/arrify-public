@@ -438,7 +438,8 @@ class Player:
         def safe(i):
             try: return self.lib.track(i)
             except ValueError: return None
-        return {**state, 'track':safe(state['current']) if state['current'] else None,
+        visible={k:v for k,v in state.items() if k!='shuffle_order'}
+        return {**visible, 'track':safe(state['current']) if state['current'] else None,
             'next':safe(state['upcoming'][0]) if state['upcoming'] else None,
             'queue':[t for i in state['upcoming'][:250] if (t:=safe(i))]}
 
