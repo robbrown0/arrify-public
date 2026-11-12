@@ -526,6 +526,9 @@ import Network
             message = nil; connectionFailures = 0; connectionInterrupted = false
             await apply(update)
             if action == "resume", playbackFailed, loadedKey != nil { recoverServerRoute() }
+            if action == "seek", let seek, playbackFailed, loadedKey != nil {
+                resumeCheckpoint = max(0, seek); recoveryUsed = false; recoverServerRoute()
+            }
         } catch {
             guard generation == sessionGeneration, !Task.isCancelled, !RequestCancellation.matches(error) else { return }
             message = error.localizedDescription
@@ -533,6 +536,7 @@ import Network
         }
     }
     func retry() {
+        guard !recovering else { return }
         if ownsOutput, state?.playing == true, loadedKey != nil, loadedKey != completedKey {
             do { try audioSession.activate(); permission.userPlayAfterSessionActivation() }
             catch { message = "Audio output is unavailable. Tap Play to try again."; return }

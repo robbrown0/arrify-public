@@ -228,6 +228,23 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(player.player.rate, 0)
     }
 
+    @MainActor func testHungMediaRequestHitsDeadlineAndLateReplyCannotRestartPlayback() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.delayMedia()
+        player.recoverServerRoute()
+        for _ in 0..<340 where !player.playbackFailed { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertTrue(player.playbackFailed)
+        XCTAssertFalse(player.recovering)
+        XCTAssertFalse(player.showsPauseControl)
+        XCTAssertEqual(player.player.rate, 0)
+        await transport.releaseMedia()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(player.playbackFailed)
+        XCTAssertEqual(player.player.rate, 0)
+        XCTAssertEqual(player.state?.currentTrackId, 1)
+    }
+
     @MainActor func testCacheRejectsTruncatedFile() async throws {
         let (player, _) = try await fixture()
         defer { player.stop() }
