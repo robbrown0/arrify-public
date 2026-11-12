@@ -190,7 +190,13 @@ final class PlaybackTransitionTests: XCTestCase {
         var refreshes = 0
         let (player, _) = try await fixture(onHistoryRecorded: { refreshes += 1 })
         defer { player.stop() }
-        for _ in 0..<100 where !player.isPlaying { try await Task.sleep(for: .milliseconds(20)) }
+        // KVO can already have a heartbeat in flight. A concurrent reconcile
+        // intentionally coalesces, so wait for its acknowledgement, not just rate.
+        for _ in 0..<100 where refreshes == 0 {
+            await player.reconcile()
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(refreshes, 1)
         await player.reconcile(); await player.reconcile()
         XCTAssertEqual(refreshes, 1)
         let oldEngine = player.player
