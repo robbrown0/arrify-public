@@ -423,7 +423,7 @@ struct HomeScreen: View {
                     }
                     if let overview = model.library.overview {
                         recentSongs(overview.recentTracks ?? [])
-                        rail("Playlists", items: overview.items.filter { ["personal", "playlists"].contains($0.section) }, albums: false)
+                        rail("Playlists", items: overview.items.filter { $0.section == "personal" } + overview.items.filter { $0.section == "playlists" }, albums: false)
                     }
                     RefreshStatus(loading: model.library.loading, updated: model.library.updated, error: model.library.error)
                 }.padding(24)

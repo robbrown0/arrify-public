@@ -624,11 +624,13 @@ import Network
         if desiredKey != key {
             desiredKey = key; prepareTask?.cancel(); aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil
             player.pause(); player.removeAllItems(); queuedTracks = [:]; loadedKey = nil; busy = true
+            position = max(0, state.positionSeconds); duration = 0
             prepareTask = Task { [weak self] in await self?.prepare(key: key, id: id, epoch: state.ownerEpoch) }
         }
         if loadedKey == key, seekIntent != state.seekIntent {
             cancelRecovery(); resumeCheckpoint = nil; resetProgressClock()
             seekIntent = state.seekIntent
+            position = max(0, state.seekTargetSeconds)
             player.seek(to: CMTime(seconds: max(0, state.seekTargetSeconds), preferredTimescale: 600), completionHandler: { _ in })
         }
         if !state.playing { cancelRecovery(); player.pause(); aheadTask?.cancel(); aheadTask = nil } else { playIfAllowed() }
@@ -663,7 +665,7 @@ import Network
         let token = UUID(); recoveryGeneration = token
         let key = loadedKey
         let sample = player.currentTime().seconds
-        let resumePosition = resumeCheckpoint ?? (sample.isFinite ? max(0, sample) : position)
+        let resumePosition = resumeCheckpoint ?? (current.status != .failed && sample.isFinite ? max(0, sample) : position)
         resumeCheckpoint = resumePosition
         let originalURL = (current.asset as? AVURLAsset)?.url
         if originalURL?.isFileURL == true { cache.invalidate(id, matching: originalURL) }

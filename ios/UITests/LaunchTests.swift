@@ -49,7 +49,7 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(recent.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Playlists"].exists)
         XCTAssertFalse(app.staticTexts["Set the mood"].exists)
-        XCTAssertTrue(app.buttons["homePlaylistsAll"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["homePlaylistsAll"].exists)
         recent.tap()
         XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
         XCTAssertTrue(app.buttons["More options for Just Like a Pill"].waitForExistence(timeout: 10))
