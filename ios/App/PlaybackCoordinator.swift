@@ -235,9 +235,7 @@ import Network
         observe(AVAudioSession.mediaServicesWereResetNotification) { owner, _ in
             owner.cancelRecovery(); owner.controlRevision += 1; owner.permission.userPause()
             owner.prepareTask?.cancel(); owner.aheadTask?.cancel(); owner.aheadTask = nil
-            if let observer = owner.timeObserver { owner.player.removeTimeObserver(observer) }
-            owner.player = AVQueuePlayer(); owner.player.allowsExternalPlayback = false
-            owner.player.actionAtItemEnd = .pause; owner.installTimeObserver()
+            owner.resetPlayerEngine()
             owner.loadedKey = nil; owner.desiredKey = nil; owner.queuedTracks = [:]
             owner.busy = false; owner.preparationSeeking = false; owner.playbackFailed = true
             owner.message = "Audio service restarted. Tap Play to resume."
@@ -253,6 +251,13 @@ import Network
                 Task { await owner.send("pause") }
             }
         }
+    }
+    private func resetPlayerEngine() {
+        player.pause()
+        if let observer = timeObserver { player.removeTimeObserver(observer); timeObserver = nil }
+        statusObservation = nil; currentObservation = nil; itemObservation = nil
+        player = AVQueuePlayer(); player.allowsExternalPlayback = false
+        player.actionAtItemEnd = .pause; installTimeObserver()
     }
     private func installTimeObserver() {
         statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
@@ -290,7 +295,7 @@ import Network
         case nil: waiting = "none"
         default: waiting = "other"
         }
-        let snapshot = "player-state status=\(item?.status.rawValue ?? -1) time=\(player.timeControlStatus.rawValue) waiting=\(waiting) empty=\(item?.isPlaybackBufferEmpty ?? true)"
+        let snapshot = "player-state engine=\(player.status.rawValue) status=\(item?.status.rawValue ?? -1) time=\(player.timeControlStatus.rawValue) waiting=\(waiting) empty=\(item?.isPlaybackBufferEmpty ?? true)"
         if snapshot != diagnosticState { diagnosticState = snapshot; PlaybackDiagnostics.record(snapshot) }
         publishNowPlaying()
         if item?.status == .failed, !busy, !recovering, !playbackFailed { recoverServerRoute() }
@@ -688,6 +693,7 @@ import Network
                     }
                     guard self.recoveryGeneration == token, self.loadedKey == key, self.ownsOutput, !Task.isCancelled else { return }
                     if !url.isFileURL { retryURL = url }
+                    if self.player.status == .failed { self.resetPlayerEngine() }
                     let replacement = AVPlayerItem(url: url)
                     self.player.removeAllItems(); self.queuedTracks = [ObjectIdentifier(replacement): id]
                     self.player.insert(replacement, after: nil)
@@ -696,15 +702,34 @@ import Network
                         if url.isFileURL { self.cache.invalidate(id) }
                         throw error
                     }
+                    guard self.recoveryGeneration == token, !Task.isCancelled,
+                          self.permission.allowsPlayback(ownsOutput: self.ownsOutput, serverPlaying: self.state?.playing == true, mediaReady: true) else { return }
+                    try self.audioSession.activate()
+                    self.player.play()
+                    // Ready/seek success is not proof of recovered playback. Observe actual progress
+                    // before ending the retry cycle, so a failed cache can fall through to streaming.
+                    let progressDeadline = ProcessInfo.processInfo.systemUptime + 8
+                    while true {
+                        try Task.checkCancellation()
+                        guard self.player.currentItem === replacement, replacement.status != .failed,
+                              ProcessInfo.processInfo.systemUptime < progressDeadline else { throw PlaybackFailure() }
+                        let progress = self.player.currentTime().seconds
+                        if progress.isFinite && progress > resumePosition + 0.05 { break }
+                        try await Task.sleep(for: .milliseconds(100))
+                    }
                     guard self.recoveryGeneration == token, !Task.isCancelled else { return }
                     self.recoveryDeadlineTask?.cancel(); self.recoveryDeadlineTask = nil
                     self.routeRecoveryTask = nil; self.recovering = false; self.message = nil
                     self.position = resumePosition; self.resumeCheckpoint = nil; self.resetProgressClock()
-                    self.updateReceiverMetadata(); self.playIfAllowed(); self.publishNowPlaying(); self.startReadAhead()
+                    self.updateReceiverMetadata(); self.playerStateChanged(); self.publishNowPlaying(); self.startReadAhead()
                     PlaybackDiagnostics.record("recovery-ready attempt=\(attempt + 1) cached=\(url.isFileURL)")
                     return
                 } catch {
                     guard self.recoveryGeneration == token, !Task.isCancelled else { return }
+                    self.player.pause()
+                    if let failedURL = (self.player.currentItem?.asset as? AVURLAsset)?.url, failedURL.isFileURL {
+                        self.cache.invalidate(id, matching: failedURL)
+                    }
                     PlaybackDiagnostics.record("recovery-attempt-failed attempt=\(attempt + 1)")
                     do { try await Task.sleep(for: .seconds(1)) } catch { return }
                 }
