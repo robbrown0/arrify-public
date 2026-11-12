@@ -96,7 +96,6 @@ struct LibraryHome: View {
             .toolbar { ToolbarItem(placement: .topBarLeading) {
                 if let image = model.brandIcon { Image(uiImage: image).resizable().scaledToFit().frame(width: 32, height: 32).clipShape(RoundedRectangle(cornerRadius: 7)).accessibilityLabel("Server icon") }
             } }
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.library.refresh() } }.accessibilityIdentifier("refreshLibrary") } }
             .task { if model.library.overview == nil { await model.library.refresh() } }
             .refreshable { await model.library.refresh() }
         }
@@ -144,7 +143,6 @@ struct CollectionScreen: View {
         }.background(Color.black).navigationTitle(title)
         .task { if model.library.overview == nil { await model.library.refresh() } }
         .refreshable { await model.library.refresh() }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.library.refresh() } } } }
     }
 }
 
@@ -263,7 +261,6 @@ struct BrowserScreen: View {
             await browser.refreshPopularity(query: activeQuery)
         }
         .refreshable { await browser.load(query: activeQuery) }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Refresh", systemImage: "arrow.clockwise") { Task { await browser.load(query: activeQuery) } }.accessibilityIdentifier("refreshSongs") } }
     }
 }
 
@@ -321,7 +318,7 @@ struct SongActionsMenu: View {
     @State private var showOriginalAlbum = false
     var body: some View {
         Menu {
-            Button(favorites.ids.contains(track.id) ? "Remove from Liked songs" : "Add to Liked songs", systemImage: "heart") { Task { await favorites.toggle(track.id) } }
+            Button(favorites.ids.contains(track.id) ? "Remove from Liked songs" : "Add to Liked songs", systemImage: favorites.ids.contains(track.id) ? "checkmark.circle.fill" : "plus.circle") { Task { await favorites.toggle(track.id) } }
                 .disabled(favorites.pending.contains(track.id))
             Button("Add to playlist", systemImage: "music.note.list") { addingToPlaylist = true }
             Button("Add to queue", systemImage: "text.badge.plus") { Task { await model.playback.send("queue", ids: [track.id]) } }
@@ -423,14 +420,12 @@ struct HomeScreen: View {
                     }
                     if let overview = model.library.overview {
                         recentSongs(overview.recentTracks ?? [])
-                        rail("Playlists", items: overview.items.filter { $0.section == "personal" } + overview.items.filter { $0.section == "playlists" }, albums: false)
+                        rail("Playlists", items: overview.items.filter { $0.section == "playlists" }, albums: false)
+                        rail("Personal playlists", items: overview.items.filter { $0.section == "personal" }, albums: false)
                     }
                     RefreshStatus(loading: model.library.loading, updated: model.library.updated, error: model.library.error)
                 }.padding(24)
             }.background(Color.black).navigationTitle("Home").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.library.refresh() } }.accessibilityIdentifier("refreshLibrary")
-                } }
                 .task { await model.library.refresh() }
                 .onChange(of: scenePhase) { if scenePhase == .active { model.library.scheduleRefresh() } }
                 .refreshable { await model.library.refresh() }
@@ -465,7 +460,7 @@ struct HomeScreen: View {
             HStack {
                 Text(title).font(.title2.bold()); Spacer()
                 if albums { NavigationLink("View all") { BrowserScreen(model: model, title: "Albums", kind: "albums") } }
-                else { NavigationLink("View all") { PlaylistLibraryView(model: model) }.accessibilityIdentifier("homePlaylistsAll") }
+                else { NavigationLink("View all") { PlaylistLibraryView(model: model) }.accessibilityIdentifier(title == "Personal playlists" ? "homePersonalPlaylistsAll" : "homePlaylistsAll") }
             }
             if items.isEmpty { Text(albums ? "Albums you listen to will appear here." : "Create a playlist to keep your favorite songs together.").foregroundStyle(.secondary).font(.subheadline) }
             ScrollView(.horizontal, showsIndicators: false) {

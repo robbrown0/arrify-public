@@ -30,7 +30,7 @@ struct TabletShell: View {
                             Button { creatingPlaylist = true } label: { Image(systemName: "plus").frame(width: 44, height: 44) }.accessibilityLabel("Create playlist")
                         }.padding(.top, 24)
                         navigation("Library", "books.vertical")
-                        navigation("Liked songs", "heart")
+                        navigation("Liked songs", "checkmark.circle.fill")
                         navigation("Playlists", "music.note.list")
                         navigation("Moods", "circle.lefthalf.filled")
                         navigation("Channels", "antenna.radiowaves.left.and.right")

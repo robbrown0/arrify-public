@@ -47,7 +47,7 @@ import ArrifyCore
     }
     func fill(_ manifest: Manifest, api: APIClient) async {
         let epoch = generation
-        let window = Array(manifest.items.prefix(3)); let wanted = Set(window.map(\.trackId))
+        let window = Array(manifest.items.prefix(4)); let wanted = Set(window.map(\.trackId))
         for id in Array(files.keys) where !wanted.contains(id) {
             if let old = files.removeValue(forKey: id) { try? FileManager.default.removeItem(at: old.url) }
         }

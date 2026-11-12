@@ -144,13 +144,13 @@ nonisolated enum ArtworkDecoder {
             return token == generation ? image : nil
         }
         let token = generation
-        let task = Task<UIImage?, Never> { [api, disk] in
+        let task = Task<UIImage?, Never> { [api, disk, weak self] in
             let scope = await api.artworkCacheScope()
             if let scope, let data = await disk.read(scope: scope, path: path),
-               let image = await Task.detached(priority: .utility, operation: { ArtworkDecoder.image(data, pixels: 384) }).value { return image }
+               let image = await Task.detached(priority: .utility, operation: { ArtworkDecoder.image(data, pixels: 2048) }).value { return image }
             guard let data = try? await api.artwork(path: path) else { return nil as UIImage? }
-            let image = await Task.detached(priority: .utility) { ArtworkDecoder.image(data, pixels: 384) }.value
-            if let scope, let thumbnail = image?.jpegData(compressionQuality: 0.85), !Task.isCancelled {
+            let image = await Task.detached(priority: .utility) { ArtworkDecoder.image(data, pixels: 2048) }.value
+            if let scope, token == self?.generation, let thumbnail = image?.jpegData(compressionQuality: 0.85), !Task.isCancelled {
                 await disk.write(thumbnail, scope: scope, path: path)
             }
             return image
@@ -171,7 +171,7 @@ actor ArtworkDiskCache {
     private let root: URL
     private let limit = 100 * 1024 * 1024
     init(root: URL? = nil) {
-        self.root = root ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ArrifyArtwork-v1", isDirectory: true)
+        self.root = root ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ArrifyArtwork-v2", isDirectory: true)
     }
     private func file(scope: String, path: String) -> URL {
         let key = SHA256.hash(data: Data((scope + "\n" + path).utf8)).map { String(format: "%02x", $0) }.joined()

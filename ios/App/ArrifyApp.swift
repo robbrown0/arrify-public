@@ -32,7 +32,7 @@ import AVKit
         #endif
         favorites = FavoritesStore(api: api)
         library = LibraryStore(api: api)
-        artwork = ArtworkStore(api: api)
+        artwork = playback.artworkStore
         playback.onHistoryRecorded = { [weak library] in
             library?.scheduleRefresh()
         }

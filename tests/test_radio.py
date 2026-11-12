@@ -27,6 +27,30 @@ class RadioTests(unittest.TestCase):
             return self.lib.radio_index.tracks[i]
         self.lib.track=lookup;self.related=SimilarArtists(self.tmp.name,enabled=False);self.radio=Radio(self.tmp.name,self.lib,self.related);self.radio.rng=random.Random(42);self.lib.radio=self.radio;self.player=Player(self.accounts,self.lib)
     def tearDown(self):self.related.db.close();self.accounts.db.close();self.tmp.cleanup()
+    def test_shuffle_toggle_restores_remaining_occurrences_after_edits(self):
+        self.player.command(1,{'action':'play','ids':[1,2,3,2,4]})
+        with patch('app.library.secrets.SystemRandom') as rng:
+            rng.return_value.shuffle.side_effect=lambda queue:queue.reverse()
+            shuffled=self.player.command(1,{'action':'shuffle'})
+        self.assertEqual(shuffled['upcoming'],[4,2,3,2])
+        self.assertEqual(self.player.command(1,{'action':'next'})['current'],4)
+        self.player.command(1,{'action':'remove','index':0})
+        self.player.command(1,{'action':'queue','ids':[6]})
+        restored=self.player.command(1,{'action':'shuffle'})
+        self.assertFalse(restored['shuffle'])
+        self.assertEqual(restored['current'],4)
+        self.assertEqual(restored['upcoming'],[2,3,6])
+        self.assertEqual(self.player.command(1,{'action':'next'})['current'],2)
+
+    def test_shuffle_play_keeps_original_order_for_toggle_off(self):
+        with patch('app.library.secrets.SystemRandom') as rng:
+            rng.return_value.shuffle.side_effect=lambda queue:queue.reverse()
+            state=self.player.command(1,{'action':'play','ids':[1,2,3,4],'shuffle':True})
+        self.assertTrue(state['shuffle'])
+        self.assertEqual(state['upcoming'],[4,3,2])
+        self.assertEqual(self.player.command(1,{'action':'shuffle'})['upcoming'],[2,3,4])
+        self.assertFalse(self.player.command(1,{'action':'play','ids':[3,2,1]})['shuffle'])
+
     def test_song_seed_first_and_only_similarity_qualified_local_music(self):
         d=self.radio.preview('track','1');self.assertEqual(d['tracks'][0]['id'],1)
         self.assertNotIn(6,[t['id'] for t in d['tracks']]);self.assertGreater(d['artists'],1)

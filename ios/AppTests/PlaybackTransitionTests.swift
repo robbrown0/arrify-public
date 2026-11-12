@@ -277,6 +277,29 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertNotNil(library.overview)
     }
 
+    @MainActor func testAudioCacheRetainsCurrentAndThreeUpcomingFiles() async throws {
+        let api = APIClient(transport: UITestTransport(), store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let items = (1...5).map { id in
+            ["track_id": id, "profile": "original", "state": "ready", "size_bytes": 4,
+             "mime_type": "audio/mpeg", "url": "/api/v1/stream/\(id)"] as [String: Any]
+        }
+        let data = try JSONSerialization.data(withJSONObject: ["owner_epoch": 1, "queue_revision": 1, "retry_after_seconds": 1, "items": items])
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let manifest = try decoder.decode(Manifest.self, from: data)
+        let cache = AudioCache(download: { url in
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try Data([1, 2, 3, 4]).write(to: file)
+            return (file, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        })
+        defer { cache.reset() }
+        await cache.fill(manifest, api: api)
+        XCTAssertEqual(cache.items.map(\.id), [1, 2, 3, 4])
+        XCTAssertEqual(cache.downloadedBytes, 16)
+        for item in manifest.items.prefix(4) { XCTAssertNotNil(cache.file(for: item)) }
+        XCTAssertNil(cache.file(for: manifest.items[4]))
+    }
+
     @MainActor func testCacheRejectsTruncatedFile() async throws {
         let (player, _) = try await fixture()
         defer { player.stop() }

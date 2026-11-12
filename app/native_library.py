@@ -156,7 +156,7 @@ def expand_playback(library, accounts, uid, data):
     if source['kind'] == 'channels':
         command['channel'] = source['id']
     else:
-        if data.get('shuffle'): random.SystemRandom().shuffle(ids)
+        command['shuffle'] = data.get('shuffle', False)
         command['ids'] = ids
     return command
 

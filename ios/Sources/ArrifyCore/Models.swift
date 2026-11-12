@@ -58,6 +58,7 @@ public struct PlaybackState: Codable, Sendable {
     public let seekIntent: Int
     public let playId: Int
     public var upcomingTrackIds: [Int]?
+    public var shuffle: Bool?
     public var repeatMode: String?
     public var queueControlsAvailable: Bool?
     public var context: PlaybackContext?
@@ -71,6 +72,7 @@ public struct PlaybackState: Codable, Sendable {
         var merged = update
         if update.partial {
             merged.context = update.context ?? current.context
+            merged.shuffle = update.shuffle ?? current.shuffle
             merged.repeatMode = update.repeatMode ?? current.repeatMode
             merged.queueControlsAvailable = update.queueControlsAvailable ?? current.queueControlsAvailable
         }

@@ -32,9 +32,11 @@ import Network
     let deviceId: String
     var state: PlaybackState?
     var track: Track?
+    let artworkStore: ArtworkStore
     var artwork: UIImage?
     private var receiverArtwork: Data?
     private var systemArtwork: MPMediaItemArtwork?
+    private var artworkPrefetchTask: Task<Void, Never>?
     private var artworkTask: Task<Void, Never>?
     var outputName = "iPhone"
     var displayOutputName: String { hasOtherOutput ? (state?.output.flatMap { $0.isEmpty ? nil : $0 } ?? "Other device") : outputName }
@@ -130,6 +132,7 @@ import Network
 
     init(api: APIClient, audioSession: any PlaybackAudioSession = SystemPlaybackAudioSession(), cache: AudioCache? = nil) {
         self.api = api
+        self.artworkStore = ArtworkStore(api: api)
         self.cache = cache ?? AudioCache()
         self.remoteActivity = RemotePlaybackActivity(api: api)
         self.audioSession = audioSession
@@ -383,6 +386,7 @@ import Network
         eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false; liveConnected = false
         pollTask?.cancel(); pollTask = nil; cancelPreparation(); prepareTask = nil
         player.pause(); player.removeAllItems(); queuedTracks = [:]
+        artworkPrefetchTask?.cancel(); artworkPrefetchTask = nil
         artworkTask?.cancel(); artworkTask = nil; artwork = nil; receiverArtwork = nil; systemArtwork = nil
         loadedKey = nil; completedKey = nil; desiredKey = nil; state = nil; track = nil; position = 0; duration = 0; busy = false
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
@@ -578,10 +582,9 @@ import Network
                 let metadata = try? await api.track(id)
                 if self.state?.currentTrackId == id {
                     if let metadata { track = metadata; receiverArtwork = nil; systemArtwork = nil }
-                    artworkTask = Task { [weak self, api] in
-                        let bytes = try? await api.artwork(id)
-                        guard let self, !Task.isCancelled, self.state?.currentTrackId == id else { return }
-                        let decoded = await Task.detached(priority: .utility) { bytes.flatMap { ArtworkDecoder.image($0, pixels: 2048) } }.value
+                    artworkTask = Task { [weak self] in
+                        guard let self else { return }
+                        let decoded = await self.artworkStore.image("/api/v1/artwork/\(id)")
                         guard !Task.isCancelled, self.state?.currentTrackId == id else { return }
                         self.artwork = decoded
                         self.artworkRevision += 1
@@ -847,7 +850,7 @@ import Network
         }
     }
     private func synchronizeQueuedItems() {
-        let expected = state?.repeatMode == "one" ? [] : Array((state?.upcomingTrackIds ?? []).prefix(2))
+        let expected = state?.repeatMode == "one" ? [] : Array((state?.upcomingTrackIds ?? []).prefix(3))
         let queued = Array(player.items().dropFirst())
         if queued.map({ queuedTracks[ObjectIdentifier($0)] }) != Array(expected.prefix(queued.count)).map({ Optional($0) }) {
             for item in queued { player.remove(item); queuedTracks.removeValue(forKey: ObjectIdentifier(item)) }
@@ -856,7 +859,7 @@ import Network
     private func enqueueAhead(_ manifest: Manifest) async throws {
         guard state?.queueRevision == manifest.queueRevision, player.currentItem != nil, !endedInFlight else { return }
         synchronizeQueuedItems()
-        let next = state?.repeatMode == "one" ? [] : Array((state?.upcomingTrackIds ?? []).prefix(2))
+        let next = state?.repeatMode == "one" ? [] : Array((state?.upcomingTrackIds ?? []).prefix(3))
         let count = max(0, player.items().count - 1)
         for id in next.dropFirst(count) {
             guard let media = manifest.items.first(where: { $0.trackId == id && $0.state == "ready" }) else { break }
@@ -880,6 +883,14 @@ import Network
                     let manifest = try await self.api.manifest(deviceId: self.deviceId, epoch: state.ownerEpoch, profile: self.loadedProfile)
                     guard !Task.isCancelled, !self.endedInFlight, self.state?.ownerEpoch == manifest.ownerEpoch, self.state?.queueRevision == manifest.queueRevision else { return }
                     self.remember(manifest)
+                    // Artwork is independently best-effort; it never gates audio downloads.
+                    self.artworkPrefetchTask?.cancel()
+                    self.artworkPrefetchTask = Task { [artworkStore = self.artworkStore] in
+                        for item in manifest.items.prefix(4) {
+                            guard !Task.isCancelled else { return }
+                            _ = await artworkStore.image("/api/v1/artwork/\(item.trackId)")
+                        }
+                    }
                     // Download current first. Do not open duplicate remote players for future songs.
                     await self.cache.fill(manifest, api: self.api)
                     guard !Task.isCancelled, !self.endedInFlight, self.state?.ownerEpoch == manifest.ownerEpoch, self.state?.queueRevision == manifest.queueRevision else { return }

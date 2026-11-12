@@ -34,7 +34,6 @@ struct BrowseScreen: View {
                     } else if error == nil { ProgressView("Loading Browse…") }
                 }.padding(16)
             }.navigationTitle("Browse").refreshable { await load() }
-                .toolbar { Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } } }
                 .task { await load() }
         }
     }

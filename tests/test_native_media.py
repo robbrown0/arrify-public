@@ -34,6 +34,16 @@ class NativeMediaHTTPTests(unittest.TestCase):
         self.s.native_media.close()
         fixtures.StreamGrantHTTPTests.tearDown(self)
 
+    def test_manifest_includes_current_and_three_upcoming_and_revokes_removed(self):
+        self.cmd('play',ids=[1,2,3,4])
+        status, manifest=self.manifest()
+        self.assertEqual(status,200)
+        self.assertEqual([i['track_id'] for i in manifest['items']],[1,2,3,4])
+        fourth=manifest['items'][3]['url']
+        self.assertEqual(self.raw(fourth)[0],200)
+        self.cmd('remove',index=2)
+        self.assertEqual(self.raw(fourth)[0],403)
+
     def manifest(self, profile='original', token=None, **data):
         c = http.client.HTTPConnection('127.0.0.1', self.s.server_port, timeout=5)
         body = {'device_id':'a'*32,'owner_epoch':self.state['listening']['epoch'],'profile':profile, **data}

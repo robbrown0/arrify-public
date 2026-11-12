@@ -421,9 +421,9 @@ class Player:
         if state.get('station') and state['station'].get('mode')!='mix' and not state['upcoming']:
             chosen=self.lib.radio.pick(state['station'],state['history']+([state['current']] if state['current'] else []))
             if chosen is not None:state['upcoming']=[chosen]
-        if state.get('channel') and len(state['upcoming'])<2:
+        if state.get('channel') and len(state['upcoming'])<3:
             with self.lib.music.lock:
-                while len(state['upcoming'])<2:
+                while len(state['upcoming'])<3:
                     chosen=self.lib.music.radio_pick(state['channel'], state['history'] + ([state['current']] if state['current'] else []) + state['upcoming'])
                     if chosen is None:break
                     state['upcoming'].append(chosen)
@@ -506,7 +506,12 @@ class Player:
                 ix=ids.index(selected)
                 s.update(current=selected,upcoming=ids[ix+1:],channel=channel,station=station,position=0,playback_context=data.get('playback_context'))
                 if channel or data.get('party_id') or station and station.get('mode')!='mix':s['repeat']='off'
-                if station and station.get('mode')=='mix':s['shuffle']=False
+                s['shuffle']=False
+                s.pop('unshuffled',None)
+                if data.get('shuffle') is True and not channel and not (station and station.get('mode')!='mix'):
+                    s['unshuffled']=list(s['upcoming'])
+                    secrets.SystemRandom().shuffle(s['upcoming'])
+                    s['shuffle']=True
             elif action=='queue_jump':
                 index=data.get('index')
                 if type(index) is not int or not 0<=index<len(s['upcoming']):raise ValueError('Queue item unavailable.')
@@ -561,13 +566,33 @@ class Player:
                 s.update(upcoming=[],channel=None,station=None)
             elif action=='shuffle':
                 if s['channel'] or s.get('station') and s['station'].get('mode')!='mix': raise ValueError('Radio already mixes its next songs.')
-                secrets.SystemRandom().shuffle(s['upcoming'])
-                s['shuffle']=True
+                if s.get('shuffle'):
+                    remaining=collections.Counter(s['upcoming'])
+                    restored=[]
+                    for tid in s.get('unshuffled',s['upcoming']):
+                        if remaining[tid]:restored.append(tid);remaining[tid]-=1
+                    for tid in s['upcoming']:
+                        if remaining[tid]:restored.append(tid);remaining[tid]-=1
+                    s['upcoming']=restored
+                    s['shuffle']=False
+                    s.pop('unshuffled',None)
+                else:
+                    s['unshuffled']=list(s['upcoming'])
+                    secrets.SystemRandom().shuffle(s['upcoming'])
+                    s['shuffle']=True
             elif action=='position':
                 pos=float(data.get('position',0))
                 if not 0<=pos<=86400: raise ValueError('Invalid position.')
                 s['position']=pos
             else: raise ValueError('Unknown playback action.')
+            if s.get('shuffle'):
+                remaining=collections.Counter(s['upcoming'])
+                ordered=[]
+                for tid in s.get('unshuffled',[]):
+                    if remaining[tid]:ordered.append(tid);remaining[tid]-=1
+                for tid in s['upcoming']:
+                    if remaining[tid]:ordered.append(tid);remaining[tid]-=1
+                s['unshuffled']=ordered
             if action in ('play','next','queue_jump') and previous and not (action=='next' and data.get('automatic') and s.get('repeat')=='one' and not s.get('party_id')):
                 s['history']=(s['history']+[previous])[-250:]
             if parties:parties.after_command(uid,data,s)
