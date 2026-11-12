@@ -42,13 +42,23 @@ class RadioTests(unittest.TestCase):
         self.assertEqual(restored['upcoming'],[2,3,6])
         self.assertEqual(self.player.command(1,{'action':'next'})['current'],2)
 
+    def test_shuffle_duplicate_removal_preserves_the_correct_occurrence(self):
+        self.player.command(1,{'action':'play','ids':[1,2,3,2,4]})
+        with patch('app.library.secrets.SystemRandom') as rng:
+            rng.return_value.shuffle.side_effect=lambda queue:queue.reverse()
+            self.player.command(1,{'action':'shuffle'})
+        self.player.command(1,{'action':'remove','index':3})
+        restored=self.player.command(1,{'action':'shuffle'})
+        self.assertEqual(restored['upcoming'],[3,2,4])
+
     def test_shuffle_play_keeps_original_order_for_toggle_off(self):
         with patch('app.library.secrets.SystemRandom') as rng:
             rng.return_value.shuffle.side_effect=lambda queue:queue.reverse()
             state=self.player.command(1,{'action':'play','ids':[1,2,3,4],'shuffle':True})
         self.assertTrue(state['shuffle'])
-        self.assertEqual(state['upcoming'],[4,3,2])
-        self.assertEqual(self.player.command(1,{'action':'shuffle'})['upcoming'],[2,3,4])
+        self.assertEqual(state['current'],4)
+        self.assertEqual(state['upcoming'],[3,2,1])
+        self.assertEqual(self.player.command(1,{'action':'shuffle'})['upcoming'],[1,2,3])
         self.assertFalse(self.player.command(1,{'action':'play','ids':[3,2,1]})['shuffle'])
 
     def test_song_seed_first_and_only_similarity_qualified_local_music(self):

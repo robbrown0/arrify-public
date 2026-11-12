@@ -577,7 +577,7 @@ extension NowPlayingArtworkTests {
         }
         await disk.write(try XCTUnwrap(cover.jpegData(compressionQuality: 0.9)), scope: scope, path: "/api/v1/artwork/1")
         let store = ArtworkStore(api: api, disk: disk)
-        let restored = await store.image("/api/v1/artwork/1")
+        let restored = await store.image("/api/v1/artwork/1", pixels: 2048)
         XCTAssertEqual(restored?.size.width, 1200)
         let requests = await transport.artworkRequests
         XCTAssertEqual(requests, 0, "Player-sized artwork must load from disk without fetching again")

@@ -584,7 +584,7 @@ import Network
                     if let metadata { track = metadata; receiverArtwork = nil; systemArtwork = nil }
                     artworkTask = Task { [weak self] in
                         guard let self else { return }
-                        let decoded = await self.artworkStore.image("/api/v1/artwork/\(id)")
+                        let decoded = await self.artworkStore.image("/api/v1/artwork/\(id)", pixels: 2048)
                         guard !Task.isCancelled, self.state?.currentTrackId == id else { return }
                         self.artwork = decoded
                         self.artworkRevision += 1
@@ -888,7 +888,7 @@ import Network
                     self.artworkPrefetchTask = Task { [artworkStore = self.artworkStore] in
                         for item in manifest.items.prefix(4) {
                             guard !Task.isCancelled else { return }
-                            _ = await artworkStore.image("/api/v1/artwork/\(item.trackId)")
+                            _ = await artworkStore.image("/api/v1/artwork/\(item.trackId)", pixels: 2048)
                         }
                     }
                     // Download current first. Do not open duplicate remote players for future songs.

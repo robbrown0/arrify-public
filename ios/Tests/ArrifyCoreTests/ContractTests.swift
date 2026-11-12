@@ -102,6 +102,13 @@ extension ContractTests {
                       playing: true, observed: "playing", seekTargetSeconds: 0, seekIntent: 0, playId: 1,
                       upcomingTrackIds: upcoming)
     }
+    func testPartialHeartbeatPreservesShuffleUntilAuthoritativeToggle() {
+        var current = snapshot(); current.shuffle = true
+        let merged = PlaybackState.merging(snapshot(time: 101, partial: true, upcoming: nil), into: current)
+        XCTAssertEqual(merged.shuffle, true)
+        var off = snapshot(time: 102); off.shuffle = false
+        XCTAssertEqual(PlaybackState.merging(off, into: merged).shuffle, false)
+    }
     func testPartialHeartbeatPreservesUpcomingQueue() {
         let merged = PlaybackState.merging(snapshot(time: 101, partial: true, upcoming: nil), into: snapshot())
         XCTAssertEqual(merged.upcomingTrackIds, [8, 9])
