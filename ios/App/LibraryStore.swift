@@ -22,7 +22,7 @@ import CryptoKit
             if generation == token { self.error = error.localizedDescription }
         }
     }
-    func refreshAfterPlayback() {
+    func scheduleRefresh() {
         let token = generation
         Task { @MainActor [weak self] in
             guard let self, self.generation == token else { return }

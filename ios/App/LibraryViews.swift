@@ -432,7 +432,7 @@ struct HomeScreen: View {
                     Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.library.refresh() } }.accessibilityIdentifier("refreshLibrary")
                 } }
                 .task { await model.library.refresh() }
-                .onChange(of: scenePhase) { if scenePhase == .active { Task { await model.library.refresh() } } }
+                .onChange(of: scenePhase) { if scenePhase == .active { model.library.scheduleRefresh() } }
                 .refreshable { await model.library.refresh() }
         }
     }

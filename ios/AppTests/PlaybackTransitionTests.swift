@@ -249,12 +249,12 @@ final class PlaybackTransitionTests: XCTestCase {
         let (player, _) = try await fixture()
         defer { player.stop() }
         let library = LibraryStore(api: player.api)
-        library.refreshAfterPlayback()
+        library.scheduleRefresh()
         library.clear()
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertNil(library.overview)
         XCTAssertNil(library.updated)
-        library.refreshAfterPlayback()
+        library.scheduleRefresh()
         for _ in 0..<100 where library.overview == nil { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertNotNil(library.overview)
     }

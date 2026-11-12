@@ -34,7 +34,7 @@ import AVKit
         library = LibraryStore(api: api)
         artwork = ArtworkStore(api: api)
         playback.onHistoryRecorded = { [weak library] in
-            library?.refreshAfterPlayback()
+            library?.scheduleRefresh()
         }
         RemoteControlRuntime.api = api
     }
