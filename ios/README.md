@@ -40,7 +40,7 @@ This is a **device-testing prototype**, not a complete replacement for the web a
 Requests, playlist editing/community sharing, favorites, native offline storage,
 seamless endpoint switching and queue editing are subsequent milestones.
 Only the loaded search-result suffix (up to 1,000 songs) becomes the initial queue.
-Streaming uses the server's current + next two preparation contract; it does not
+Streaming uses the server's current + next three preparation contract; it does not
 claim that audio has been downloaded onto the device.
 
 Home and public addresses are separate explicit enrollments. Home never falls back
@@ -368,3 +368,19 @@ new authority. No implementation should infer permission from Wi-Fi, weaken gran
 validation, silently take ownership back, or replay old songs after reconnecting.
 Codec/quality fallback also remains explicit until diagnostics establish a need;
 this release does not silently downgrade original audio.
+
+### Artwork and queue controls
+
+Audio read-ahead covers the current song plus three upcoming songs within the existing
+512 MB total / 256 MB per-file budget. Artwork is fetched independently for that window,
+uses the same account-scoped store as browsing and the full-screen player, and persists
+at up to 2048 pixels in the 100 MB, 24-hour artwork cache. Artwork failures never gate audio.
+Shuffle is server-authoritative: on randomizes remaining songs; off restores their
+pre-shuffle order without restoring consumed or removed occurrences. New queue additions
+are retained. Starting an ordinary Play selection resets shuffle; Shuffle selection enables it.
+
+Behavior references: [Apple Music](https://support.apple.com/en-ca/guide/iphone/iphe22408524/ios),
+[Spotify](https://support.spotify.com/us/article/shuffle-play/), and
+[TIDAL queue controls](https://support.tidal.com/hc/en-us/articles/360004182777-Play-Queue).
+Apple and Spotify document the on/off distinction; TIDAL's queue guide does not specify
+shuffle-off restoration details. Remaining-occurrence restoration is Arrify's policy.

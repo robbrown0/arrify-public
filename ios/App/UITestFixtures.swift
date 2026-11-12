@@ -18,6 +18,7 @@ actor UITestTransport: HTTPTransport {
     private var owner: String? = ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1" ? "other-device" : nil
     private var playing = false
     private var repeatMode = "off"
+    private var shuffle = false
     private var playlists: [[String: Any]] = []
     private var favoriteIds: Set<Int> = []
     private let album = #"{"id":"aaaaaaaaaaaaaaaaaaaaaaaa","kind":"albums","name":"M!ssundaztood","subtitle":"P!nk","section":"","artwork":null,"track_count":2}"#
@@ -102,10 +103,11 @@ actor UITestTransport: HTTPTransport {
             if request.httpMethod == "POST", let data = request.httpBody,
                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 owner = body["device_id"] as? String
+                if body["action"] as? String == "shuffle" { shuffle.toggle() }
                 if let mode = body["mode"] as? String { repeatMode = mode }
                 playing = body["action"] as? String != "pause"
             }
-            value = "{\"repeat_mode\":\"\(repeatMode)\",\"queue_controls_available\":true,\"partial\":false,\"current_track_id\":\(owner == nil ? "null" : "1"),\"position_seconds\":0,\"server_time\":1,\"queue_revision\":1,\"owner_device_id\":\(owner.map { "\"\($0)\"" } ?? "null"),\"owner_epoch\":1,\"intent\":1,\"playing\":\(playing),\"observed\":\"paused\",\"seek_target_seconds\":0,\"seek_intent\":0,\"play_id\":1,\"upcoming_track_ids\":[2]}"
+            value = "{\"shuffle\":\(shuffle),\"repeat_mode\":\"\(repeatMode)\",\"queue_controls_available\":true,\"partial\":false,\"current_track_id\":\(owner == nil ? "null" : "1"),\"position_seconds\":0,\"server_time\":1,\"queue_revision\":1,\"owner_device_id\":\(owner.map { "\"\($0)\"" } ?? "null"),\"owner_epoch\":1,\"intent\":1,\"playing\":\(playing),\"observed\":\"paused\",\"seek_target_seconds\":0,\"seek_intent\":0,\"play_id\":1,\"upcoming_track_ids\":[2]}"
         }
         let response = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_TITLE"] == "1"
             ? value.replacingOccurrences(of: "Just Like a Pill", with: "A Very Long Song Title That Wraps Onto Two Lines in the Expanded Player During Keyboard Restoration")

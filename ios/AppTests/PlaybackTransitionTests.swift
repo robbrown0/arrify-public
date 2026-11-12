@@ -55,9 +55,23 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(player.player.actionAtItemEnd, .pause)
         let first = try XCTUnwrap(player.player.currentItem)
         let next = player.player.items()[1]
+        // Wait for the real-start heartbeat to finish so the deliberately held
+        // GET belongs to this task, not a coalesced background reconciliation.
+        for _ in 0..<500 where player.reconciling || player.historyRevision == 0 {
+            if !player.reconciling { await player.reconcile() }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(player.reconciling)
+        XCTAssertGreaterThan(player.historyRevision, 0)
         await transport.delayPoll()
         let poll = Task { await player.reconcile() }
-        for _ in 0..<100 { if await transport.pollWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<500 { if await transport.pollWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        let delayedPollStarted = await transport.pollWaiting
+        XCTAssertTrue(delayedPollStarted, "Establish the delayed response before simulating the track ending")
+        guard delayedPollStarted else {
+            poll.cancel(); await transport.releasePoll(); await poll.value
+            return
+        }
         player.player.pause()
         NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: first)
         for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
@@ -275,6 +289,29 @@ final class PlaybackTransitionTests: XCTestCase {
         library.scheduleRefresh()
         for _ in 0..<100 where library.overview == nil { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertNotNil(library.overview)
+    }
+
+    @MainActor func testAudioCacheRetainsCurrentAndThreeUpcomingFiles() async throws {
+        let api = APIClient(transport: UITestTransport(), store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let items = (1...5).map { id in
+            ["track_id": id, "profile": "original", "state": "ready", "size_bytes": 4,
+             "mime_type": "audio/mpeg", "url": "/api/v1/stream/\(id)"] as [String: Any]
+        }
+        let data = try JSONSerialization.data(withJSONObject: ["owner_epoch": 1, "queue_revision": 1, "retry_after_seconds": 1, "items": items])
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let manifest = try decoder.decode(Manifest.self, from: data)
+        let cache = AudioCache(download: { url in
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try Data([1, 2, 3, 4]).write(to: file)
+            return (file, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        })
+        defer { cache.reset() }
+        await cache.fill(manifest, api: api)
+        XCTAssertEqual(cache.items.map(\.id), [1, 2, 3, 4])
+        XCTAssertEqual(cache.downloadedBytes, 16)
+        for item in manifest.items.prefix(4) { XCTAssertNotNil(cache.file(for: item)) }
+        XCTAssertNil(cache.file(for: manifest.items[4]))
     }
 
     @MainActor func testCacheRejectsTruncatedFile() async throws {

@@ -30,7 +30,7 @@ struct TabletShell: View {
                             Button { creatingPlaylist = true } label: { Image(systemName: "plus").frame(width: 44, height: 44) }.accessibilityLabel("Create playlist")
                         }.padding(.top, 24)
                         navigation("Library", "books.vertical")
-                        navigation("Liked songs", "heart")
+                        navigation("Liked songs", "checkmark.circle.fill")
                         navigation("Playlists", "music.note.list")
                         navigation("Moods", "circle.lefthalf.filled")
                         navigation("Channels", "antenna.radiowaves.left.and.right")
@@ -62,6 +62,18 @@ struct TabletShell: View {
                     }
                     content.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+            }
+            if let message = model.playback.message {
+                HStack {
+                    Text(message).font(.footnote)
+                        .accessibilityIdentifier("playbackStatusMessage")
+                    Spacer()
+                    Button("Retry") { model.playback.retry() }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityIdentifier("retryPlayback")
+                }.padding(.horizontal, 16)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16).padding(.bottom, 8)
             }
             TabletPlayerBar(playback: model.playback, expand: expandPlayer)
         }.background(Color.black)

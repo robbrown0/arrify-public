@@ -130,36 +130,42 @@ nonisolated enum ArtworkDecoder {
     private var cachedAt: [String: Date] = [:]
     private var generation = UUID()
     init(api: APIClient, disk: ArtworkDiskCache = ArtworkDiskCache()) { self.api = api; self.disk = disk; cache.totalCostLimit = 24 * 1024 * 1024; cache.countLimit = 160 }
-    func cachedImage(_ path: String) -> UIImage? {
+    func cachedImage(_ path: String, pixels: Int = 384) -> UIImage? {
+        let path = "\(pixels):\(path)"
         guard let date = cachedAt[path], Date().timeIntervalSince(date) < 86400 else {
             cache.removeObject(forKey: path as NSString); cachedAt[path] = nil; return nil
         }
         return cache.object(forKey: path as NSString)
     }
-    func image(_ path: String) async -> UIImage? {
-        if let image = cachedImage(path) { return image }
-        if let task = pending[path] {
+    func image(_ path: String, pixels: Int = 384) async -> UIImage? {
+        let key = "\(pixels):\(path)"
+        if let image = cachedImage(path, pixels: pixels) { return image }
+        if let task = pending[key] {
             let token = generation
             let image = await task.value
             return token == generation ? image : nil
         }
         let token = generation
-        let task = Task<UIImage?, Never> { [api, disk] in
+        let task = Task<UIImage?, Never> { [api, disk, weak self] in
             let scope = await api.artworkCacheScope()
             if let scope, let data = await disk.read(scope: scope, path: path),
-               let image = await Task.detached(priority: .utility, operation: { ArtworkDecoder.image(data, pixels: 384) }).value { return image }
+               let image = await Task.detached(priority: .utility, operation: { ArtworkDecoder.image(data, pixels: pixels) }).value { return image }
             guard let data = try? await api.artwork(path: path) else { return nil as UIImage? }
-            let image = await Task.detached(priority: .utility) { ArtworkDecoder.image(data, pixels: 384) }.value
-            if let scope, let thumbnail = image?.jpegData(compressionQuality: 0.85), !Task.isCancelled {
+            let image = await Task.detached(priority: .utility) { ArtworkDecoder.image(data, pixels: 2048) }.value
+            if let scope, token == self?.generation, let thumbnail = image?.jpegData(compressionQuality: 0.85), !Task.isCancelled {
                 await disk.write(thumbnail, scope: scope, path: path)
+            }
+            // Keep list thumbnails small in memory while retaining a player-sized disk cover.
+            if pixels < 2048 {
+                return await Task.detached(priority: .utility) { ArtworkDecoder.image(data, pixels: pixels) }.value
             }
             return image
         }
-        pending[path] = task
+        pending[key] = task
         let image = await task.value
         guard token == generation else { return nil }
-        pending[path] = nil
-        if let image { cachedAt[path] = Date(); cache.setObject(image, forKey: path as NSString, cost: Int(image.size.width * image.size.height * 4)) }
+        pending[key] = nil
+        if let image { cachedAt[key] = Date(); cache.setObject(image, forKey: key as NSString, cost: Int(image.size.width * image.size.height * 4)) }
         return image
     }
     func clearPersistentCache() async { clear(); await disk.clear() }
@@ -171,7 +177,12 @@ actor ArtworkDiskCache {
     private let root: URL
     private let limit = 100 * 1024 * 1024
     init(root: URL? = nil) {
-        self.root = root ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ArrifyArtwork-v1", isDirectory: true)
+        if root == nil {
+            // v1 retained only small thumbnails; retire it rather than doubling the disk budget.
+            let legacy = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ArrifyArtwork-v1", isDirectory: true)
+            try? FileManager.default.removeItem(at: legacy)
+        }
+        self.root = root ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ArrifyArtwork-v2", isDirectory: true)
     }
     private func file(scope: String, path: String) -> URL {
         let key = SHA256.hash(data: Data((scope + "\n" + path).utf8)).map { String(format: "%02x", $0) }.joined()

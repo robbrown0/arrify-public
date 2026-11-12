@@ -32,7 +32,7 @@ class NativeMedia:
         listening = state.get('listening', {})
         if listening.get('owner') != device or listening.get('epoch') != epoch or not device:
             raise NativeError(409, 'output_changed', 'Playback belongs to another output.')
-        return list(dict.fromkeys([state.get('current')] + state.get('upcoming', [])[:2]))
+        return list(dict.fromkeys([state.get('current')] + state.get('upcoming', [])[:3]))
 
     def family(self, uid: int, access: str):
         row = self.a.db.execute('''SELECT f.id,f.expires FROM native_access n

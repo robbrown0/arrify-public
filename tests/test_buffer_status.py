@@ -43,3 +43,12 @@ class BufferStatusTests(unittest.TestCase):
         for value in ['x'*33,'https://secret.example/token',{},None]:
             report['worker_version']=value
             self.assertNotIn('worker_version',clean_buffer_report(report))
+
+    def test_four_song_native_window_remains_bounded(self):
+        report=self.report();report.update(storage='disk',limit_bytes=512*1024*1024)
+        report['items']=[{'id':i,'loaded_bytes':100*1024*1024,'total_bytes':100*1024*1024,'state':'ready'} for i in range(1,5)]
+        result=clean_buffer_report(report)
+        self.assertEqual(len(result['items']),4)
+        self.assertEqual(result['downloaded_bytes'],400*1024*1024)
+        report['items'].append(dict(report['items'][0],id=5))
+        self.assertIsNone(clean_buffer_report(report))

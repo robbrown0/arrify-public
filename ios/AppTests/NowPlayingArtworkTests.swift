@@ -560,3 +560,27 @@ extension NowPlayingArtworkTests {
         XCTAssertFalse(remote.wifiAvailable)
     }
 }
+
+
+extension NowPlayingArtworkTests {
+    @MainActor func testPlayerArtworkUsesPersistentFullSizeCoverWithoutNetwork() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let cacheScope = await api.artworkCacheScope()
+        let scope = try XCTUnwrap(cacheScope)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let disk = ArtworkDiskCache(root: root)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let cover = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 1200), format: format).image { context in
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 1200, height: 1200))
+        }
+        await disk.write(try XCTUnwrap(cover.jpegData(compressionQuality: 0.9)), scope: scope, path: "/api/v1/artwork/1")
+        let store = ArtworkStore(api: api, disk: disk)
+        let restored = await store.image("/api/v1/artwork/1", pixels: 2048)
+        XCTAssertEqual(restored?.size.width, 1200)
+        let requests = await transport.artworkRequests
+        XCTAssertEqual(requests, 0, "Player-sized artwork must load from disk without fetching again")
+        await store.clearPersistentCache()
+    }
+}

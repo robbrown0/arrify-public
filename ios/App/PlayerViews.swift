@@ -126,8 +126,8 @@ struct NowPlayingView: View {
             }
             HStack {
                 Button { Task { await playback.send("shuffle") } } label: {
-                    Image(systemName: "shuffle").font(.title3).frame(width: 44, height: 44)
-                }.accessibilityLabel("Shuffle upcoming songs").disabled(playback.state?.queueControlsAvailable != true)
+                    Image(systemName: "shuffle").font(.title3).foregroundStyle(playback.state?.shuffle == true ? Color.green : Color.white).frame(width: 44, height: 44)
+                }.accessibilityLabel("Shuffle upcoming songs").accessibilityValue(playback.state?.shuffle == true ? "on" : "off").disabled(playback.state?.queueControlsAvailable != true)
                 Spacer(minLength: 4)
                 Button { Task { await playback.send("previous") } } label: {
                     Image(systemName: "backward.end.fill").font(.system(size: 27)).frame(width: 44, height: 44)
@@ -156,8 +156,6 @@ struct NowPlayingView: View {
             HStack(spacing: 0) {
                 HStack(spacing: 4) {
                     ServerConnectionBadge(connection: playback.serverConnection)
-                    Button { showArtwork = true } label: { Image(systemName: "photo").frame(width: 44, height: 44) }
-                        .accessibilityLabel("Show artwork").accessibilityIdentifier("artworkDisplayButton")
                 }.frame(width: 92, alignment: .leading)
                 VStack(spacing: 0) {
                     AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")
@@ -385,7 +383,7 @@ struct CacheStatusView: View {
                     if item.state == "ready" { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
                 }.font(.subheadline)
             }
-            Text("Temporary read-ahead for the current song and next two, up to 512 MB total and 256 MB per song. Cleared on sign-out. Downloads may use cellular data.").font(.footnote).foregroundStyle(.secondary)
+            Text("Temporary read-ahead for the current song and next three, up to 512 MB total and 256 MB per song. Cleared on sign-out. Downloads may use cellular data.").font(.footnote).foregroundStyle(.secondary)
         }.accessibilityIdentifier("cacheStatus")
     }
 }

@@ -10,7 +10,7 @@ def clean_buffer_report(value):
         return int(v)
     try:
         items=value.get('items')
-        if not isinstance(items,list) or len(items)>3:return None
+        if not isinstance(items,list) or len(items)>4:return None
         result=[]
         for item in items:
             if not isinstance(item,dict) or item.get('state') not in ('ready','downloading','retrying','partial','waiting','queued','oversized','budget','storage-full'):return None

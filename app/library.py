@@ -417,13 +417,15 @@ class Player:
     def preview(self, state):
         if state.get('station'):
             with self.lib.index_lock:available=self.lib.radio_index.tracks
+            if state.get('shuffle') and len(state.get('shuffle_order',[]))==len(state['upcoming']):
+                state['shuffle_order']=[rank for rank,tid in zip(state['shuffle_order'],state['upcoming']) if tid in available]
             state['upcoming']=[i for i in state['upcoming'] if i in available]
         if state.get('station') and state['station'].get('mode')!='mix' and not state['upcoming']:
             chosen=self.lib.radio.pick(state['station'],state['history']+([state['current']] if state['current'] else []))
             if chosen is not None:state['upcoming']=[chosen]
-        if state.get('channel') and len(state['upcoming'])<2:
+        if state.get('channel') and len(state['upcoming'])<3:
             with self.lib.music.lock:
-                while len(state['upcoming'])<2:
+                while len(state['upcoming'])<3:
                     chosen=self.lib.music.radio_pick(state['channel'], state['history'] + ([state['current']] if state['current'] else []) + state['upcoming'])
                     if chosen is None:break
                     state['upcoming'].append(chosen)
@@ -436,7 +438,8 @@ class Player:
         def safe(i):
             try: return self.lib.track(i)
             except ValueError: return None
-        return {**state, 'track':safe(state['current']) if state['current'] else None,
+        visible={k:v for k,v in state.items() if k!='shuffle_order'}
+        return {**visible, 'track':safe(state['current']) if state['current'] else None,
             'next':safe(state['upcoming'][0]) if state['upcoming'] else None,
             'queue':[t for i in state['upcoming'][:250] if (t:=safe(i))]}
 
@@ -451,6 +454,10 @@ class Player:
             s = self.load(uid)
             action = data.get('action')
             previous = s['current']
+            # Stable ranks identify queue occurrences, including repeated track IDs.
+            ranks=s.get('shuffle_order')
+            if s.get('shuffle') and (not isinstance(ranks,list) or len(ranks)!=len(s['upcoming'])):
+                s['shuffle_order']=list(range(len(s['upcoming'])))
             transition=str(data.get('transition_id',''))
             if action=='next' and transition and s.get('last_transition')==transition:
                 return self.public(s)
@@ -501,15 +508,31 @@ class Player:
                 if not isinstance(ids,list) or not ids or len(ids)>50000: raise ValueError('No playable tracks in this selection.')
                 ids=[int(i) for i in ids]
                 for i in ids: self.lib.track(i)
+                shuffled_start=data.get('shuffle') is True and not data.get('track_id') and not channel and not (station and station.get('mode')!='mix')
+                ranked=list(enumerate(ids))
+                if shuffled_start:
+                    secrets.SystemRandom().shuffle(ranked)
+                    ids=[tid for _,tid in ranked]
                 selected=int(data.get('track_id') or ids[0])
                 if selected not in ids: raise ValueError('Track is outside this selection.')
                 ix=ids.index(selected)
                 s.update(current=selected,upcoming=ids[ix+1:],channel=channel,station=station,position=0,playback_context=data.get('playback_context'))
                 if channel or data.get('party_id') or station and station.get('mode')!='mix':s['repeat']='off'
-                if station and station.get('mode')=='mix':s['shuffle']=False
+                s['shuffle']=False
+                s.pop('shuffle_order',None)
+                if data.get('shuffle') is True and not channel and not (station and station.get('mode')!='mix'):
+                    if shuffled_start:
+                        s['shuffle_order']=[rank for rank,_ in ranked[ix+1:]]
+                    else:
+                        ranked=list(enumerate(s['upcoming']))
+                        secrets.SystemRandom().shuffle(ranked)
+                        s['shuffle_order']=[rank for rank,_ in ranked]
+                        s['upcoming']=[tid for _,tid in ranked]
+                    s['shuffle']=True
             elif action=='queue_jump':
                 index=data.get('index')
                 if type(index) is not int or not 0<=index<len(s['upcoming']):raise ValueError('Queue item unavailable.')
+                if s.get('shuffle'):s['shuffle_order']=s['shuffle_order'][index+1:]
                 s['current']=s['upcoming'][index];s['upcoming']=s['upcoming'][index+1:];s['position']=0
             elif action=='repeat':
                 mode=data.get('mode')
@@ -522,6 +545,7 @@ class Player:
                 if data.get('expected_upcoming')!=s['upcoming']:raise PlaybackConflict('Queue changed. Review it before editing.')
                 order=data.get('order')
                 if not isinstance(order,list) or any(type(i) is not int or not 0<=i<len(s['upcoming']) for i in order) or len(set(order))!=len(order):raise ValueError('Invalid queue order.')
+                if s.get('shuffle'):s['shuffle_order']=[s['shuffle_order'][i] for i in order]
                 s['upcoming']=[s['upcoming'][i] for i in order]
             elif action=='next':
                 self.preview(s)
@@ -534,13 +558,17 @@ class Player:
                     pass
                 else:
                     if repeating and s.get('repeat')=='all' and s['current']:
+                        if s.get('shuffle'):s['shuffle_order'].append(max(s['shuffle_order'],default=-1)+1)
                         s['upcoming'].append(s['current'])
+                    if s.get('shuffle') and s['shuffle_order']:s['shuffle_order'].pop(0)
                     s['current']=s['upcoming'].pop(0) if s['upcoming'] else None
                 s['position']=0
                 if transition:s['last_transition']=transition
             elif action=='previous':
                 if s['history']:
-                    if s['current']: s['upcoming'].insert(0,s['current'])
+                    if s['current']:
+                        if s.get('shuffle'):s['shuffle_order'].insert(0,min(s['shuffle_order'],default=0)-1)
+                        s['upcoming'].insert(0,s['current'])
                     s['current']=s['history'].pop()
                     s['position']=0
             elif action=='queue':
@@ -548,21 +576,35 @@ class Player:
                 if not isinstance(ids,list) or len(ids)>1000: raise ValueError('Queue is too long.')
                 for i in ids: self.lib.track(int(i))
                 if len(s['upcoming'])+len(ids)>50000: raise ValueError('Queue is full.')
+                if s.get('shuffle'):
+                    start=max(s['shuffle_order'],default=-1)+1
+                    s['shuffle_order'].extend(range(start,start+len(ids)))
                 s['upcoming'] += [int(i) for i in ids]
             elif action=='remove':
                 index=int(data['index'])
                 if not 0<=index<len(s['upcoming']): raise ValueError('Queue item unavailable.')
+                if s.get('shuffle'):s['shuffle_order'].pop(index)
                 s['upcoming'].pop(index)
             elif action=='reorder':
                 src,dst=int(data['from']),int(data['to'])
                 if not (0<=src<len(s['upcoming']) and 0<=dst<len(s['upcoming'])): raise ValueError('Queue item unavailable.')
+                if s.get('shuffle'):s['shuffle_order'].insert(dst,s['shuffle_order'].pop(src))
                 s['upcoming'].insert(dst,s['upcoming'].pop(src))
             elif action=='clear':
-                s.update(upcoming=[],channel=None,station=None)
+                s.update(upcoming=[],channel=None,station=None,shuffle=False)
+                s.pop('shuffle_order',None)
             elif action=='shuffle':
                 if s['channel'] or s.get('station') and s['station'].get('mode')!='mix': raise ValueError('Radio already mixes its next songs.')
-                secrets.SystemRandom().shuffle(s['upcoming'])
-                s['shuffle']=True
+                if s.get('shuffle'):
+                    s['upcoming']=[tid for _,tid in sorted(zip(s['shuffle_order'],s['upcoming']))]
+                    s['shuffle']=False
+                    s.pop('shuffle_order',None)
+                else:
+                    ranked=list(enumerate(s['upcoming']))
+                    secrets.SystemRandom().shuffle(ranked)
+                    s['shuffle_order']=[rank for rank,_ in ranked]
+                    s['upcoming']=[tid for _,tid in ranked]
+                    s['shuffle']=True
             elif action=='position':
                 pos=float(data.get('position',0))
                 if not 0<=pos<=86400: raise ValueError('Invalid position.')

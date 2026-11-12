@@ -135,7 +135,8 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["Songs"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["On the record."].waitForExistence(timeout: 5))
         let homeShot = XCTAttachment(screenshot: app.screenshot()); homeShot.name = "Artwork-led Home"; homeShot.lifetime = .keepAlways; add(homeShot)
-        app.buttons["refreshLibrary"].tap()
+        XCTAssertFalse(app.buttons["refreshLibrary"].exists)
+        app.scrollViews.firstMatch.swipeDown()
         XCTAssertFalse(app.staticTexts["Library updated"].exists)
         app.buttons["Songs"].tap()
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
@@ -222,7 +223,15 @@ extension LaunchTests {
         let repeatButton = app.buttons["Repeat"]
         XCTAssertTrue(repeatButton.waitForExistence(timeout: 10), app.debugDescription)
         if !repeatButton.isHittable { app.scrollViews.firstMatch.swipeUp() }
-        XCTAssertTrue(app.buttons["Shuffle upcoming songs"].exists)
+        let shuffleButton = app.buttons["Shuffle upcoming songs"]
+        XCTAssertTrue(shuffleButton.exists)
+        XCTAssertEqual(shuffleButton.value as? String, "off")
+        shuffleButton.tap()
+        expectation(for: NSPredicate(format: "value == 'on'"), evaluatedWith: shuffleButton)
+        waitForExpectations(timeout: 5)
+        shuffleButton.tap()
+        expectation(for: NSPredicate(format: "value == 'off'"), evaluatedWith: shuffleButton)
+        waitForExpectations(timeout: 5)
         XCTAssertEqual(repeatButton.value as? String, "off")
         repeatButton.tap()
         expectation(for: NSPredicate(format: "value == 'all'"), evaluatedWith: repeatButton)
@@ -232,7 +241,8 @@ extension LaunchTests {
         app.buttons["upNext"].tap()
         XCTAssertTrue(app.staticTexts["Family Portrait"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
-        app.buttons["artworkDisplayButton"].tap()
+        XCTAssertFalse(app.buttons["artworkDisplayButton"].exists)
+        app.buttons["Show artwork"].tap()
         XCTAssertTrue(app.buttons["Close artwork"].waitForExistence(timeout: 5))
         app.buttons["Close artwork"].tap()
     }
@@ -323,7 +333,19 @@ extension LaunchTests {
         takeover.tap()
         let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: takeover)
         XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 10), .completed)
-        XCTAssertTrue(app.buttons["Pause"].firstMatch.exists)
+        // This fixture never supplies playable media. Takeover must succeed,
+        // then preparation must time out with truthful, retryable controls.
+        // Waiting for this state also avoids depending on simulator speed.
+        let status = app.staticTexts["playbackStatusMessage"]
+        XCTAssertTrue(status.waitForExistence(timeout: 35))
+        XCTAssertEqual(status.label, "This song could not be prepared. Tap Retry or choose another song.")
+        XCTAssertTrue(app.buttons["Play"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["Pause"].firstMatch.exists)
+        XCTAssertFalse(takeover.exists)
+        if app.textFields["tabletSearch"].exists {
+            XCTAssertTrue(app.buttons["retryPlayback"].isHittable)
+            XCTAssertGreaterThan(status.frame.minY, app.textFields["tabletSearch"].frame.maxY)
+        }
     }
 }
 

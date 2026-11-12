@@ -869,7 +869,7 @@
             "items": {
               "$ref": "#/components/schemas/MediaItem"
             },
-            "maxItems": 3
+            "maxItems": 4
           },
           "retry_after_seconds": {
             "type": "integer",
@@ -1054,7 +1054,7 @@
               "type": "integer",
               "minimum": 0
             },
-            "maxItems": 2,
+            "maxItems": 3,
             "nullable": true
           },
           "repeat_mode": {
@@ -1093,6 +1093,11 @@
           },
           "output": {
             "type": "string"
+          },
+          "shuffle": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Whether the remaining queue is shuffled; omitted or null on compact updates."
           }
         },
         "required": [

@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Playback reliability update: bounded current-song recovery using completed audio cache, accurate stopped/reconnecting status, immediate Pause during pending commands, and interruption/queue safeguards. Another spin refreshes after confirmed listening; Home now features Playlists. Please verify extended AirPlay and CarPlay playback, calls, network changes and recovery near song endings.'}
+    attrs = {'whatsNew': 'Cover artwork now caches alongside the current song and three upcoming songs, within bounded storage. Shuffle toggles on/off and restores the remaining queue order. Home separates Personal playlists beneath Playlists. Favorites use consistent checkmarks, redundant refresh buttons are removed, and tapping artwork still opens it. Please verify shuffle on/off, cached artwork after connection loss, and iPhone/iPad layouts.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:
