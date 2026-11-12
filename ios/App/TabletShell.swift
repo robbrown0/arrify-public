@@ -63,6 +63,18 @@ struct TabletShell: View {
                     content.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            if let message = model.playback.message {
+                HStack {
+                    Text(message).font(.footnote)
+                        .accessibilityIdentifier("playbackStatusMessage")
+                    Spacer()
+                    Button("Retry") { model.playback.retry() }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityIdentifier("retryPlayback")
+                }.padding(.horizontal, 16)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16).padding(.bottom, 8)
+            }
             TabletPlayerBar(playback: model.playback, expand: expandPlayer)
         }.background(Color.black)
             .onChange(of: query) { destination = "Search" }

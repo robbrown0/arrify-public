@@ -342,6 +342,10 @@ extension LaunchTests {
         XCTAssertTrue(app.buttons["Play"].firstMatch.exists)
         XCTAssertFalse(app.buttons["Pause"].firstMatch.exists)
         XCTAssertFalse(takeover.exists)
+        if app.textFields["tabletSearch"].exists {
+            XCTAssertTrue(app.buttons["retryPlayback"].isHittable)
+            XCTAssertGreaterThan(status.frame.minY, app.textFields["tabletSearch"].frame.maxY)
+        }
     }
 }
 
