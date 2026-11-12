@@ -169,6 +169,8 @@ final class PlaybackTransitionTests: XCTestCase {
         await next.value
         for _ in 0..<100 where player.state?.playing != false { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertFalse(player.state?.playing ?? true)
+        for _ in 0..<100 where player.busy { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertFalse(player.busy, "A pause must not cancel matching preparation and leave its spinner stuck")
         XCTAssertEqual(player.player.rate, 0)
     }
 

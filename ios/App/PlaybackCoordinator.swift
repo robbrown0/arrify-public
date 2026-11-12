@@ -550,7 +550,7 @@ import Network
         if !ownsOutput || !metadataState.playing || (loadedKey != nil && incomingKey != loadedKey) {
             cancelRecovery()
             player.pause()
-            if !ownsOutput || incomingKey != loadedKey { prepareTask?.cancel() }
+            if !ownsOutput || incomingKey != desiredKey { prepareTask?.cancel() }
         }
         if previous?.upcomingTrackIds != metadataState.upcomingTrackIds {
             // A remote queue edit must not wait for an obsolete read-ahead download.
