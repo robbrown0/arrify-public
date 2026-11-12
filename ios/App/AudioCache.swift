@@ -29,7 +29,8 @@ import ArrifyCore
     }
     private func key(_ item: MediaItem) -> String { "\(item.trackId):\(item.sourceRevision ?? ""):\(item.profile)" }
     func file(for item: MediaItem) -> URL? {
-        guard let entry = files[item.trackId], entry.key == key(item) else { return nil }
+        guard let entry = files[item.trackId] else { return nil }
+        guard entry.key == key(item) else { invalidate(item.trackId); return nil }
         guard let bytes = try? FileManager.default.attributesOfItem(atPath: entry.url.path)[.size] as? NSNumber,
               bytes.intValue == entry.bytes else { invalidate(item.trackId); return nil }
         return entry.url

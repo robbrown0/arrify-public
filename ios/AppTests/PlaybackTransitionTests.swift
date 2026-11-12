@@ -188,6 +188,44 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(player.player.rate, 0)
     }
 
+    @MainActor func testWallClockWatchdogRecoversNearEndWithoutSkippingAndIgnoresUserPause() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        player.player.pause()
+        await player.player.seek(to: CMTime(seconds: 177, preferredTimescale: 600))
+        // First sample establishes progress; then elapsed wall time detects no progress.
+        let now = ProcessInfo.processInfo.systemUptime
+        player.checkPlaybackProgress(now: now)
+        player.checkPlaybackProgress(now: now + 9)
+        XCTAssertTrue(player.recovering)
+        XCTAssertEqual(player.state?.currentTrackId, 1)
+        let nextWaiting = await transport.nextWaiting
+        XCTAssertFalse(nextWaiting)
+        await player.send("pause")
+        player.checkPlaybackProgress(now: now + 100)
+        XCTAssertFalse(player.recovering)
+        XCTAssertEqual(player.player.rate, 0)
+        XCTAssertEqual(player.state?.currentTrackId, 1)
+    }
+
+    @MainActor func testLateRecoveryResponseCannotReclaimAnotherDeviceOutput() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.delayMedia()
+        player.recoverServerRoute()
+        for _ in 0..<100 { if await transport.mediaWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        let waiting = await transport.mediaWaiting
+        XCTAssertTrue(waiting)
+        await transport.setOwner("other-device")
+        await player.reconcile(report: false)
+        await transport.releaseMedia()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(player.ownsOutput)
+        XCTAssertFalse(player.recovering)
+        XCTAssertTrue(player.player.items().isEmpty)
+        XCTAssertEqual(player.player.rate, 0)
+    }
+
     @MainActor func testCacheRejectsTruncatedFile() async throws {
         let (player, _) = try await fixture()
         defer { player.stop() }
@@ -209,6 +247,11 @@ actor CallResumeTransitionTransport: HTTPTransport {
     private var revision = 1
     private var playing = true
     private var delayOnePoll = false
+    private var delayOneMedia = false
+    private var pendingMedia: CheckedContinuation<Void, Never>?
+    private(set) var mediaWaiting = false
+    func delayMedia() { delayOneMedia = true }
+    func releaseMedia() { pendingMedia?.resume(); pendingMedia = nil }
     private var failingMedia = false
     func failMedia(_ value: Bool) { failingMedia = value }
     private var failingTransitions = false
@@ -258,6 +301,10 @@ actor CallResumeTransitionTransport: HTTPTransport {
             return try state()
         }
         if path.hasSuffix("/manifest") {
+            if delayOneMedia {
+                delayOneMedia = false; mediaWaiting = true
+                await withCheckedContinuation { pendingMedia = $0 }
+            }
             if failingMedia { throw URLError(.notConnectedToInternet) }
             return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: [
                 "owner_epoch": 1, "queue_revision": revision, "retry_after_seconds": 1,

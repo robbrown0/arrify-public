@@ -618,11 +618,10 @@ import Network
         publishNowPlaying()
     }
     private func cancelRecovery() {
-        if recovering { playbackFailed = true }
+        if recovering { playbackFailed = true; player.currentItem?.cancelPendingSeeks() }
         recoveryGeneration = UUID()
         routeRecoveryTask?.cancel(); routeRecoveryTask = nil
         recoveryDeadlineTask?.cancel(); recoveryDeadlineTask = nil
-        player.currentItem?.cancelPendingSeeks()
         recovering = false; resetProgressClock()
     }
     private func failRecovery() {
@@ -659,14 +658,15 @@ import Network
         }
         routeRecoveryTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            var retryURL = originalURL
             for attempt in 0..<3 {
                 do {
                     try Task.checkCancellation()
                     let url: URL
                     if attempt == 0, let media = self.mediaWindow[id], let local = self.cache.file(for: media) {
                         url = local
-                    } else if attempt == 2, let originalURL, !originalURL.isFileURL,
-                              let alternate = try await self.api.alternateMediaURL(originalURL) {
+                    } else if attempt == 2, let retryURL, !retryURL.isFileURL,
+                              let alternate = try await self.api.alternateMediaURL(retryURL) {
                         url = alternate
                     } else {
                         let manifest = try await self.api.manifest(deviceId: self.deviceId, epoch: epoch, profile: self.loadedProfile, retry: true)
@@ -677,6 +677,7 @@ import Network
                         url = try await self.api.mediaURL(media)
                     }
                     guard self.recoveryGeneration == token, self.loadedKey == key, self.ownsOutput, !Task.isCancelled else { return }
+                    if !url.isFileURL { retryURL = url }
                     let replacement = AVPlayerItem(url: url)
                     self.player.removeAllItems(); self.queuedTracks = [ObjectIdentifier(replacement): id]
                     self.player.insert(replacement, after: nil)
