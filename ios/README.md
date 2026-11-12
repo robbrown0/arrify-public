@@ -309,3 +309,58 @@ Remote Live Activity state now includes a bounded inline JPEG thumbnail, rendere
 The volume view overrides the public `volumeSliderRect(forBounds:)` layout hook to center its track within the 44-point control frame. MediaPlayer still owns volume values and receiver synchronization. Physical AirPlay volume behavior and Lock Screen APNs artwork must be validated in TestFlight.
 
 References: [Live Activity presentation and data limits](https://developer.apple.com/documentation/activitykit/displaying-live-data-with-live-activities), [native volume slider layout](https://developer.apple.com/documentation/mediaplayer/mpvolumeview/volumesliderrect(forbounds:)).
+
+
+## Focused playback reliability release
+
+Current-item recovery is separate from queue advancement. AVPlayer state changes
+and an eight-second no-progress watchdog detect failure even when media-time
+callbacks stop. A transient stall may recover naturally. Recovery has one
+30-second budget: prefer a completed, size-checked cache entry; otherwise refresh
+media authorization and retry, then try the verified alternate server origin.
+The replacement must become ready and finish seeking before playback resumes.
+Fifteen seconds of advancing audio is required before another automatic recovery
+cycle is permitted. Explicit Retry starts a new bounded cycle.
+
+Recovery retains the current track, owner epoch and play identity. Pause is local
+and immediate even during a server command. Control changes, interruptions,
+logout, ownership changes and track changes invalidate pending recovery. Late
+responses cannot replace the new owner's player. Failed recovery reports `failed`,
+not indefinite buffering; `recovering` and `failed` freeze server cursor projection
+without altering user intent or adding duplicate history. Audio-service resets
+recreate AVQueuePlayer and require user action. No proximity-to-end heuristic skips
+an unfinished song. The existing server-confirmed next-item gate remains in place,
+and automatic transition retries reuse their transition identifier.
+
+Opt-in diagnostics record fixed playback/waiting states, sanitized error domains
+and numeric error codes, cache use, attempts and exhaustion. They never include
+media URLs, credentials, exception descriptions or audio. Read-ahead downloads
+current audio first and queues future local files instead of opening duplicate
+remote player items. Cache files that disappear, change size or fail preparation
+are invalidated. This is not a promise of full decode integrity or offline rights.
+
+Home refreshes account-scoped recent songs after acknowledged actual playback and
+on foreground entry. Home features saved and curated Playlists; Moods remains
+available in Library.
+
+Validation includes real AVQueuePlayer tests using generated local audio, delayed
+server responses, failed preparation, cached replacement at a saved position,
+user Pause during a pending transition, ownership changes, interruption handling,
+media-service resets, near-end stalls, history acknowledgement and damaged cache.
+Server tests cover history deduplication and position/ownership invariants for new
+observations. Real-device AirPlay/CarPlay, calls, Wi-Fi/cellular changes and extended
+listening remain required field verification: simulator tests cannot certify those
+routes. Record outcomes with build number and opt-in diagnostics; do not describe
+unperformed hardware checks as passed.
+
+### Separate design: offline queue continuity (not implemented)
+
+Keep server acknowledgement mandatory in this release. A later offline design
+would need a server-issued bounded reservation naming the account/session, owner
+epoch, exact ordered play identities, media revisions and expiry. It needs an
+explicit maximum disconnected interval and takeover/revocation policy, followed by
+idempotent reconciliation of completed transitions. Cached bytes alone confer no
+new authority. No implementation should infer permission from Wi-Fi, weaken grant
+validation, silently take ownership back, or replay old songs after reconnecting.
+Codec/quality fallback also remains explicit until diagnostics establish a need;
+this release does not silently downgrade original audio.

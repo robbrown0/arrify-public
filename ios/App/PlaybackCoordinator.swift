@@ -311,7 +311,10 @@ import Network
               let item = player.currentItem else { resetProgressClock(); return }
         if item.status == .failed { recoverServerRoute(); return }
         let sample = player.currentTime().seconds
-        if sample.isFinite, sample > lastProgressPosition + 0.1 {
+        if sample.isFinite, sample < lastProgressPosition - 0.5 {
+            // A confirmed seek/repeat may move backward; establish a new baseline.
+            lastProgressPosition = sample; lastProgressTime = now
+        } else if sample.isFinite, sample > lastProgressPosition + 0.1 {
             position = sample; lastProgressPosition = sample; lastProgressTime = now
             if recoveryUsed {
                 if recoveryStableSince == nil { recoveryStableSince = now }
@@ -537,6 +540,13 @@ import Network
         let previous = state
         state = PlaybackState.merging(update, into: state)
         guard let metadataState = state else { return }
+        let incomingKey = metadataState.currentTrackId.map { "\($0):\(metadataState.ownerEpoch):\(metadataState.playId)" }
+        // Fence audio immediately, before any metadata/artwork await can yield.
+        if !ownsOutput || !metadataState.playing || (loadedKey != nil && incomingKey != loadedKey) {
+            cancelRecovery()
+            player.pause()
+            if !ownsOutput || incomingKey != loadedKey { prepareTask?.cancel() }
+        }
         if previous?.upcomingTrackIds != metadataState.upcomingTrackIds {
             // A remote queue edit must not wait for an obsolete read-ahead download.
             aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil
@@ -598,7 +608,7 @@ import Network
             if let old = player.currentItem { queuedTracks.removeValue(forKey: ObjectIdentifier(old)) }
             player.advanceToNextItem()
             desiredKey = key; loadedKey = key; seekIntent = state.seekIntent
-            position = 0; duration = 0
+            position = 0; duration = 0; resetProgressClock()
             busy = false; message = nil; updateReceiverMetadata()
             PlaybackDiagnostics.record("track-transition confirmed")
         }
@@ -827,7 +837,7 @@ import Network
         guard loadedKey != completedKey, !busy, !preparationSeeking, !recovering, !playbackFailed else { return }
         if player.currentItem?.status == .failed { recoverServerRoute(); return }
         guard permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: loadedKey != nil) else { return }
-        guard player.timeControlStatus != .playing else { return }
+        guard player.timeControlStatus == .paused else { return }
         do { try audioSession.activate(); refreshOutput(trigger: "playback-activated"); player.play() }
         catch { player.pause(); permission.userPause(); message = "Audio is unavailable. Tap Play to try again." }
     }
