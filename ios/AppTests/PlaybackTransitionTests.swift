@@ -55,16 +55,15 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(player.player.actionAtItemEnd, .pause)
         let first = try XCTUnwrap(player.player.currentItem)
         let next = player.player.items()[1]
-        await transport.delayPoll()
-        // A real-start heartbeat may still be reconciling when the fixture becomes
-        // audible. Retry coalesced calls until this test's delayed GET is in flight.
-        let poll = Task {
-            for _ in 0..<100 {
-                await player.reconcile()
-                if await transport.pollWaiting { return }
-                do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
-            }
+        // Wait for the real-start heartbeat to finish so the deliberately held
+        // GET belongs to this task, not a coalesced background reconciliation.
+        for _ in 0..<500 where player.reconciling || player.historyRevision == 0 {
+            try await Task.sleep(for: .milliseconds(10))
         }
+        XCTAssertFalse(player.reconciling)
+        XCTAssertGreaterThan(player.historyRevision, 0)
+        await transport.delayPoll()
+        let poll = Task { await player.reconcile() }
         for _ in 0..<500 { if await transport.pollWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
         let delayedPollStarted = await transport.pollWaiting
         XCTAssertTrue(delayedPollStarted, "Establish the delayed response before simulating the track ending")

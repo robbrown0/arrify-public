@@ -85,7 +85,7 @@ import Network
     }
     private var pollTask: Task<Void, Never>?
     private var eventsTask: Task<Void, Never>?
-    private var reconciling = false
+    private(set) var reconciling = false
     private var controlRevision = 0
     private var liveUpdatePending = false
     private var liveConnected = false
