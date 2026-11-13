@@ -181,6 +181,11 @@ extension LaunchTests {
         app.staticTexts["M!ssundaztood"].firstMatch.tap()
         XCTAssertTrue(app.buttons["playCollection"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["shuffleCollection"].exists)
+        let primary = app.buttons["playCollection"]
+        primary.tap()
+        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Pause"), object: primary)], timeout: 10) == .completed)
+        primary.tap()
+        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Play"), object: primary)], timeout: 10) == .completed)
         let album = XCTAttachment(screenshot: app.screenshot()); album.name = "Album detail"; album.lifetime = .keepAlways; add(album)
         app.buttons["Channels"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Play 80s on 8"].waitForExistence(timeout: 10))

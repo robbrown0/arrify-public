@@ -456,6 +456,18 @@ import Network
     func play(source: LibrarySource, trackId: Int? = nil, shuffle: Bool = false) async {
         await send("play", source: source, trackId: trackId, shuffle: shuffle)
     }
+    func isCurrentSource(_ source: LibrarySource) -> Bool {
+        state?.currentTrackId != nil && state?.context?.matches(source) == true
+    }
+    func sourceShowsPause(_ source: LibrarySource) -> Bool { isCurrentSource(source) && showsPauseControl }
+    func toggleSource(_ source: LibrarySource) async {
+        if isCurrentSource(source) { await send(showsPauseControl ? "pause" : "resume") }
+        else { await play(source: source) }
+    }
+    func shuffleSource(_ source: LibrarySource) async {
+        if isCurrentSource(source) { await send("shuffle") }
+        else { await play(source: source, shuffle: true) }
+    }
     func cycleRepeat() async {
         let next = state?.repeatMode == "off" ? "all" : state?.repeatMode == "all" ? "one" : "off"
         await send("repeat", mode: next)

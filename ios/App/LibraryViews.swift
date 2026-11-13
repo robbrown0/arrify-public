@@ -155,10 +155,10 @@ struct CollectionCard: View {
                 NavigationLink { DetailScreen(model: model, entry: item) } label: {
                     RemoteCover(path: item.artwork, title: item.name, artwork: model.artwork, channel: item.kind == "channels").clipShape(RoundedRectangle(cornerRadius: 12))
                 }.buttonStyle(.plain).accessibilityLabel("Details for \(item.name)")
-                Button { Task { await model.playback.play(source: item.source) } } label: {
-                    Image(systemName: "play.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(.black)
+                Button { Task { await model.playback.toggleSource(item.source) } } label: {
+                    Image(systemName: model.playback.sourceShowsPause(item.source) ? "pause.fill" : "play.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(.black)
                         .frame(width: 34, height: 34).background(.green, in: Circle()).frame(width: 44, height: 44)
-                }.padding(6).disabled(item.trackCount == 0).accessibilityLabel("Play \(item.name)")
+                }.padding(6).disabled(item.trackCount == 0).accessibilityLabel("\(model.playback.sourceShowsPause(item.source) ? "Pause" : "Play") \(item.name)")
             }
             .overlay {
                 if item.kind == "channels" {
@@ -363,9 +363,9 @@ struct DetailScreen: View {
                     if !item.subtitle.isEmpty { Text(item.subtitle).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                     Text("\(item.trackCount) songs").font(.subheadline).foregroundStyle(.secondary)
                     HStack(spacing: 16) {
-                        Button { Task { await model.playback.play(source: item.source) } } label: { Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 36) }.buttonStyle(.borderedProminent).tint(.green).foregroundStyle(.black).accessibilityIdentifier("playCollection")
+                        Button { Task { await model.playback.toggleSource(item.source) } } label: { Label(model.playback.sourceShowsPause(item.source) ? "Pause" : "Play", systemImage: model.playback.sourceShowsPause(item.source) ? "pause.fill" : "play.fill").frame(maxWidth: .infinity, minHeight: 36) }.buttonStyle(.borderedProminent).tint(.green).foregroundStyle(.black).accessibilityIdentifier("playCollection")
                         if item.kind != "channels" {
-                            Button { Task { await model.playback.play(source: item.source, shuffle: true) } } label: { Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity, minHeight: 36) }.buttonStyle(.bordered).accessibilityIdentifier("shuffleCollection")
+                            Button { Task { await model.playback.shuffleSource(item.source) } } label: { Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity, minHeight: 36) }.buttonStyle(.bordered).accessibilityIdentifier("shuffleCollection")
                         }
                     }.disabled(item.trackCount == 0)
                 }.frame(maxWidth: .infinity).padding(.vertical)

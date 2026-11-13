@@ -1080,6 +1080,10 @@
               },
               "name": {
                 "type": "string"
+              },
+              "id": {
+                "type": "string",
+                "description": "Stable source identity; optional for older server states."
               }
             },
             "required": [

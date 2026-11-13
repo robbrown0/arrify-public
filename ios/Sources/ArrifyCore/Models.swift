@@ -160,7 +160,12 @@ public struct Endpoint: Sendable {
     }
 }
 
-public struct PlaybackContext: Codable, Sendable { public let kind: String; public let name: String }
+public struct PlaybackContext: Codable, Sendable {
+    public let kind: String
+    public let name: String
+    public let id: String?
+    public func matches(_ source: LibrarySource) -> Bool { kind == source.kind && id == source.id }
+}
 public struct QueueEntry: Codable, Identifiable, Sendable {
     public let index: Int
     public let track: Track
