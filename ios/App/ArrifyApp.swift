@@ -83,12 +83,12 @@ import AVKit
                 Button("OK", role: .cancel) {}
             } message: { Text("Your account and personal data have been deleted. You are signed out on all devices.") }
             .task {
-                PlaybackDiagnostics.record("launch build=" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"))
+                PlaybackDiagnostics.event("launch build=" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"))
                 PlaybackDiagnostics.configure(active: scenePhase == .active)
                 await model.restore()
             }
             .onChange(of: scenePhase) {
-                PlaybackDiagnostics.record("scene=\(scenePhase)")
+                PlaybackDiagnostics.event("scene=\(scenePhase)")
                 PlaybackDiagnostics.configure(active: scenePhase == .active)
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in PlaybackDiagnostics.record("keyboard-frame-change") }

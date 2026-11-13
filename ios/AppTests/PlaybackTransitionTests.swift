@@ -49,6 +49,31 @@ final class PlaybackTransitionTests: XCTestCase {
         return (coordinator, transport)
     }
 
+    @MainActor func testFailedManualNextReleasesNavigationGate() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.failTransitions(true)
+        await player.send("next")
+        XCTAssertFalse(player.navigationPending)
+        XCTAssertEqual(player.state?.currentTrackId, 1)
+    }
+
+    @MainActor func testPauseWinsOverDelayedRetryActivation() async throws {
+        let session = DelayedActivationSession()
+        let (player, _) = try await fixture(audioSession: session)
+        defer { player.stop() }
+        session.hold = true
+        player.retry()
+        for _ in 0..<100 where !session.waiting { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(session.waiting)
+        await player.send("pause")
+        session.release()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertFalse(player.recovering)
+        XCTAssertFalse(player.showsPauseControl)
+        XCTAssertEqual(player.player.rate, 0)
+    }
+
     @MainActor func testForegroundKeepsCurrentItemAndVerifiedRoute() async throws {
         let (player, transport) = try await fixture()
         defer { player.stop() }
@@ -559,4 +584,15 @@ private final class ActivationCalls: @unchecked Sendable {
     private var main = false
     func record() { lock.lock(); defer { lock.unlock() }; count += 1; main = main || Thread.isMainThread }
     var snapshot: (count: Int, main: Bool) { lock.lock(); defer { lock.unlock() }; return (count, main) }
+}
+
+@MainActor private final class DelayedActivationSession: PlaybackAudioSession {
+    var hold = false
+    var waiting = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    func activate() async throws {
+        if hold { waiting = true; await withCheckedContinuation { continuation = $0 } }
+    }
+    func release() { continuation?.resume(); continuation = nil; hold = false }
+    func deactivate() async throws {}
 }

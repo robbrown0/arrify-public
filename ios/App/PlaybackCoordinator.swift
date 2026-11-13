@@ -137,7 +137,8 @@ import Network
     private var metadataRequestedId: Int?
     private var routeSettlingUntil = 0.0
     private var routeSettleStarted = 0.0
-    var transitionMessage: String? { navigationPending ? "Skipping…" : (busy ? "Preparing playback…" : (ownsOutput && showsPauseControl && loadedKey != nil && progressVerifiedKey != loadedKey ? "Starting playback…" : nil)) }
+    var skipPending: Bool { navigationPending || endedInFlight }
+    var transitionMessage: String? { skipPending ? "Skipping…" : (busy ? "Preparing playback…" : (ownsOutput && showsPauseControl && loadedKey != nil && progressVerifiedKey != loadedKey ? "Starting playback…" : nil)) }
     private func finishNavigation() {
         if navigationPending { PlaybackDiagnostics.event("navigation-finish ms=\(Int((ProcessInfo.processInfo.systemUptime - navigationStarted) * 1000))") }
         navigationPending = false; navigationTarget = nil
@@ -535,7 +536,7 @@ import Network
         let tapPlay = state?.playId
         if navigation {
             navigationPending = true; navigationStarted = ProcessInfo.processInfo.systemUptime
-            PlaybackDiagnostics.event("navigation-start")
+            PlaybackDiagnostics.event(action == "next" ? "navigation-next-start" : "navigation-previous-start")
         }
         let commandStarted = ProcessInfo.processInfo.systemUptime
         defer { PlaybackDiagnostics.event("command-finish ms=\(Int((ProcessInfo.processInfo.systemUptime - commandStarted) * 1000))") }
