@@ -375,10 +375,14 @@ extension NowPlayingArtworkTests {
 }
 
 extension NowPlayingArtworkTests {
-    @MainActor func testVolumeTrackIsCenteredWithoutChangingNativeValue() {
-        let volume = CenteredVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
-        let track = volume.volumeSliderRect(forBounds: volume.bounds)
-        XCTAssertEqual(track.midY, volume.bounds.midY, accuracy: 0.5)
+    @MainActor func testNativeVolumeTrackIsCenteredInContainer() {
+        let volume = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
+        let container = VolumeControlContainer(volumeView: volume)
+        container.frame = CGRect(x: 0, y: 0, width: 130, height: 44)
+        container.layoutIfNeeded()
+        let track = volume.convert(volume.volumeSliderRect(forBounds: volume.bounds), to: container)
+        XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 0.5)
+        XCTAssertTrue(volume.superview === container)
     }
     func testLegacyActivityStateStillDecodesWithoutArtwork() throws {
         let data = Data(#"{"title":"Song","artist":"Artist","destination":"Office","playing":true,"updatedAt":100}"#.utf8)

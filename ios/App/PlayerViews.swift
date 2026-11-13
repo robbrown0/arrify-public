@@ -313,21 +313,34 @@ struct AirPlayPicker: UIViewRepresentable {
 // Keep the native control's identity stable during route-name and playback updates.
 // MediaPlayer owns receiver-volume synchronization; never seed it from the phone's
 // outputVolume or write a remembered value when this view appears.
-final class CenteredVolumeView: MPVolumeView {
-    override func volumeSliderRect(forBounds bounds: CGRect) -> CGRect {
-        let rect = super.volumeSliderRect(forBounds: bounds)
-        return CGRect(x: rect.minX, y: bounds.midY - rect.height / 2, width: rect.width, height: rect.height)
+// Apple does not support subclassing MPVolumeView. Center its native track by
+// positioning the whole control in a container, without changing its internals.
+final class VolumeControlContainer: UIView {
+    let volumeView: MPVolumeView
+    init(volumeView: MPVolumeView) {
+        self.volumeView = volumeView
+        super.init(frame: .zero)
+        addSubview(volumeView)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        volumeView.frame = bounds
+        let track = volumeView.volumeSliderRect(forBounds: volumeView.bounds)
+        if !track.isEmpty {
+            volumeView.frame.origin.y += bounds.midY - track.midY
+        }
     }
 }
 
 struct SystemVolumeSlider: UIViewRepresentable {
     var retainedView: MPVolumeView? = nil
-    func makeUIView(context: Context) -> MPVolumeView {
-        let view = retainedView ?? CenteredVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44)); view.showsRouteButton = false; view.tintColor = .white
-        return view
+    func makeUIView(context: Context) -> VolumeControlContainer {
+        let view = retainedView ?? MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44)); view.showsRouteButton = false; view.tintColor = .white
+        return VolumeControlContainer(volumeView: view)
     }
-    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: MPVolumeView, context: Context) -> CGSize? {
+    func updateUIView(_ uiView: VolumeControlContainer, context: Context) {}
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: VolumeControlContainer, context: Context) -> CGSize? {
         CGSize(width: proposal.width ?? 300, height: proposal.height ?? 44)
     }
 }
