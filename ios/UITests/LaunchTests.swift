@@ -430,7 +430,14 @@ extension LaunchTests {
         app.textFields["newUsername"].tap(); app.textFields["newUsername"].typeText("newlistener")
         app.textFields["newEmail"].tap(); app.textFields["newEmail"].typeText("new@example.invalid")
         app.secureTextFields["newPassword"].tap(); app.secureTextFields["newPassword"].typeText("long-new-password")
-        app.secureTextFields["confirmPassword"].tap(); app.secureTextFields["confirmPassword"].typeText("long-new-password")
+        let confirmation = app.secureTextFields["confirmPassword"]
+        for _ in 0..<5 {
+            if confirmation.exists && confirmation.isHittable { break }
+            if app.collectionViews.firstMatch.exists { app.collectionViews.firstMatch.swipeUp() }
+            else { app.swipeUp() }
+        }
+        XCTAssertTrue(confirmation.exists && confirmation.isHittable)
+        confirmation.tap(); confirmation.typeText("long-new-password")
         if !app.buttons["submitAccount"].isHittable { app.swipeUp() }
         app.buttons["submitAccount"].tap()
         XCTAssertTrue(app.staticTexts["registrationMessage"].waitForExistence(timeout: 10))
