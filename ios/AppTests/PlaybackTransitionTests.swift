@@ -49,6 +49,19 @@ final class PlaybackTransitionTests: XCTestCase {
         return (coordinator, transport)
     }
 
+    @MainActor func testForegroundKeepsCurrentItemAndVerifiedRoute() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        for _ in 0..<500 where player.reconciling { try await Task.sleep(for: .milliseconds(10)) }
+        let probes = await transport.capabilityRequests
+        let item = player.player.currentItem
+        await player.foregrounded()
+        let after = await transport.capabilityRequests
+        XCTAssertEqual(after, probes)
+        XCTAssertTrue(player.player.currentItem === item)
+        XCTAssertEqual(player.state?.currentTrackId, 1)
+    }
+
     @MainActor func testRepeatedNextDoesNotQueueDuringRequestOrPreparation() async throws {
         let (player, transport) = try await fixture()
         defer { player.stop() }
@@ -427,6 +440,7 @@ final class PlaybackTransitionTests: XCTestCase {
 actor CallResumeTransitionTransport: HTTPTransport {
     struct Observation: Sendable { let current: Int; let observed: String; let afterNext: Bool }
     private let fallback = UITestTransport()
+    private(set) var capabilityRequests = 0
     private(set) var nextRequests = 0
     private var holdMetadata = false
     private var pendingMetadata: CheckedContinuation<Void, Never>?
@@ -470,6 +484,7 @@ actor CallResumeTransitionTransport: HTTPTransport {
     }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
+        if path.hasSuffix("/capabilities") { capabilityRequests += 1 }
         if path.hasSuffix("/native/playback") {
             if request.httpMethod == "POST", let body = request.httpBody,
                let value = try JSONSerialization.jsonObject(with: body) as? [String: Any] {
@@ -519,4 +534,28 @@ actor CallResumeTransitionTransport: HTTPTransport {
     var activations = 0
     func activate() async throws { activations += 1 }
     func deactivate() async throws {}
+}
+
+final class AudioActivationTests: XCTestCase {
+    @MainActor func testActivationRunsOffMainAndReusesSessionUntilInvalidated() async throws {
+        let calls = ActivationCalls()
+        let session = SystemPlaybackAudioSession(activate: { calls.record() }, deactivate: {})
+        try await session.activate()
+        try await session.activate()
+        XCTAssertEqual(calls.snapshot.count, 1)
+        XCTAssertFalse(calls.snapshot.main)
+        session.invalidate()
+        try await session.activate()
+        XCTAssertEqual(calls.snapshot.count, 2)
+        try await session.deactivate()
+        try await session.activate()
+        XCTAssertEqual(calls.snapshot.count, 3)
+    }
+}
+private final class ActivationCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    private var main = false
+    func record() { lock.lock(); defer { lock.unlock() }; count += 1; main = main || Thread.isMainThread }
+    var snapshot: (count: Int, main: Bool) { lock.lock(); defer { lock.unlock() }; return (count, main) }
 }

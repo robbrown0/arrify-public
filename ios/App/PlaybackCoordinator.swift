@@ -138,7 +138,10 @@ import Network
     private var routeSettlingUntil = 0.0
     private var routeSettleStarted = 0.0
     var transitionMessage: String? { navigationPending ? "Skipping…" : (busy ? "Preparing playback…" : (ownsOutput && showsPauseControl && loadedKey != nil && progressVerifiedKey != loadedKey ? "Starting playback…" : nil)) }
-    private func finishNavigation() { navigationPending = false; navigationTarget = nil }
+    private func finishNavigation() {
+        if navigationPending { PlaybackDiagnostics.event("navigation-finish ms=\(Int((ProcessInfo.processInfo.systemUptime - navigationStarted) * 1000))") }
+        navigationPending = false; navigationTarget = nil
+    }
 
     private var endedInFlight = false
     private var sessionGeneration = UUID()
@@ -243,7 +246,7 @@ import Network
             owner.outputSelectionChanged(trigger: "foreground")
             Task {
                 guard owner.pollTask != nil else { return }
-                await owner.reconcile()
+                await owner.foregrounded()
             }
         }
         observe(AVAudioSession.mediaServicesWereLostNotification) { owner, _ in
@@ -268,6 +271,11 @@ import Network
             owner.publishNowPlaying()
             owner.handleRouteChange(reason: note.routeReason, previousWasAirPlay: note.previousOutputs?.contains { $0.portType == AVAudioSession.Port.airPlay.rawValue } == true)
         }
+    }
+    func foregrounded() async {
+        PlaybackDiagnostics.event("foreground-reconcile")
+        // Router freshness/identity checks remain intact; unlock isn't a network change.
+        await reconcile()
     }
     func handleRouteChange(reason: UInt?, previousWasAirPlay: Bool) {
         let remainsAirPlay = audioSession.usesAirPlay
@@ -519,7 +527,7 @@ import Network
     func send(_ action: String, ids: [Int]? = nil, seek: Double? = nil, automatic: Bool = false,
               source: LibrarySource? = nil, trackId: Int? = nil, shuffle: Bool? = nil, mode: String? = nil, index: Int? = nil, from: Int? = nil, to: Int? = nil, revision: Int? = nil) async {
         let navigation = !automatic && ["next", "previous"].contains(action)
-        if navigation && (commandInFlight || navigationPending || endedInFlight) {
+        if navigation && (navigationPending || endedInFlight) {
             PlaybackDiagnostics.event("navigation-coalesced")
             return
         }
