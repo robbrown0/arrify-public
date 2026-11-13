@@ -296,6 +296,7 @@ extension NowPlayingArtworkTests {
         let coordinator = PlaybackCoordinator(api: api, audioSession: TestAudioSession())
         await transport.setOwner("remote-device")
         await coordinator.reconcile(report: false)
+        for _ in 0..<200 where coordinator.track?.id != 1 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(coordinator.track?.id, 1)
         await transport.advanceWithDelayedMetadata()
         let update = Task { await coordinator.reconcile(report: false) }
@@ -308,6 +309,7 @@ extension NowPlayingArtworkTests {
         XCTAssertEqual(coordinator.track?.id, 1, "The mounted player must survive metadata latency")
         await transport.releaseMetadata()
         await update.value
+        for _ in 0..<200 where coordinator.track?.id != 2 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(coordinator.track?.id, 2)
         coordinator.stop()
     }
@@ -329,6 +331,7 @@ extension NowPlayingArtworkTests {
         await transport.setNetworkFailure(false)
         await coordinator.reconcile(report: false)
         XCTAssertFalse(coordinator.connectionInterrupted)
+        for _ in 0..<200 where coordinator.track?.id != 1 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(coordinator.track?.id, 1)
         XCTAssertEqual(coordinator.message, "An unrelated playback error")
         coordinator.stop()
