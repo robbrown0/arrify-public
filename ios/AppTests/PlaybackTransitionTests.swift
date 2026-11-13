@@ -113,6 +113,29 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(player.state?.currentTrackId, 2)
     }
 
+    @MainActor func testInterruptionReportSurvivesOverlappingPoll() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        // Wait for any fixture observation to finish before holding this poll.
+        for _ in 0..<500 where player.reconciling { try await Task.sleep(for: .milliseconds(20)) }
+        await transport.delayPoll()
+        let poll = Task { await player.reconcile(report: false) }
+        for _ in 0..<500 { if await transport.pollWaiting { break }; try await Task.sleep(for: .milliseconds(20)) }
+        let waiting = await transport.pollWaiting
+        XCTAssertTrue(waiting)
+        NotificationCenter.default.post(name: AVAudioSession.interruptionNotification, object: nil,
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue])
+        // Let the interruption's task encounter the held poll.
+        await Task.yield()
+        try await Task.sleep(for: .milliseconds(50))
+        await transport.releasePoll()
+        await poll.value
+        for _ in 0..<500 { if await transport.observations.contains(where: { $0.observed == "interrupted" }) { break }; try await Task.sleep(for: .milliseconds(20)) }
+        let observations = await transport.observations
+        XCTAssertTrue(observations.contains { $0.observed == "interrupted" })
+        XCTAssertFalse(player.showsPauseControl)
+    }
+
     @MainActor func testCallInterruptionPreservesItemAndDoesNotOverrideUserPause() async throws {
         let (player, transport) = try await fixture()
         defer { player.stop() }
