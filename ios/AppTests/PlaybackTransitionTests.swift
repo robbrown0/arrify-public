@@ -286,6 +286,7 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(observations.last?.observed, "failed")
         XCTAssertEqual(player.state?.currentTrackId, 1)
         player.retry()
+        for _ in 0..<100 where !player.recovering { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(player.recovering)
         await player.send("pause")
         try await Task.sleep(for: .milliseconds(200))

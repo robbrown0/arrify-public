@@ -577,6 +577,8 @@ import Network
         if explicitPlayback && (!hasOtherOutput || action == "takeover") {
             do { try await audioSession.activate(); guard requestGeneration == sessionGeneration else { finishNavigation(); return }; outputSelectionChanged(trigger: "session-activated") }
             catch {
+                guard requestGeneration == sessionGeneration else { return }
+                if RequestCancellation.matches(error) { finishNavigation(); return }
                 player.pause(); permission.userPause()
                 message = "Audio output is unavailable. Tap Play to try again."
                 finishNavigation(); return
@@ -635,7 +637,21 @@ import Network
     func retry() {
         guard !recovering else { return }
         if ownsOutput, state?.playing == true, loadedKey != nil, loadedKey != completedKey {
-            recoveryUsed = false; playbackFailed = false; recoverServerRoute()
+            let generation = sessionGeneration
+            let revision = controlRevision
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.audioSession.activate()
+                    guard self.sessionGeneration == generation, self.controlRevision == revision else { return }
+                    self.permission.userPlayAfterSessionActivation()
+                    self.recoveryUsed = false; self.playbackFailed = false; self.recoverServerRoute()
+                } catch {
+                    guard self.sessionGeneration == generation, self.controlRevision == revision,
+                          !RequestCancellation.matches(error) else { return }
+                    self.message = "Audio output is unavailable. Tap Play to try again."
+                }
+            }
         } else { retryPreparation = true; Task { await send("resume") } }
     }
     private func apply(_ update: PlaybackState) async {
@@ -1032,7 +1048,7 @@ import Network
                       self.permission.allowsPlayback(ownsOutput: self.ownsOutput, serverPlaying: self.state?.playing == true, mediaReady: self.loadedKey != nil) else { return }
                 self.refreshOutput(trigger: "playback-activated"); self.player.play()
             } catch {
-                guard !Task.isCancelled, self.sessionGeneration == generation else { return }
+                guard !Task.isCancelled, self.sessionGeneration == generation, !RequestCancellation.matches(error) else { return }
                 self.player.pause(); self.permission.userPause(); self.finishNavigation()
                 self.message = "Audio is unavailable. Tap Play to try again."
             }
