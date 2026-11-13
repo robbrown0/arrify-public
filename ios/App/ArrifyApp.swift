@@ -185,8 +185,7 @@ struct MainView: View {
                 // Keep status beside playback controls. A top inset outside the
                 // navigation stack can cover its search field and consume taps.
                 if model.playback.hasOtherOutput {
-                    HStack { Text("Playing on another device").font(.footnote); Spacer(); Button("Play here") { Task { await model.playback.send("takeover") } } }
-                        .padding().background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    PlaybackTakeoverBanner(playback: model.playback)
                 }
                 if model.playback.connectionInterrupted {
                     Label("Reconnecting… Playback continues where possible.", systemImage: "wifi.exclamationmark")

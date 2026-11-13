@@ -153,7 +153,14 @@ struct NowPlayingView: View {
                 }.accessibilityLabel("Repeat").accessibilityValue(playback.state?.repeatMode ?? "off")
                     .disabled(playback.state?.queueControlsAvailable != true)
             }.buttonStyle(.plain)
-            SystemVolumeSlider(retainedView: playback.expandedVolumeView).frame(height: 44).padding(.top, 6)
+            if playback.hasOtherOutput {
+                Text("Adjust volume on the playing device")
+                    .font(.footnote).foregroundStyle(.secondary).frame(height: 44)
+            } else {
+                SystemVolumeSlider(onCreate: { playback.expandedVolumeView = $0 })
+                    .frame(height: 44).padding(.top, 6)
+                    .accessibilityIdentifier("localVolumeControl")
+            }
             HStack(spacing: 0) {
                 HStack(spacing: 4) {
                     ServerConnectionBadge(connection: playback.serverConnection)
@@ -325,23 +332,43 @@ final class VolumeControlContainer: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layoutSubviews() {
         super.layoutSubviews()
-        volumeView.frame = bounds
+        let preferred = volumeView.sizeThatFits(bounds.size)
+        let height = preferred.height.isFinite && preferred.height > 0 ? min(bounds.height, preferred.height) : bounds.height
+        volumeView.frame = CGRect(x: bounds.minX, y: bounds.midY - height / 2, width: bounds.width, height: height)
+        volumeView.layoutIfNeeded()
         let track = volumeView.volumeSliderRect(forBounds: volumeView.bounds)
         if !track.isEmpty {
-            volumeView.frame.origin.y += bounds.midY - track.midY
+            volumeView.frame.origin.y = bounds.midY - track.midY
         }
     }
 }
 
 struct SystemVolumeSlider: UIViewRepresentable {
-    var retainedView: MPVolumeView? = nil
+    var onCreate: (MPVolumeView) -> Void = { _ in }
     func makeUIView(context: Context) -> VolumeControlContainer {
-        let view = retainedView ?? MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44)); view.showsRouteButton = false; view.tintColor = .white
+        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44)); view.showsRouteButton = false; view.tintColor = .white
+        onCreate(view)
         return VolumeControlContainer(volumeView: view)
     }
     func updateUIView(_ uiView: VolumeControlContainer, context: Context) {}
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: VolumeControlContainer, context: Context) -> CGSize? {
         CGSize(width: proposal.width ?? 300, height: proposal.height ?? 44)
+    }
+}
+
+struct PlaybackTakeoverBanner: View {
+    @Bindable var playback: PlaybackCoordinator
+    var body: some View {
+        HStack(spacing: 16) {
+            Text("Playing on another device").font(.subheadline.weight(.medium))
+            Spacer(minLength: 8)
+            Button("Play here") { Task { await playback.send("takeover") } }
+                .font(.subheadline.weight(.semibold))
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("takeOverPlayback")
+        }
+        .padding(.horizontal, 16).padding(.vertical, 4)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -371,7 +398,10 @@ struct TabletPlayerBar: View {
                         Button { Task { await playback.send("next") } } label: { Image(systemName: "forward.end.fill").opacity(playback.skipPending ? 0 : 1).overlay { if playback.skipPending { ProgressView().tint(.green) } }.frame(width: 44, height: 44) }.accessibilityLabel(playback.skipPending ? "Skipping" : "Next song").disabled(playback.skipPending)
                     }
                 }.frame(width: 180)
-                SystemVolumeSlider().frame(width: 130, height: 44)
+                if !playback.hasOtherOutput {
+                    SystemVolumeSlider().frame(width: 130, height: 44)
+                        .accessibilityIdentifier("localVolumeControl")
+                }
                 if !playback.serverConnection.connected || playback.serverConnection.degraded { ServerConnectionBadge(connection: playback.serverConnection) }
                 AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44)
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")

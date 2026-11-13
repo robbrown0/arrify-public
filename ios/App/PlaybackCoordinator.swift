@@ -12,13 +12,8 @@ import Network
     private let audioSession: any PlaybackAudioSession
     private(set) var player = AVQueuePlayer()
     let cache: AudioCache
-    // Retain the receiver-owned volume control across full-screen presentations.
-    // A newly created slider must not substitute the phone's local volume.
-    @ObservationIgnored lazy var expandedVolumeView: MPVolumeView = {
-        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
-        view.showsRouteButton = false; view.tintColor = .white
-        return view
-    }()
+    // Observe the presented control without retaining it between presentations.
+    @ObservationIgnored weak var expandedVolumeView: MPVolumeView?
     private var aheadTask: Task<Void, Never>?
     private var aheadGeneration = UUID()
     private var aheadCompletedRevision: Int?

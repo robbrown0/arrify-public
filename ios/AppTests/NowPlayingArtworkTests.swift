@@ -385,7 +385,8 @@ extension NowPlayingArtworkTests {
         if nativeTrack.isEmpty {
             // Simulator and routes without a volume slider have no track to center.
             // Keep the native control available to display its own route UI.
-            XCTAssertEqual(volume.frame, container.bounds)
+            XCTAssertEqual(volume.frame.midY, container.bounds.midY, accuracy: 0.5)
+            XCTAssertEqual(volume.frame.width, container.bounds.width)
         } else {
             let track = volume.convert(nativeTrack, to: container)
             XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 0.5)
