@@ -4,11 +4,12 @@ import UIKit
 /// Only fixed event names and numeric/boolean measurements belong in this log.
 /// No titles, track IDs, endpoints, credentials, or notification userInfo are recorded.
 @MainActor enum PlaybackDiagnostics {
-    static let writer = DiagnosticWriter(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("PlaybackDiagnostics"))
+    nonisolated static let writer = DiagnosticWriter(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("PlaybackDiagnostics"))
     static var enabled: Bool { UserDefaults.standard.bool(forKey: "playbackDiagnostics") }
     static func record(_ event: String) { if enabled { writer.record(event) } }
+    static func event(_ event: String) { writer.record(event) }
     static func configure(active: Bool) {
-        writer.monitor(enabled: enabled && active)
+        writer.monitor(enabled: active)
     }
 }
 
@@ -113,12 +114,12 @@ struct PlaybackDiagnosticsView: View {
     @State private var error: String?
     var body: some View {
         Form {
-            Toggle("Record playback diagnostics", isOn: $enabled)
+            Toggle("Record detailed playback diagnostics", isOn: $enabled)
                 .onChange(of: enabled) {
                     PlaybackDiagnostics.configure(active: phase == .active)
                     PlaybackDiagnostics.record("recording-enabled")
                 }
-            Text("Turn on before playing. After a freeze, reopen Arrify, turn recording off, then prepare and share the report. Logs stay on this device and contain timing and UI events, not song titles, audio, passwords, or server addresses. Up to 256 KB of recent events are kept; the export uses up to another 256 KB.")
+            Text("Basic command, recovery and responsiveness events are always retained locally. Enable detailed recording for playback ticks and UI events. After a problem, prepare and share the report. Logs stay on this device and contain timing and UI events, not song titles, audio, passwords, or server addresses. Up to 256 KB of recent events are kept; the export uses up to another 256 KB.")
                 .font(.footnote)
             Button("Prepare diagnostic report") {
                 Task { do { exportURL = try await PlaybackDiagnostics.writer.export(); error = nil } catch { self.error = "Could not prepare diagnostics. Please try again." } }

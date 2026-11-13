@@ -148,11 +148,11 @@ private actor RestoredOwnerTransport: HTTPTransport {
 @MainActor private final class TestAudioSession: PlaybackAudioSession {
     var unavailable = false
     var activationAttempts = 0
-    func activate() throws {
+    func activate() async throws {
         activationAttempts += 1
         if unavailable { throw URLError(.cannotConnectToHost) }
     }
-    func deactivate() throws {}
+    func deactivate() async throws {}
 }
 
 extension NowPlayingArtworkTests {
@@ -367,8 +367,8 @@ extension NowPlayingArtworkTests {
     var name = "Office"
     var activations = 0
     var outputName: String { name }
-    func activate() throws { activations += 1 }
-    func deactivate() throws {}
+    func activate() async throws { activations += 1 }
+    func deactivate() async throws {}
 }
 
 extension NowPlayingArtworkTests {
