@@ -144,6 +144,7 @@ def expand_playback(library, accounts, uid, data):
         station = library.radio.describe(source['kind'].removeprefix('radio-'), source['id'])
         command = {k: v for k, v in data.items() if k not in ('source', 'shuffle')}
         command['radio'] = {'kind': station['kind'], 'seed': station['seed']}
+        command['playback_context']={'kind':source['kind'],'id':source['id'],'name':str(station.get('name') or 'Radio')[:200]}
         return command
     item, ids = selection(library, accounts, uid, source['kind'], source['id'])
     if not ids: raise NativeError(409, 'empty_collection', 'No local songs are available yet.')
@@ -152,7 +153,7 @@ def expand_playback(library, accounts, uid, data):
         raise NativeError(409, 'catalog_changed', 'That song is no longer in this list.')
     if type(data.get('shuffle', False)) is not bool: raise NativeError(400, 'invalid_request', 'Invalid shuffle setting.')
     command = {k: v for k, v in data.items() if k not in ('source', 'shuffle')}
-    command['playback_context'] = {'kind': source['kind'], 'name': str(item.get('name') or item.get('title') or 'Library')[:200]}
+    command['playback_context'] = {'kind': source['kind'], 'id': source['id'], 'name': str(item.get('name') or item.get('title') or 'Library')[:200]}
     if source['kind'] == 'channels':
         command['channel'] = source['id']
     else:

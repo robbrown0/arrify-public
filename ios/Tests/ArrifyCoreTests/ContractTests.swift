@@ -5,6 +5,16 @@ import FoundationNetworking
 #endif
 
 final class ContractTests: XCTestCase {
+    func testPlaybackContextMatchesIdentityNotDisplayName() throws {
+        let decoder = JSONDecoder()
+        let context = try decoder.decode(PlaybackContext.self, from: Data(#"{"kind":"playlists","id":"42","name":"Favorites"}"#.utf8))
+        XCTAssertTrue(context.matches(LibrarySource(kind: "playlists", id: "42")))
+        XCTAssertFalse(context.matches(LibrarySource(kind: "playlists", id: "43")))
+        XCTAssertFalse(context.matches(LibrarySource(kind: "collections", id: "42")))
+        let legacy = try decoder.decode(PlaybackContext.self, from: Data(#"{"kind":"playlists","name":"Favorites"}"#.utf8))
+        XCTAssertFalse(legacy.matches(LibrarySource(kind: "playlists", id: "42")))
+    }
+
     func testBrowseChartHandlesRequestedObjectsAndMissingLocalSongs() throws {
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
         let chart = try decoder.decode(BrowseChart.self, from: Data(#"{"items":[{"title":"Song","artist":"Artist","rank":1,"request_key":"key","requested":{"id":42},"track":null}],"pending":false,"stale":true}"#.utf8))

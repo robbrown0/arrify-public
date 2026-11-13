@@ -417,7 +417,7 @@
                   "password": {
                     "type": "string",
                     "format": "password",
-                    "minLength": 12,
+                    "minLength": 15,
                     "maxLength": 128
                   }
                 }
@@ -427,7 +427,7 @@
         },
         "responses": {
           "200": {
-            "description": "Account awaits approval",
+            "description": "Account awaits email verification and administrator approval",
             "content": {
               "application/json": {
                 "schema": {

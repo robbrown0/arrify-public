@@ -210,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/.well-known/apple-app-site-association':
                 app_ids=[x.strip() for x in os.environ.get('ARRIFY_IOS_APP_IDS','').split(',') if re.fullmatch(r'[A-Z0-9]{10}\.[A-Za-z0-9.-]+',x.strip())]
                 return self.json({'applinks':{'details':[{'appIDs':app_ids,'components':[{'/':'/party/join'}]}] if app_ids else []}})
-            assets={'/branding.js':'branding.js','/privacy':'privacy.html','/buffer-status.js':'buffer-status.js','/device-buffer-worker.js':'device-buffer-worker.js','/party':'party.html','/party-display':'party.html','/party-guest.js':'party-guest.js','/party-host.js':'party-host.js','/party.css':'party.css','/metadata.js':'metadata.js','/browse.js':'browse.js','/connections.js':'connections.js','/apple-music.js':'apple-music.js','/spotify.js':'spotify.js','/listening.js':'listening.js','/api.js':'api.js','/navigation.js':'navigation.js','/gapless.js':'gapless.js','/':'index.html','/app.js':'app.js','/player.js':'player.js','/playback.js':'playback.js','/install.js':'install.js','/sw.js':'sw.js','/offline.html':'offline.html','/manifest.webmanifest':'manifest.webmanifest','/style.css':'style.css','/brand.css':'brand.css','/recover':'recover.html','/recover.js':'recover.js','/output.js':'output.js','/timeline.js':'timeline.js'}
+            assets={'/account-access.html':'account-access.html','/account-access.js':'account-access.js','/account-ui.js':'account-ui.js','/branding.js':'branding.js','/privacy':'privacy.html','/buffer-status.js':'buffer-status.js','/device-buffer-worker.js':'device-buffer-worker.js','/party':'party.html','/party-display':'party.html','/party-guest.js':'party-guest.js','/party-host.js':'party-host.js','/party.css':'party.css','/metadata.js':'metadata.js','/browse.js':'browse.js','/connections.js':'connections.js','/apple-music.js':'apple-music.js','/spotify.js':'spotify.js','/listening.js':'listening.js','/api.js':'api.js','/navigation.js':'navigation.js','/gapless.js':'gapless.js','/':'index.html','/app.js':'app.js','/player.js':'player.js','/playback.js':'playback.js','/install.js':'install.js','/sw.js':'sw.js','/offline.html':'offline.html','/manifest.webmanifest':'manifest.webmanifest','/style.css':'style.css','/brand.css':'brand.css','/recover':'recover.html','/recover.js':'recover.js','/output.js':'output.js','/timeline.js':'timeline.js'}
             if re.fullmatch(r'/assets/fonts/(outfit|dm-sans)-latin-wght-normal\.woff2',path):
                 return self.send(200,(WEB/path.lstrip('/')).read_bytes(),'font/woff2',{'Cache-Control':'public, max-age=86400'})
             if re.fullmatch(r'/assets/channels/(80s-on-8|the-bridge|the-blend|1st-wave|the-pulse|classic-rewind|the-spectrum)\.svg',path):
@@ -461,6 +461,8 @@ class Handler(BaseHTTPRequestHandler):
             self.server.accounts.rate_limit(('branding',user['id']),12,900)
             return self.json(self.server.branding.update(user,self.body(maximum=1400000)))
         data=self.body(); a,lib,p=self.server.accounts,self.server.library,self.server.player
+        from .account_email_http import dispatch as email_dispatch
+        if email_dispatch(self,path,data):return
         if native_http.dispatch(self,path,data):return
         if party_http.public_post(self,path,data):return
         if path in ('/api/v1/auth/recovery-link','/api/v1/auth/recovery-check','/api/v1/auth/recover'):
@@ -479,12 +481,20 @@ class Handler(BaseHTTPRequestHandler):
             if path.endswith('/setup'):
                 if not self.setup_allowed():raise Error(403,'Initial owner setup is available only from the local LAN.')
                 return self.json(a.bootstrap(data.get('username'),data.get('password'),data.get('email')),201)
-            if path.endswith('/register'): return self.json(a.register(data.get('username'),data.get('password'),data.get('email')),201)
+            if path.endswith('/register'): return self.json(a.register_public(data.get('username'),data.get('password'),data.get('email')),201)
             kind='native' if path.endswith('/token') else 'web'
             token=a.login(data.get('username'),data.get('password'),kind)
             if kind=='native': return self.json({'access_token':token,'token_type':'Bearer','expires_in':604800})
             return self.json({'ok':True},extra={'Set-Cookie':self.cookie(token)})
         user=self.identity(write=True); uid=user['id']
+        if path=='/api/v1/account/delete':
+            a.rate_limit(('web-account-delete',uid),5,900)
+            if data.get('confirm') is not True:raise ValueError('Confirm permanent account deletion.')
+            result=a.delete_account(data.get('password'),user_id=uid)
+            result.pop('_erased_id',None)
+            from .account_deletion import finish_runtime_erasure
+            finish_runtime_erasure(self.server,uid)
+            return self.json(result,extra={'Set-Cookie':self.cookie('',True)})
         if spotify_http.post(self,path,data,user):return
         if path.startswith('/api/v1/parties') and party_http.host_post(self,path,data,user):return
         if path=='/api/v1/stations':
@@ -522,7 +532,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(a.set_playlist_shared_default(uid,data.get('playlist_shared_default')))
         if path=='/api/v1/profile':
             a.rate_limit(('profile',uid),12,900)
-            return self.json(a.update_profile(uid,data.get('display_name',''),data.get('email',''),data.get('text_size')))
+            return self.json(a.update_profile_authenticated(uid,data.get('display_name',''),data.get('email',''),data.get('text_size'),data.get('password')))
         if path=='/api/v1/profile/refresh':
             a.rate_limit(('profile',uid),12,900)
             return self.json(a.refresh_avatar(uid))

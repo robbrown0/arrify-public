@@ -91,3 +91,18 @@ def restore(accounts):
         if setup_complete:
             accounts.db.execute('UPDATE account_lifecycle SET setup_complete=1 WHERE id=1')
         install_guards(accounts)
+
+
+def finish_runtime_erasure(server, uid):
+    """Clear transient output ownership after either web or native deletion."""
+    spotify=getattr(server,'spotify',None)
+    if spotify:spotify.disconnect(uid)
+    live=getattr(server,'live_activities',None)
+    if live:
+        with server.accounts.lock:
+            live.local_presence.owners.pop(uid,None)
+            live.local_presence.challenges={k:v for k,v in live.local_presence.challenges.items() if v['uid']!=uid}
+            active={r[0] for r in server.accounts.db.execute('SELECT id FROM native_families')}
+            live.sent={k:v for k,v in live.sent.items() if k[0] in active}
+    events=getattr(server,'listening_events',None)
+    if events:events.publish(uid)

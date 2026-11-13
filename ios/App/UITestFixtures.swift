@@ -17,6 +17,7 @@ actor UITestStore: CredentialStore {
 actor UITestTransport: HTTPTransport {
     private var owner: String? = ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1" ? "other-device" : nil
     private var playing = false
+    private var playbackContext = "null"
     private var repeatMode = "off"
     private var shuffle = false
     private var playlists: [[String: Any]] = []
@@ -36,8 +37,10 @@ actor UITestTransport: HTTPTransport {
                 return HTTPResult(status: 403, data: Data(#"{"error":{"code":"verification_failed","message":"The account details could not be verified."}}"#.utf8))
             }
             value = #"{"message":"Your account and personal data have been deleted. You are signed out on all devices."}"#
+        } else if path.hasSuffix("/native/account/email") {
+            value = #"{"message":"If the account is eligible, an email will arrive shortly. Check your inbox and spam folder."}"#
         } else if path.hasSuffix("/native/register") {
-            value = #"{"message":"Account created. An administrator must approve it before you can listen."}"#
+            value = #"{"message":"Account created. Check your email to verify your address. An administrator must also approve your account before you can listen."}"#
         } else if path == "/api/v1/browse/charts" {
             value = #"{"items":[{"title":"Unavailable fixture song","artist":"Fixture artist","rank":1,"request_key":"012345678901234567890123","track":null,"requested":null}],"source":"Fixture chart","pending":false,"stale":false}"#
         } else if path == "/api/v1/browse/request" {
@@ -102,12 +105,18 @@ actor UITestTransport: HTTPTransport {
         } else {
             if request.httpMethod == "POST", let data = request.httpBody,
                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if body["action"] as? String == "play" {
+                    if var source = body["source"] as? [String:String] {
+                        source["name"] = "Fixture collection"
+                        playbackContext = String(data: try JSONSerialization.data(withJSONObject: source), encoding: .utf8)!
+                    } else { playbackContext = "null" }
+                }
                 owner = body["device_id"] as? String
                 if body["action"] as? String == "shuffle" { shuffle.toggle() }
                 if let mode = body["mode"] as? String { repeatMode = mode }
                 playing = body["action"] as? String != "pause"
             }
-            value = "{\"shuffle\":\(shuffle),\"repeat_mode\":\"\(repeatMode)\",\"queue_controls_available\":true,\"partial\":false,\"current_track_id\":\(owner == nil ? "null" : "1"),\"position_seconds\":0,\"server_time\":1,\"queue_revision\":1,\"owner_device_id\":\(owner.map { "\"\($0)\"" } ?? "null"),\"owner_epoch\":1,\"intent\":1,\"playing\":\(playing),\"observed\":\"paused\",\"seek_target_seconds\":0,\"seek_intent\":0,\"play_id\":1,\"upcoming_track_ids\":[2]}"
+            value = "{\"context\":\(playbackContext),\"shuffle\":\(shuffle),\"repeat_mode\":\"\(repeatMode)\",\"queue_controls_available\":true,\"partial\":false,\"current_track_id\":\(owner == nil ? "null" : "1"),\"position_seconds\":0,\"server_time\":1,\"queue_revision\":1,\"owner_device_id\":\(owner.map { "\"\($0)\"" } ?? "null"),\"owner_epoch\":1,\"intent\":1,\"playing\":\(playing),\"observed\":\"paused\",\"seek_target_seconds\":0,\"seek_intent\":0,\"play_id\":1,\"upcoming_track_ids\":[2]}"
         }
         let response = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_TITLE"] == "1"
             ? value.replacingOccurrences(of: "Just Like a Pill", with: "A Very Long Song Title That Wraps Onto Two Lines in the Expanded Player During Keyboard Restoration")

@@ -88,6 +88,7 @@ import Network
     private(set) var reconciling = false
     private var controlRevision = 0
     private var liveUpdatePending = false
+    private var reportPending = false
     private var liveConnected = false
     private var prepareTask: Task<Void, Never>?
     private var preparationGeneration = UUID()
@@ -383,7 +384,7 @@ import Network
         outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
         sessionGeneration = UUID(); permission = PlaybackPermission(); connectionInterrupted = false; connectionFailures = 0; message = nil
         aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil; cache.reset(); finishBackgroundTransition()
-        eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false; liveConnected = false
+        eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false; reportPending = false; liveConnected = false
         pollTask?.cancel(); pollTask = nil; cancelPreparation(); prepareTask = nil
         player.pause(); player.removeAllItems(); queuedTracks = [:]
         artworkPrefetchTask?.cancel(); artworkPrefetchTask = nil
@@ -398,11 +399,19 @@ import Network
         await reconcile(report: false)
     }
     func reconcile(report: Bool = true) async {
-        guard !endedInFlight, !commandInFlight, !reconciling else { return }
-        reconciling = true; liveUpdatePending = false
+        guard !endedInFlight, !commandInFlight else { return }
+        if reconciling {
+            // Preserve interruption/heartbeat reports that overlap an older poll.
+            reportPending = reportPending || report
+            return
+        }
+        reconciling = true; liveUpdatePending = false; reportPending = false
         defer {
             reconciling = false
-            if liveUpdatePending { Task { [weak self] in await self?.reconcile(report: false) } }
+            if liveUpdatePending || reportPending {
+                let reportAgain = reportPending
+                Task { [weak self] in await self?.reconcile(report: reportAgain) }
+            }
         }
         let generation = sessionGeneration
         let revision = controlRevision
@@ -455,6 +464,18 @@ import Network
     }
     func play(source: LibrarySource, trackId: Int? = nil, shuffle: Bool = false) async {
         await send("play", source: source, trackId: trackId, shuffle: shuffle)
+    }
+    func isCurrentSource(_ source: LibrarySource) -> Bool {
+        state?.currentTrackId != nil && state?.context?.matches(source) == true
+    }
+    func sourceShowsPause(_ source: LibrarySource) -> Bool { isCurrentSource(source) && showsPauseControl }
+    func toggleSource(_ source: LibrarySource) async {
+        if isCurrentSource(source) { await send(showsPauseControl ? "pause" : "resume") }
+        else { await play(source: source) }
+    }
+    func shuffleSource(_ source: LibrarySource) async {
+        if isCurrentSource(source) { await send("shuffle") }
+        else { await play(source: source, shuffle: true) }
     }
     func cycleRepeat() async {
         let next = state?.repeatMode == "off" ? "all" : state?.repeatMode == "all" ? "one" : "off"

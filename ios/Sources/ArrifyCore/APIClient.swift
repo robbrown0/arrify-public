@@ -283,6 +283,11 @@ public actor APIClient {
         struct Input: Encodable { let id: Int; let addTrackId: Int }
         return try await call("/api/v1/native/playlists", method: "POST", body: Self.encoder().encode(Input(id: id, addTrackId: trackId)))
     }
+    public func requestAccountEmail(endpoint text: String, identifier: String, purpose: String) async throws -> AccountRegistration {
+        struct Input: Encodable { let identifier: String; let purpose: String }
+        let request = try Self.request(endpoint: Endpoint(text), path: "/api/v1/native/account/email", method: "POST", body: Self.encoder().encode(Input(identifier: identifier, purpose: purpose)))
+        return try Self.decode(await transport.send(request), as: AccountRegistration.self)
+    }
     public func register(endpoint text: String, username: String, email: String, password: String) async throws -> AccountRegistration {
         let endpoint = try Endpoint(text)
         struct Signup: Encodable { let username: String; let email: String; let password: String }

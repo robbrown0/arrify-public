@@ -58,16 +58,16 @@ struct LikedSongsView: View {
         List {
             Section {
                 HStack {
-                    Button("Play", systemImage: "play.fill") { Task { await model.playback.play(source: source) } }
+                    Button(model.playback.sourceShowsPause(source) ? "Pause" : "Play", systemImage: model.playback.sourceShowsPause(source) ? "pause.fill" : "play.fill") { Task { await model.playback.toggleSource(source) } }
                     Spacer()
-                    Button("Shuffle", systemImage: "shuffle") { Task { await model.playback.play(source: source, shuffle: true) } }
+                    Button("Shuffle", systemImage: "shuffle") { Task { await model.playback.shuffleSource(source) } }
                 }.disabled(model.favorites.ids.isEmpty)
             }
             if let error = model.favorites.error { Text(error).foregroundStyle(.orange) }
             RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
             ForEach(browser.tracks) { track in
                 SongRow(track: track, model: model) {
-                    Task { await model.playback.play(track, in: browser.tracks) }
+                    Task { await model.playback.play(source: source, trackId: track.id) }
                 }
             }
             if !browser.loading && browser.tracks.isEmpty && browser.error == nil {
