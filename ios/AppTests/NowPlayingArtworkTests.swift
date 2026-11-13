@@ -380,9 +380,16 @@ extension NowPlayingArtworkTests {
         let container = VolumeControlContainer(volumeView: volume)
         container.frame = CGRect(x: 0, y: 0, width: 130, height: 44)
         container.layoutIfNeeded()
-        let track = volume.convert(volume.volumeSliderRect(forBounds: volume.bounds), to: container)
-        XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 0.5)
         XCTAssertTrue(volume.superview === container)
+        let nativeTrack = volume.volumeSliderRect(forBounds: volume.bounds)
+        if nativeTrack.isEmpty {
+            // Simulator and routes without a volume slider have no track to center.
+            // Keep the native control available to display its own route UI.
+            XCTAssertEqual(volume.frame, container.bounds)
+        } else {
+            let track = volume.convert(nativeTrack, to: container)
+            XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 0.5)
+        }
     }
     func testLegacyActivityStateStillDecodesWithoutArtwork() throws {
         let data = Data(#"{"title":"Song","artist":"Artist","destination":"Office","playing":true,"updatedAt":100}"#.utf8)
