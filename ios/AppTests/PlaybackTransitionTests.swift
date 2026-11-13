@@ -4,7 +4,7 @@ import ArrifyCore
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
-    @MainActor func fixture(onHistoryRecorded: (@MainActor () -> Void)? = nil) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
+    @MainActor func fixture(onHistoryRecorded: (@MainActor () -> Void)? = nil, audioSession: any PlaybackAudioSession = UITestAudioSession()) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
         let transport = CallResumeTransitionTransport()
         let api = APIClient(transport: transport, store: UITestStore())
         try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
@@ -29,7 +29,7 @@ final class PlaybackTransitionTests: XCTestCase {
             try bytes.write(to: target)
             return (target, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
-        let coordinator = PlaybackCoordinator(api: api, audioSession: UITestAudioSession(), cache: cache)
+        let coordinator = PlaybackCoordinator(api: api, audioSession: audioSession, cache: cache)
         coordinator.onHistoryRecorded = onHistoryRecorded
         await transport.setOwner(coordinator.deviceId)
         let manifest = try await api.manifest(deviceId: coordinator.deviceId, epoch: 1, profile: "original")
@@ -47,6 +47,119 @@ final class PlaybackTransitionTests: XCTestCase {
             throw NSError(domain: "PlaybackFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: detail])
         }
         return (coordinator, transport)
+    }
+
+    @MainActor func testFailedManualNextReleasesNavigationGate() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.failTransitions(true)
+        await player.send("next")
+        XCTAssertFalse(player.navigationPending)
+        XCTAssertEqual(player.state?.currentTrackId, 1)
+    }
+
+    @MainActor func testPauseWinsOverDelayedRetryActivation() async throws {
+        let session = DelayedActivationSession()
+        let (player, _) = try await fixture(audioSession: session)
+        defer { player.stop() }
+        session.hold = true
+        player.retry()
+        for _ in 0..<100 where !session.waiting { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(session.waiting)
+        await player.send("pause")
+        session.release()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertFalse(player.recovering)
+        XCTAssertFalse(player.showsPauseControl)
+        XCTAssertEqual(player.player.rate, 0)
+    }
+
+    @MainActor func testForegroundKeepsCurrentItemAndVerifiedRoute() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        for _ in 0..<500 where player.reconciling { try await Task.sleep(for: .milliseconds(10)) }
+        let probes = await transport.capabilityRequests
+        let item = player.player.currentItem
+        await player.foregrounded()
+        let after = await transport.capabilityRequests
+        XCTAssertEqual(after, probes)
+        XCTAssertTrue(player.player.currentItem === item)
+        XCTAssertEqual(player.state?.currentTrackId, 1)
+    }
+
+    @MainActor func testRepeatedNextDoesNotQueueDuringRequestOrPreparation() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        let next = Task { await player.send("next") }
+        for _ in 0..<500 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(player.navigationPending)
+        for _ in 0..<6 { await player.send("next") }
+        await transport.delayMedia()
+        await transport.releaseNext()
+        await next.value
+        for _ in 0..<500 { if await transport.mediaWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(player.navigationPending)
+        for _ in 0..<6 { await player.send("next") }
+        let count = await transport.nextRequests
+        XCTAssertEqual(count, 1)
+        await transport.releaseMedia()
+        for _ in 0..<500 where player.navigationPending {
+            player.checkPlaybackProgress()
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(player.navigationPending)
+        XCTAssertEqual(player.state?.currentTrackId, 2)
+    }
+
+    @MainActor func testChangedTrackWhileNextWaitsForStateDoesNotSkipAgain() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        for _ in 0..<500 where player.reconciling { try await Task.sleep(for: .milliseconds(10)) }
+        await transport.advanceExternally()
+        await player.send("next")
+        let requests = await transport.nextRequests
+        XCTAssertEqual(requests, 0)
+        XCTAssertEqual(player.state?.currentTrackId, 2)
+        XCTAssertFalse(player.navigationPending)
+    }
+
+    @MainActor func testSlowMetadataDoesNotBlockAudioTransition() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.delayMetadata()
+        let next = Task { await player.send("next") }
+        for _ in 0..<500 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        await transport.releaseNext()
+        await next.value
+        for _ in 0..<500 where player.navigationPending {
+            player.checkPlaybackProgress()
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let held = await transport.metadataWaiting
+        XCTAssertTrue(held)
+        XCTAssertFalse(player.navigationPending)
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(player.state?.currentTrackId, 2)
+        await transport.releaseMetadata()
+    }
+
+    @MainActor func testAirPlayGroupChangePreservesItemAndLastReceiverLossPauses() async throws {
+        let session = GroupRouteSession()
+        let (player, _) = try await fixture(audioSession: session)
+        defer { player.stop() }
+        let item = player.player.currentItem
+        let activations = session.activations
+        player.handleRouteChange(reason: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue, previousWasAirPlay: true)
+        XCTAssertTrue(player.player.currentItem === item)
+        XCTAssertTrue(player.showsPauseControl)
+        XCTAssertEqual(session.activations, activations)
+        player.player.pause()
+        player.recoverServerRoute()
+        XCTAssertFalse(player.recovering, "Do not rebuild the item during AirPlay negotiation")
+        session.usesAirPlay = false
+        player.handleRouteChange(reason: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue, previousWasAirPlay: true)
+        XCTAssertFalse(player.showsPauseControl)
+        XCTAssertEqual(player.player.rate, 0)
     }
 
     @MainActor func testNextItemWaitsForServerConfirmationAndDelayedPollCannotRestoreOldSong() async throws {
@@ -198,6 +311,7 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(observations.last?.observed, "failed")
         XCTAssertEqual(player.state?.currentTrackId, 1)
         player.retry()
+        for _ in 0..<100 where !player.recovering { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(player.recovering)
         await player.send("pause")
         try await Task.sleep(for: .milliseconds(200))
@@ -352,6 +466,14 @@ final class PlaybackTransitionTests: XCTestCase {
 actor CallResumeTransitionTransport: HTTPTransport {
     struct Observation: Sendable { let current: Int; let observed: String; let afterNext: Bool }
     private let fallback = UITestTransport()
+    private(set) var capabilityRequests = 0
+    private(set) var nextRequests = 0
+    private var holdMetadata = false
+    private var pendingMetadata: CheckedContinuation<Void, Never>?
+    private(set) var metadataWaiting = false
+    func delayMetadata() { holdMetadata = true }
+    func releaseMetadata() { pendingMetadata?.resume(); pendingMetadata = nil }
+    func advanceExternally() { current = 2; revision += 1 }
     private var owner = ""
     private var size = 0
     private var current = 1
@@ -388,11 +510,13 @@ actor CallResumeTransitionTransport: HTTPTransport {
     }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
+        if path.hasSuffix("/capabilities") { capabilityRequests += 1 }
         if path.hasSuffix("/native/playback") {
             if request.httpMethod == "POST", let body = request.httpBody,
                let value = try JSONSerialization.jsonObject(with: body) as? [String: Any] {
                 let action = value["action"] as? String
                 if action == "next" {
+                    nextRequests += 1
                     if failingTransitions { throw URLError(.networkConnectionLost) }
                     nextWaiting = true
                     await withCheckedContinuation { pendingNext = $0 }
@@ -423,6 +547,52 @@ actor CallResumeTransitionTransport: HTTPTransport {
                     "url": "/api/v1/stream/\($0)", "mime_type": "audio/wav", "size_bytes": size, "source_revision": "fixture"] as [String: Any] }
             ] as [String: Any]))
         }
+        if path == "/api/v1/tracks/2", holdMetadata {
+            holdMetadata = false; metadataWaiting = true
+            await withCheckedContinuation { pendingMetadata = $0 }
+        }
         return try await fallback.send(request)
     }
+}
+
+@MainActor private final class GroupRouteSession: PlaybackAudioSession {
+    var usesAirPlay = true
+    var activations = 0
+    func activate() async throws { activations += 1 }
+    func deactivate() async throws {}
+}
+
+final class AudioActivationTests: XCTestCase {
+    @MainActor func testActivationRunsOffMainAndReusesSessionUntilInvalidated() async throws {
+        let calls = ActivationCalls()
+        let session = SystemPlaybackAudioSession(activate: { calls.record() }, deactivate: {})
+        try await session.activate()
+        try await session.activate()
+        XCTAssertEqual(calls.snapshot.count, 1)
+        XCTAssertFalse(calls.snapshot.main)
+        session.invalidate()
+        try await session.activate()
+        XCTAssertEqual(calls.snapshot.count, 2)
+        try await session.deactivate()
+        try await session.activate()
+        XCTAssertEqual(calls.snapshot.count, 3)
+    }
+}
+private final class ActivationCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    private var main = false
+    func record() { lock.lock(); defer { lock.unlock() }; count += 1; main = main || Thread.isMainThread }
+    var snapshot: (count: Int, main: Bool) { lock.lock(); defer { lock.unlock() }; return (count, main) }
+}
+
+@MainActor private final class DelayedActivationSession: PlaybackAudioSession {
+    var hold = false
+    var waiting = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    func activate() async throws {
+        if hold { waiting = true; await withCheckedContinuation { continuation = $0 } }
+    }
+    func release() { continuation?.resume(); continuation = nil; hold = false }
+    func deactivate() async throws {}
 }

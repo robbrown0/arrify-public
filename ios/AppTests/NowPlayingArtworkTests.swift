@@ -148,11 +148,11 @@ private actor RestoredOwnerTransport: HTTPTransport {
 @MainActor private final class TestAudioSession: PlaybackAudioSession {
     var unavailable = false
     var activationAttempts = 0
-    func activate() throws {
+    func activate() async throws {
         activationAttempts += 1
         if unavailable { throw URLError(.cannotConnectToHost) }
     }
-    func deactivate() throws {}
+    func deactivate() async throws {}
 }
 
 extension NowPlayingArtworkTests {
@@ -296,6 +296,7 @@ extension NowPlayingArtworkTests {
         let coordinator = PlaybackCoordinator(api: api, audioSession: TestAudioSession())
         await transport.setOwner("remote-device")
         await coordinator.reconcile(report: false)
+        for _ in 0..<200 where coordinator.track?.id != 1 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(coordinator.track?.id, 1)
         await transport.advanceWithDelayedMetadata()
         let update = Task { await coordinator.reconcile(report: false) }
@@ -308,6 +309,7 @@ extension NowPlayingArtworkTests {
         XCTAssertEqual(coordinator.track?.id, 1, "The mounted player must survive metadata latency")
         await transport.releaseMetadata()
         await update.value
+        for _ in 0..<200 where coordinator.track?.id != 2 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(coordinator.track?.id, 2)
         coordinator.stop()
     }
@@ -329,6 +331,7 @@ extension NowPlayingArtworkTests {
         await transport.setNetworkFailure(false)
         await coordinator.reconcile(report: false)
         XCTAssertFalse(coordinator.connectionInterrupted)
+        for _ in 0..<200 where coordinator.track?.id != 1 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(coordinator.track?.id, 1)
         XCTAssertEqual(coordinator.message, "An unrelated playback error")
         coordinator.stop()
@@ -367,8 +370,8 @@ extension NowPlayingArtworkTests {
     var name = "Office"
     var activations = 0
     var outputName: String { name }
-    func activate() throws { activations += 1 }
-    func deactivate() throws {}
+    func activate() async throws { activations += 1 }
+    func deactivate() async throws {}
 }
 
 extension NowPlayingArtworkTests {

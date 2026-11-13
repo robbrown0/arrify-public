@@ -28,8 +28,8 @@ struct MiniPlayerView: View {
                             .font(.system(size: 21, weight: .semibold)).frame(width: 44, height: 44).overlay { PlaybackProgressRing(progress: playback.progress).padding(3) }
                     }.accessibilityLabel(playback.showsPauseControl ? "Pause" : "Play")
                     Button { Task { await playback.send("next") } } label: {
-                        Image(systemName: "forward.end.fill").font(.system(size: 19)).frame(width: 44, height: 44)
-                    }.accessibilityLabel("Next song")
+                        Image(systemName: "forward.end.fill").opacity(playback.skipPending ? 0 : 1).overlay { if playback.skipPending { ProgressView().tint(.green) } }.font(.system(size: 19)).frame(width: 44, height: 44)
+                    }.accessibilityLabel(playback.skipPending ? "Skipping" : "Next song").disabled(playback.skipPending)
                 }.padding(.horizontal, 10).padding(.vertical, 8)
             }.foregroundStyle(.white)
         }
@@ -107,6 +107,7 @@ struct NowPlayingView: View {
             if let message = playback.message {
                 HStack { Text(message).font(.caption); Button("Retry") { playback.retry() } }
             }
+            if let transition = playback.transitionMessage { Text(transition).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("playbackTransition") }
             if playback.hasOtherOutput {
                 HStack {
                     Button("Play here") { Task { await playback.send("takeover") } }
@@ -131,7 +132,7 @@ struct NowPlayingView: View {
                 Spacer(minLength: 4)
                 Button { Task { await playback.send("previous") } } label: {
                     Image(systemName: "backward.end.fill").font(.system(size: 27)).frame(width: 44, height: 44)
-                }.accessibilityLabel("Previous song")
+                }.accessibilityLabel("Previous song").disabled(playback.skipPending)
                 Spacer(minLength: 4)
                 Button { Task { await playback.send(playback.showsPauseControl ? "pause" : "resume") } } label: {
                     ZStack {
@@ -142,8 +143,8 @@ struct NowPlayingView: View {
                 }.accessibilityLabel(playback.showsPauseControl ? "Pause" : "Play").accessibilityIdentifier("expandedPlayPause")
                 Spacer(minLength: 4)
                 Button { Task { await playback.send("next") } } label: {
-                    Image(systemName: "forward.end.fill").font(.system(size: 27)).frame(width: 44, height: 44)
-                }.accessibilityLabel("Next song")
+                    Image(systemName: "forward.end.fill").opacity(playback.skipPending ? 0 : 1).overlay { if playback.skipPending { ProgressView().tint(.green) } }.font(.system(size: 27)).frame(width: 44, height: 44)
+                }.accessibilityLabel(playback.skipPending ? "Skipping" : "Next song").disabled(playback.skipPending)
                 Spacer(minLength: 4)
                 Button { Task { await playback.cycleRepeat() } } label: {
                     Image(systemName: playback.state?.repeatMode == "one" ? "repeat.1" : "repeat")
@@ -350,11 +351,11 @@ struct TabletPlayerBar: View {
                 }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
                 VStack(spacing: 8) {
                     HStack(spacing: 16) {
-                        Button { Task { await playback.send("previous") } } label: { Image(systemName: "backward.end.fill").frame(width: 44, height: 44) }.accessibilityLabel("Previous song")
+                        Button { Task { await playback.send("previous") } } label: { Image(systemName: "backward.end.fill").frame(width: 44, height: 44) }.accessibilityLabel("Previous song").disabled(playback.skipPending)
                         Button { Task { await playback.send(playback.showsPauseControl ? "pause" : "resume") } } label: {
                             Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill").font(.title2).frame(width: 48, height: 48).background(.white.opacity(0.08), in: Circle()).padding(4).overlay { PlaybackProgressRing(progress: playback.progress) }
                         }.accessibilityLabel(playback.showsPauseControl ? "Pause" : "Play")
-                        Button { Task { await playback.send("next") } } label: { Image(systemName: "forward.end.fill").frame(width: 44, height: 44) }.accessibilityLabel("Next song")
+                        Button { Task { await playback.send("next") } } label: { Image(systemName: "forward.end.fill").opacity(playback.skipPending ? 0 : 1).overlay { if playback.skipPending { ProgressView().tint(.green) } }.frame(width: 44, height: 44) }.accessibilityLabel(playback.skipPending ? "Skipping" : "Next song").disabled(playback.skipPending)
                     }
                 }.frame(width: 180)
                 SystemVolumeSlider().frame(width: 130, height: 44)

@@ -4,8 +4,8 @@ import ArrifyCore
 
 /// Deterministic simulator-only fixtures, excluded from Release/TestFlight builds.
 @MainActor struct UITestAudioSession: PlaybackAudioSession {
-    func activate() throws {}
-    func deactivate() throws {}
+    func activate() async throws {}
+    func deactivate() async throws {}
 }
 
 actor UITestStore: CredentialStore {
