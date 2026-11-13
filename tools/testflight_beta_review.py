@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Playback reliability improvements: repeated Next/Previous taps no longer queue multiple skips while a transition is pending. Playback shows transition feedback, preserves verified routing after unlock, and loads song details independently. Audio activation avoids blocking the interface, and AirPlay route changes receive bounded settling time while losing the last output pauses playback. Basic diagnostics stay bounded and local. Please verify locked-phone playback, unlock and skip, pause during transitions, and changes to multi-speaker AirPlay groups.'}
+    attrs = {'whatsNew': 'Volume control correction: the player now embeds Apple’s unmodified native volume control in a centered container. Please compare the app slider with AirPlay volume, including after sleep/wake and adding or removing speakers. At a low starting volume, verify that lowering the slider lowers speaker volume. This build corrects unsupported control customization; resolution of the reported AirPlay volume mismatch still requires physical-device testing.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:
