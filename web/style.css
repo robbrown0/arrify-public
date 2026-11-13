@@ -362,3 +362,5 @@ dialog#party-host-display{position:fixed;inset:0;margin:0;width:100vw;max-width:
 }
 @media(max-width:360px){:root .admin-page .connection-now{padding-left:0}.buffer-tracks>div{font-size:11px}}
 @media(max-width:600px){:root .admin-page .stream-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px}}
+/* Account forms share Arrify's quiet dark surfaces and green feedback. */
+.password-entry{display:flex;align-items:center;position:relative;width:100%}.password-entry input{padding-right:52px;width:100%}.password-eye{position:absolute;right:4px;min-width:44px;min-height:44px;display:grid;place-items:center;background:transparent;border:0;color:inherit}.password-feedback{display:block;margin:8px 0 14px;line-height:1.5;color:#a7afa9}.password-feedback.met{color:#55e87c}.auth-card a.text-button{display:inline-block;padding:12px 0}.auth-card button:focus-visible,.password-eye:focus-visible{outline:2px solid #55e87c;outline-offset:3px}

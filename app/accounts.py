@@ -77,6 +77,10 @@ class Accounts:
         from .account_deletion import restore
         restore(self)
         self.attempts = {}
+        if 'email_required' not in {r[1] for r in self.db.execute('PRAGMA table_info(users)')}:
+            self.db.execute('ALTER TABLE users ADD COLUMN email_required INTEGER NOT NULL DEFAULT 0')
+        from .account_email import configure
+        self.account_email = configure(self)
         # Equal work for nonexistent usernames.
         self.dummy = self.hash_password(secrets.token_urlsafe(24))
 
@@ -137,7 +141,7 @@ class Accounts:
         username = str(username).strip().lower()
         if not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{2,39}', username):
             raise ValueError('Use a username of 3–40 letters, numbers, dots, dashes or underscores.')
-        if not isinstance(password, str) or not 12 <= len(password) <= 128:
+        if not isinstance(password,str) or not 12<=len(password)<=128:
             raise ValueError('Use a password of 12–128 characters.')
         email=self.normalize_email(email)
         encoded = self.hash_password(password)
@@ -150,6 +154,16 @@ class Accounts:
         except sqlite3.IntegrityError:
             raise ValueError('That username or email is already in use.') from None
         return {'message': 'Account created. An administrator must approve it before you can listen.'}
+
+    def register_public(self,username,password,email):
+        from .password_policy import validate
+        validate(password)
+        if not self.account_email:raise ValueError('Account email is not configured. Contact the administrator.')
+        with self.transaction():
+            self.register(username,password,email)
+            self.db.execute('UPDATE users SET email_required=1 WHERE username=?',(str(username).strip().lower(),))
+        self.account_email.request(username,'verify')
+        return {'message':'Account created. Check your email to verify your address. An administrator must also approve your account before you can listen.'}
 
     def delete_account(self, password, *, user_id=None, username=None):
         """Password reauthentication works even for pending/frozen accounts."""
@@ -190,6 +204,8 @@ class Accounts:
         valid = hmac.compare_digest(self.hash_password(password, stored.split(':')[0]), stored)
         if not user or not valid:
             raise ValueError('Invalid credentials.')
+        if user['email_required'] and not self.db.execute('SELECT 1 FROM profiles WHERE user_id=? AND email_verified_at>0',(user['id'],)).fetchone():
+            raise PermissionError('Verify your email to continue. You can request a new verification email from sign in.')
         if user['frozen']:raise PermissionError('This account is frozen. Contact the administrator.')
         if not user['approved']:
             raise PermissionError('Your account is awaiting administrator approval.')
@@ -199,6 +215,8 @@ class Accounts:
             current=self.db.execute('SELECT * FROM users WHERE id=?',(user['id'],)).fetchone()
             if not current or current['deleted_at'] or current['frozen'] or not current['approved'] or not hmac.compare_digest(current['password'],stored):
                 raise PermissionError('Account access changed. Contact the administrator.')
+            if current['email_required'] and not self.db.execute('SELECT 1 FROM profiles WHERE user_id=? AND email_verified_at>0',(user['id'],)).fetchone():
+                raise PermissionError('Verify your email to continue.')
             if upgraded:self.db.execute('UPDATE users SET password=? WHERE id=?',(upgraded,user['id']))
             self.db.execute('UPDATE users SET last_login=?,last_seen=? WHERE id=?',(int(time.time()),int(time.time()),user['id']))
             self.db.execute('DELETE FROM sessions WHERE expires<?', (int(time.time()),))
@@ -257,6 +275,8 @@ class Accounts:
         display_name=display_name.strip();email=self.normalize_email(email)
         if len(display_name)>80 or any(ord(c)<32 or ord(c)==127 for c in display_name):raise ValueError('Use a display name of up to 80 characters.')
         with self.transaction():
+            previous=self.db.execute('SELECT email FROM profiles WHERE user_id=?',(user_id,)).fetchone()
+            changed=bool(previous and previous[0]!=email)
             self.check_email_available(email,user_id)
             self.db.execute('''INSERT INTO profiles(user_id,display_name,email) VALUES(?,?,?)
                 ON CONFLICT(user_id) DO UPDATE SET display_name=excluded.display_name,email=excluded.email,
@@ -266,6 +286,9 @@ class Accounts:
                 avatar_mime=CASE WHEN profiles.email=excluded.email THEN profiles.avatar_mime ELSE '' END,
                 avatar_checked=CASE WHEN profiles.email=excluded.email THEN profiles.avatar_checked ELSE 0 END''',(user_id,display_name,email))
             if text_size is not None:self.db.execute('INSERT INTO preferences(user_id,text_size) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET text_size=excluded.text_size',(user_id,text_size))
+        if changed and getattr(self,'account_email',None):
+            with self.transaction():self.db.execute('DELETE FROM email_grants WHERE user_id=?',(user_id,))
+            self.account_email.request(email,'verify')
         return self.profile(user_id)
 
     def admin_users(self):
@@ -371,6 +394,8 @@ class Accounts:
                     self.update_profile(row['id'],self.profile(row['id'])['display_name'],email)
                 else:self.register(username,password,email)
                 self.approve(username,admin=True)
+                self.db.execute('UPDATE users SET email_required=0 WHERE username=?',(username,))
+                self.db.execute('UPDATE profiles SET email_verified_at=? WHERE user_id=(SELECT id FROM users WHERE username=?)',(int(time.time()),username))
                 self.db.commit()
             except Exception:
                 self.db.rollback();raise
@@ -441,6 +466,7 @@ class Accounts:
                 if not row:raise PermissionError('This reset link is invalid or has expired.')
                 self.db.execute('UPDATE users SET password=? WHERE id=?',(encoded,row['id']))
                 self.db.execute('DELETE FROM sessions WHERE user_id=?',(row['id'],))
+                if self.account_email:self.db.execute('DELETE FROM email_grants WHERE user_id=?',(row['id'],))
                 # An interrupted reset must fail closed, never leave a reusable grant.
                 (self.directory/'recovery.json').unlink()
                 self.db.commit()

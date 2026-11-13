@@ -45,6 +45,10 @@ class NativeHTTPTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.a = Accounts(self.tmp.name)
+        from app.account_email import AccountEmail
+        from tests.test_account_email import FakeMail
+        self.mail = FakeMail()
+        self.a.account_email = AccountEmail(self.a,'https://music.example',self.mail)
         self.a.register('listener', 'long-test-password', 'listener@example.invalid')
         self.a.approve('listener')
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
@@ -82,6 +86,8 @@ class NativeHTTPTests(unittest.TestCase):
         self.assertNotIn('access_token', result)
         with self.assertRaises(PermissionError): self.a.login('newlistener', 'long-new-password', 'native')
         self.a.approve('newlistener')
+        with self.assertRaises(PermissionError):self.a.login('newlistener','long-new-password')
+        self.a.account_email.finish(self.mail.token(),'verify')
         self.assertTrue(self.a.login('newlistener', 'long-new-password', 'native'))
 
     def test_registration_validation_duplicates_and_rate_limit(self):

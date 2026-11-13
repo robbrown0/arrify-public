@@ -103,6 +103,7 @@ struct SignInView: View {
     @State private var password = ""
     @State private var submitting = false
     @State private var creatingAccount = false
+    @State private var recoveringAccount = false
     @State private var deletingAccount = false
     var body: some View {
         NavigationStack {
@@ -126,7 +127,7 @@ struct SignInView: View {
                 Section("Account") {
                     TextField("Username", text: $username).textContentType(.username)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("username")
-                    SecureField("Password", text: $password).textContentType(.password).accessibilityIdentifier("password")
+                    AccountPasswordField(title: "Password", text: $password, identifier: "password", newPassword: false)
                 }
                 if let error = model.error { Section { Text(error).foregroundStyle(.orange) } }
                 Section {
@@ -138,10 +139,12 @@ struct SignInView: View {
                     }.disabled(submitting || username.isEmpty || password.isEmpty).accessibilityIdentifier("signIn")
                 }
                 Section {
+                    Button("Forgot password?") { recoveringAccount = true }
                     Button("Create account") { creatingAccount = true }.accessibilityIdentifier("createAccount")
                     Button("Delete an existing account", role: .destructive) { deletingAccount = true }.accessibilityIdentifier("deleteExistingAccount")
                 }
             }.navigationTitle("Arrify")
+                .sheet(isPresented: $recoveringAccount) { AccountRecoveryView(model: model) }
                 .sheet(isPresented: $creatingAccount) { CreateAccountView(model: model) }
                 .sheet(isPresented: $deletingAccount) { NavigationStack { DeleteAccountView(model: model, signedIn: false) } }
         }
@@ -151,6 +154,8 @@ struct SignInView: View {
 struct MainView: View {
     @Bindable var model: AppModel
     @State private var showPlayer = false
+    @State private var selectedTab = "Home"
+    @State private var libraryRoot = UUID()
     @ScaledMetric(relativeTo: .subheadline) private var playerScrollClearance = 72
     var body: some View {
         ZStack {
@@ -161,12 +166,14 @@ struct MainView: View {
         .task { await model.refreshBranding(); await model.favorites.refresh() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(model: model) }
     }
     private var tabs: some View {
-        TabView {
-            Tab("Home", systemImage: "house") { withPlayer(HomeScreen(model: model)) }
-            Tab("Library", systemImage: "square.stack") { withPlayer(LibraryHome(model: model)) }
-            Tab("Channels", systemImage: "antenna.radiowaves.left.and.right") { withPlayer(NavigationStack { CollectionScreen(model: model, section: "channels", title: "Channels") }) }
-            Tab("Search", systemImage: "magnifyingglass", role: .search) { withPlayer(SearchScreen(model: model)) }
-            Tab("Settings", systemImage: "gearshape") { withPlayer(SettingsView(model: model)) }
+        TabView(selection: Binding(get: { selectedTab }, set: { value in
+            if value == "Library" { libraryRoot = UUID() }; selectedTab = value
+        })) {
+            Tab("Home", systemImage: "house", value: "Home") { withPlayer(HomeScreen(model: model)) }
+            Tab("Library", systemImage: "square.stack", value: "Library") { withPlayer(LibraryHome(model: model).id(libraryRoot)) }
+            Tab("Channels", systemImage: "antenna.radiowaves.left.and.right", value: "Channels") { withPlayer(NavigationStack { CollectionScreen(model: model, section: "channels", title: "Channels") }) }
+            Tab("Search", systemImage: "magnifyingglass", value: "Search", role: .search) { withPlayer(SearchScreen(model: model)) }
+            Tab("Settings", systemImage: "gearshape", value: "Settings") { withPlayer(SettingsView(model: model)) }
         }
         .tabViewStyle(.sidebarAdaptable)
     }

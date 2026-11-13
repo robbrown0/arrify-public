@@ -410,7 +410,7 @@ struct HomeScreen: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 32) {
-                    Text("On the record.").font(.largeTitle.bold())
+                    Text("On the record").font(.largeTitle.bold())
                     if UIDevice.current.userInterfaceIdiom != .pad {
                         HStack(spacing: 20) {
                             NavigationLink("Songs") { BrowserScreen(model: model, title: "Songs", kind: "tracks") }
@@ -425,7 +425,7 @@ struct HomeScreen: View {
                     }
                     RefreshStatus(loading: model.library.loading, updated: model.library.updated, error: model.library.error)
                 }.padding(24)
-            }.background(Color.black).navigationTitle("Home").navigationBarTitleDisplayMode(.inline)
+            }.background(Color.black).navigationTitle("").navigationBarTitleDisplayMode(.inline)
                 .task { await model.library.refresh() }
                 .onChange(of: scenePhase) { if scenePhase == .active { model.library.scheduleRefresh() } }
                 .refreshable { await model.library.refresh() }

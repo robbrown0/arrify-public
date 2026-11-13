@@ -1,0 +1,11 @@
+'use strict';
+(()=>{
+ const $=s=>document.querySelector(s);let purpose='reset';
+ const password=$('#access-password'),confirmation=$('#access-confirm');ArrifyPassword.enhance(password,confirmation);
+ async function post(action,data={}){const response=await fetch('/api/v1/auth/email/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),cache:'no-store'});const value=await response.json();if(!response.ok)throw Error(value.error||'Please try again.');return value}
+ async function request(kind){const form=$('#access-request');if(!form.reportValidity())return;const buttons=form.querySelectorAll('button');buttons.forEach(b=>b.disabled=true);try{const r=await post('request',{identifier:form.elements.identifier.value,purpose:kind});$('#access-message').textContent=r.message}catch(e){$('#access-message').textContent=e.message}finally{buttons.forEach(b=>b.disabled=false)}}
+ $('#access-request').onsubmit=e=>{e.preventDefault();request('reset')};$('#access-verify').onclick=()=>request('verify');
+ function ready(result){purpose=result.purpose;$('#access-request').hidden=true;$('#access-finish').hidden=false;$('#access-passwords').hidden=purpose==='verify';password.required=confirmation.required=purpose==='reset';$('#access-title').textContent=purpose==='verify'?'Confirm your email':'A fresh set of keys';$('#access-help').textContent=purpose==='verify'?'Confirm this address belongs to you. Administrator approval is also required before you can listen.':'Choose a unique password you haven’t used elsewhere.';$('#access-save').textContent=purpose==='verify'?'Verify email':'Save password'}
+ $('#access-finish').onsubmit=async e=>{e.preventDefault();$('#access-save').disabled=true;try{const r=await post('finish',{password:password.value});password.value=confirmation.value='';$('#access-finish').hidden=true;$('#access-title').textContent='You’re all set';$('#access-help').textContent=r.message}catch(e){$('#access-message').textContent=e.message}finally{$('#access-save').disabled=false}};
+ const fragment=location.hash.slice(1);if(fragment){history.replaceState(null,'',location.pathname);const [kind,token]=fragment.split(':');post('open',{purpose:kind,token}).then(ready).catch(e=>$('#access-message').textContent=e.message)}else{post('status').then(ready).catch(()=>{})}
+})();

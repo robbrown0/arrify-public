@@ -5,6 +5,7 @@ struct TabletShell: View {
     let model: AppModel
     let expandPlayer: () -> Void
     @State private var destination = "Home"
+    @State private var libraryRoot = UUID()
     @State private var query = ""
     @State private var searchKind = "tracks"
     @State private var creatingPlaylist = false
@@ -83,7 +84,7 @@ struct TabletShell: View {
     }
     private func navigation(_ title: String, _ icon: String, key: String? = nil) -> some View {
         let value = key ?? title
-        return Button { searching = false; destination = value } label: {
+        return Button { searching = false; if value == "Library" { libraryRoot = UUID() }; destination = value } label: {
             Label(title, systemImage: icon).font(.subheadline.weight(.medium)).lineLimit(2)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 10)
                 .foregroundStyle(destination == value ? Color.green : Color.secondary)
@@ -94,7 +95,7 @@ struct TabletShell: View {
         switch destination {
         case "Home": HomeScreen(model: model)
         case "Browse": BrowseScreen(model: model)
-        case "Library": LibraryHome(model: model)
+        case "Library": LibraryHome(model: model).id(libraryRoot)
         case "Moods": MoodScreen(model: model)
         case "Settings": SettingsView(model: model)
         case "Search":
