@@ -53,16 +53,12 @@ struct TabletShell: View {
                         }
                         Button { creatingPlaylist = true } label: { Label("Create", systemImage: "plus").frame(minHeight: 44) }.accessibilityLabel("Create playlist")
                     }.padding(.horizontal, 16).padding(.vertical, 8).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12)).padding(16)
-                    if model.playback.hasOtherOutput {
-                        HStack {
-                            Text("Playing on another device").font(.footnote)
-                            Spacer()
-                            Button("Play here") { Task { await model.playback.send("takeover") } }
-                                .accessibilityIdentifier("takeOverPlayback")
-                        }.padding(.horizontal, 16).padding(.bottom, 12)
-                    }
                     content.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+            }
+            if model.playback.hasOtherOutput {
+                PlaybackTakeoverBanner(playback: model.playback)
+                    .padding(.horizontal, 16).padding(.top, 8)
             }
             if let message = model.playback.message {
                 HStack {

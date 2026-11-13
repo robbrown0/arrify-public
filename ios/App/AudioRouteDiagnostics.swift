@@ -44,7 +44,7 @@ struct RoutePortDetails: Codable, Sendable {
         let playerAllowsExternalPlayback: Bool
         let playerIsExternalPlaybackActive: Bool
         let playerTimeControlStatus: Int
-        let volumeViewWirelessRouteActive: Bool
+        let volumeViewWirelessRouteActive: Bool?
         let volumeViewAttachedToWindow: Bool
         let displayedLocalOutput: String
         let displayedOutput: String
@@ -66,7 +66,7 @@ struct RoutePortDetails: Codable, Sendable {
     }
     func stop() { capturing = false; expiry?.cancel(); expiry = nil }
     func clear() { stop(); records = []; lastSnapshot = nil }
-    func record(trigger: String, player: AVPlayer, volumeView: MPVolumeView,
+    func record(trigger: String, player: AVPlayer, volumeView: MPVolumeView?,
                 localName: String, displayedName: String, remoteOwner: Bool,
                 reason: UInt? = nil, previousOutputs: [RoutePortDetails]? = nil) {
         guard capturing else { return }
@@ -76,8 +76,8 @@ struct RoutePortDetails: Codable, Sendable {
             outputs: session.currentRoute.outputs.map(RoutePortDetails.init),
             selectedOutputDataSource: session.outputDataSource.map(RoutePortDetails.DataSource.init),
             playerAllowsExternalPlayback: player.allowsExternalPlayback, playerIsExternalPlaybackActive: player.isExternalPlaybackActive,
-            playerTimeControlStatus: player.timeControlStatus.rawValue, volumeViewWirelessRouteActive: volumeView.isWirelessRouteActive,
-            volumeViewAttachedToWindow: volumeView.window != nil,
+            playerTimeControlStatus: player.timeControlStatus.rawValue, volumeViewWirelessRouteActive: volumeView?.isWirelessRouteActive,
+            volumeViewAttachedToWindow: volumeView?.window != nil,
             displayedLocalOutput: localName, displayedOutput: displayedName, observingRemoteOwner: remoteOwner)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]; encoder.dateEncodingStrategy = .iso8601
         guard let snapshotData = try? encoder.encode(snapshot), let fingerprint = String(data: snapshotData, encoding: .utf8) else { return }

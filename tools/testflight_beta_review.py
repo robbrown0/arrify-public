@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Volume control correction: the player now embeds Apple’s unmodified native volume control in a centered container. Please compare the app slider with AirPlay volume, including after sleep/wake and adding or removing speakers. At a low starting volume, verify that lowering the slider lowers speaker volume. This build corrects unsupported control customization; resolution of the reported AirPlay volume mismatch still requires physical-device testing.'}
+    attrs = {'whatsNew': 'Player polish: the expanded player now creates its native volume control for each presentation instead of retaining it for the app lifetime. Volume layout uses the native preferred size. iPad now shares the rounded Play here banner with iPhone, positioned beside playback controls. Please verify iPad slider alignment and compare iPhone AirPlay volume before and after reopening the player, sleep/wake, and speaker changes. The iPhone volume mismatch remains under investigation pending physical-device verification.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:
