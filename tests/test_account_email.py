@@ -108,3 +108,32 @@ class GrantConcurrencyTests(AccountEmailTests):
             except ValueError:return False
         with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(lambda _:attempt(),range(2)))
         self.assertEqual(sum(results),1)
+
+class WebDeletionTests(EmailHTTPTests):
+    def test_web_deletion_requires_csrf_password_and_confirmation(self):
+        import http.client,json
+        from unittest.mock import patch
+        self.a.account_email.finish(self.mail.token(),'verify');self.a.approve('listener')
+        token=self.a.login('listener','A unique longer password 123')
+        def request(password,confirm,csrf):
+            connection=http.client.HTTPConnection('127.0.0.1',self.server.server_port)
+            with patch('app.server.ORIGINS',frozenset(['https://music.example'])):
+                connection.request('POST','/api/v1/account/delete',json.dumps({'password':password,'confirm':confirm}),{'Content-Type':'application/json','Origin':'https://music.example','Host':'music.example','Cookie':'arrify_session='+token,'X-CSRF-Token':csrf})
+                response=connection.getresponse();status=response.status;response.read();connection.close();return status
+        csrf=self.a.csrf(token)
+        self.assertEqual(request('A unique longer password 123',True,''),403)
+        self.assertEqual(request('wrong',True,csrf),403)
+        self.assertEqual(request('A unique longer password 123',False,csrf),400)
+        self.assertEqual(request('A unique longer password 123',True,csrf),200)
+        self.assertIsNone(self.a.db.execute('SELECT 1 FROM users').fetchone())
+
+class EmailChangeTests(AccountEmailTests):
+    def test_sensitive_email_change_requires_password(self):
+        self.service.finish(self.create(),'verify')
+        uid=self.a.db.execute('SELECT id FROM users').fetchone()[0]
+        with self.assertRaises(PermissionError):self.a.update_profile_authenticated(uid,'Name','new@example.com')
+        self.assertTrue(self.a.profile(uid)['email_verified'])
+        self.a.update_profile_authenticated(uid,'Name','new@example.com',password=self.password)
+        self.assertFalse(self.a.profile(uid)['email_verified'])
+        self.service.finish(self.mail.token(),'verify')
+        self.assertTrue(self.a.profile(uid)['email_verified'])

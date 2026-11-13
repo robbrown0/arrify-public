@@ -268,6 +268,15 @@ class Accounts:
             self.db.execute('INSERT INTO preferences(user_id,playlist_shared_default) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET playlist_shared_default=excluded.playlist_shared_default',(user_id,int(value)))
         return {'playlist_shared_default':value}
 
+    def update_profile_authenticated(self,user_id,display_name,email,text_size=None,password=None):
+        email=self.normalize_email(email)
+        with self.transaction():
+            current=self.db.execute('SELECT p.email,u.password FROM profiles p JOIN users u ON u.id=p.user_id WHERE p.user_id=?',(user_id,)).fetchone()
+            if current and current['email']!=email:
+                if not isinstance(password,str) or not 1<=len(password)<=128 or not hmac.compare_digest(self.hash_password(password,current['password'].split(':')[0]),current['password']):
+                    raise PermissionError('Enter your current password to change your email address.')
+            return self.update_profile(user_id,display_name,email,text_size)
+
     def update_profile(self,user_id,display_name,email,text_size=None):
         if not isinstance(display_name,str):raise ValueError('Invalid profile.')
         if text_size is not None and text_size not in ('standard','large','largest'):

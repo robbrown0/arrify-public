@@ -40,17 +40,8 @@ def dispatch(handler, path, data=None):
                 result = a.delete_account(data['password'], user_id=uid, username=data.get('username'))
             except PermissionError as exc:raise NativeError(403, 'verification_failed', str(exc)) from None
             uid = result.pop('_erased_id')
-            spotify = getattr(handler.server, 'spotify', None)
-            if spotify:spotify.disconnect(uid)
-            live = getattr(handler.server, 'live_activities', None)
-            if live:
-                with a.lock:
-                    live.local_presence.owners.pop(uid, None)
-                    live.local_presence.challenges = {k:v for k,v in live.local_presence.challenges.items() if v['uid'] != uid}
-                    active = {r[0] for r in a.db.execute('SELECT id FROM native_families')}
-                    live.sent = {k:v for k,v in live.sent.items() if k[0] in active}
-            events = getattr(handler.server, 'listening_events', None)
-            if events:events.publish(uid)
+            from .account_deletion import finish_runtime_erasure
+            finish_runtime_erasure(handler.server,uid)
         elif path == PREFIX + 'register' and data is not None:
             try:a.rate_limit(('native-register', handler.client_address[0]), 5, 900)
             except ValueError:raise NativeError(429, 'rate_limited', 'Too many attempts. Try again later.') from None

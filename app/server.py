@@ -492,8 +492,8 @@ class Handler(BaseHTTPRequestHandler):
             if data.get('confirm') is not True:raise ValueError('Confirm permanent account deletion.')
             result=a.delete_account(data.get('password'),user_id=uid)
             result.pop('_erased_id',None)
-            spotify=getattr(self.server,'spotify',None)
-            if spotify:spotify.disconnect(uid)
+            from .account_deletion import finish_runtime_erasure
+            finish_runtime_erasure(self.server,uid)
             return self.json(result,extra={'Set-Cookie':self.cookie('',True)})
         if spotify_http.post(self,path,data,user):return
         if path.startswith('/api/v1/parties') and party_http.host_post(self,path,data,user):return
@@ -532,7 +532,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(a.set_playlist_shared_default(uid,data.get('playlist_shared_default')))
         if path=='/api/v1/profile':
             a.rate_limit(('profile',uid),12,900)
-            return self.json(a.update_profile(uid,data.get('display_name',''),data.get('email',''),data.get('text_size')))
+            return self.json(a.update_profile_authenticated(uid,data.get('display_name',''),data.get('email',''),data.get('text_size'),data.get('password')))
         if path=='/api/v1/profile/refresh':
             a.rate_limit(('profile',uid),12,900)
             return self.json(a.refresh_avatar(uid))
