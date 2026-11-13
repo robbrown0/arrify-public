@@ -153,7 +153,14 @@ struct NowPlayingView: View {
                 }.accessibilityLabel("Repeat").accessibilityValue(playback.state?.repeatMode ?? "off")
                     .disabled(playback.state?.queueControlsAvailable != true)
             }.buttonStyle(.plain)
-            SystemVolumeSlider(onCreate: { playback.expandedVolumeView = $0 }).frame(height: 44).padding(.top, 6)
+            if playback.hasOtherOutput {
+                Text("Adjust volume on the playing device")
+                    .font(.footnote).foregroundStyle(.secondary).frame(height: 44)
+            } else {
+                SystemVolumeSlider(onCreate: { playback.expandedVolumeView = $0 })
+                    .frame(height: 44).padding(.top, 6)
+                    .accessibilityIdentifier("localVolumeControl")
+            }
             HStack(spacing: 0) {
                 HStack(spacing: 4) {
                     ServerConnectionBadge(connection: playback.serverConnection)
@@ -391,7 +398,10 @@ struct TabletPlayerBar: View {
                         Button { Task { await playback.send("next") } } label: { Image(systemName: "forward.end.fill").opacity(playback.skipPending ? 0 : 1).overlay { if playback.skipPending { ProgressView().tint(.green) } }.frame(width: 44, height: 44) }.accessibilityLabel(playback.skipPending ? "Skipping" : "Next song").disabled(playback.skipPending)
                     }
                 }.frame(width: 180)
-                SystemVolumeSlider().frame(width: 130, height: 44)
+                if !playback.hasOtherOutput {
+                    SystemVolumeSlider().frame(width: 130, height: 44)
+                        .accessibilityIdentifier("localVolumeControl")
+                }
                 if !playback.serverConnection.connected || playback.serverConnection.degraded { ServerConnectionBadge(connection: playback.serverConnection) }
                 AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44)
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")

@@ -333,6 +333,10 @@ extension LaunchTests {
         let takeover = app.buttons["Play here"]
         XCTAssertTrue(takeover.waitForExistence(timeout: 10))
         XCTAssertTrue(takeover.isHittable)
+        XCTAssertFalse(app.otherElements["localVolumeControl"].exists)
+        if app.textFields["tabletSearch"].exists {
+            XCTAssertGreaterThan(takeover.frame.minY, app.textFields["tabletSearch"].frame.maxY)
+        }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Remote playback takeover available"; shot.lifetime = .keepAlways; add(shot)
         takeover.tap()
