@@ -60,3 +60,51 @@ class AccountEmailTests(unittest.TestCase):
     def test_deleted_account_cannot_verify(self):
         token=self.create();self.a.delete_account(self.password,username='listener')
         with self.assertRaises(ValueError):self.service.finish(token,'verify')
+
+class EmailHTTPTests(unittest.TestCase):
+    def setUp(self):
+        from http.server import ThreadingHTTPServer
+        from app.server import Handler
+        from types import SimpleNamespace
+        import threading
+        self.tmp=tempfile.TemporaryDirectory();self.a=Accounts(self.tmp.name);self.mail=FakeMail()
+        self.a.account_email=AccountEmail(self.a,'https://music.example',self.mail)
+        self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        self.server.accounts=self.a;self.server.library=self.server.player=SimpleNamespace()
+        self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
+        self.a.register_public('listener','A unique longer password 123','listener@example.com')
+    def tearDown(self):
+        self.server.shutdown();self.server.server_close();self.thread.join();self.a.db.close();self.tmp.cleanup()
+    def post(self,action,data,cookie='',origin='https://music.example'):
+        import http.client,json
+        from unittest.mock import patch
+        c=http.client.HTTPConnection('127.0.0.1',self.server.server_port)
+        with patch('app.server.ORIGINS',frozenset(['https://music.example'])):
+            c.request('POST','/api/v1/auth/email/'+action,json.dumps(data),{'Content-Type':'application/json','Origin':origin,'Host':'music.example','Cookie':cookie})
+            r=c.getresponse();result=r.status,json.loads(r.read()),dict(r.getheaders());c.close();return result
+    def test_explicit_verification_cookie_refresh_and_replay(self):
+        token=self.mail.token()
+        status,_,headers=self.post('open',{'purpose':'verify','token':token})
+        self.assertEqual(status,200);cookie=headers['Set-Cookie']
+        for flag in ['Secure','HttpOnly','SameSite=Strict','Path=/api/v1/auth/email/']:self.assertIn(flag,cookie)
+        self.assertEqual(self.post('status',{},cookie)[0],200)
+        self.assertEqual(self.a.db.execute('SELECT email_verified_at FROM profiles').fetchone()[0],0)
+        self.assertEqual(self.post('finish',{},cookie)[0],200)
+        self.assertEqual(self.post('finish',{},cookie)[0],400)
+    def test_cross_origin_rejected(self):
+        self.assertEqual(self.post('open',{'purpose':'verify','token':self.mail.token()},origin='https://evil.example')[0],403)
+    def test_wrong_cookie_and_neutral_request(self):
+        self.assertEqual(self.post('finish',{})[0],400)
+        known=self.post('request',{'purpose':'reset','identifier':'listener'})
+        unknown=self.post('request',{'purpose':'reset','identifier':'missing'})
+        self.assertEqual(known[:2],unknown[:2])
+
+class GrantConcurrencyTests(AccountEmailTests):
+    def test_only_one_concurrent_reset_succeeds(self):
+        from concurrent.futures import ThreadPoolExecutor
+        self.service.finish(self.create(),'verify');self.service.request('listener','reset');token=self.mail.token()
+        def attempt():
+            try:self.service.finish(token,'reset','New independent words 998');return True
+            except ValueError:return False
+        with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(lambda _:attempt(),range(2)))
+        self.assertEqual(sum(results),1)

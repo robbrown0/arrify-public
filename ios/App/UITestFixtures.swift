@@ -36,8 +36,10 @@ actor UITestTransport: HTTPTransport {
                 return HTTPResult(status: 403, data: Data(#"{"error":{"code":"verification_failed","message":"The account details could not be verified."}}"#.utf8))
             }
             value = #"{"message":"Your account and personal data have been deleted. You are signed out on all devices."}"#
+        } else if path.hasSuffix("/native/account/email") {
+            value = #"{"message":"If the account is eligible, an email will arrive shortly. Check your inbox and spam folder."}"#
         } else if path.hasSuffix("/native/register") {
-            value = #"{"message":"Account created. An administrator must approve it before you can listen."}"#
+            value = #"{"message":"Account created. Check your email to verify your address. An administrator must also approve your account before you can listen."}"#
         } else if path == "/api/v1/browse/charts" {
             value = #"{"items":[{"title":"Unavailable fixture song","artist":"Fixture artist","rank":1,"request_key":"012345678901234567890123","track":null,"requested":null}],"source":"Fixture chart","pending":false,"stale":false}"#
         } else if path == "/api/v1/browse/request" {

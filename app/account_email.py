@@ -7,6 +7,7 @@ import ssl
 import smtplib
 import queue
 import threading
+import html
 from email.message import EmailMessage
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -32,6 +33,11 @@ class Mailer:
                 message['To'] = recipient
                 message['Subject'] = subject
                 message.set_content(body)
+                paragraphs=''.join('<p style="line-height:1.6">'+html.escape(line)+'</p>' for line in body.split('\n\n'))
+                for line in body.splitlines():
+                    if line.startswith('https://'):
+                        paragraphs=paragraphs.replace(html.escape(line),'<a style="display:inline-block;background:#55e87c;color:#07120b;padding:14px 22px;border-radius:12px;text-decoration:none;font-weight:bold" href="'+html.escape(line,quote=True)+'">Continue securely</a>')
+                message.add_alternative('<!doctype html><html><body style="margin:0;background:#0b110e;color:#f3f6f4;font-family:Arial,sans-serif"><main style="max-width:520px;margin:auto;padding:40px 24px"><h1>Arr<span style="color:#55e87c">ify</span></h1>'+paragraphs+'<p style="color:#a5b0a8;font-size:13px">Account security · Arrify</p></main></body></html>',subtype='html')
                 with smtplib.SMTP(self.config['host'], self.config['port'], timeout=20) as smtp:
                     smtp.ehlo(); smtp.starttls(context=ssl.create_default_context()); smtp.ehlo()
                     smtp.login(self.config['username'], Path(self.config['password_file']).read_text().strip())
@@ -85,8 +91,8 @@ class AccountEmail:
         return {'message': GENERIC}
 
     def grant(self, token, purpose):
-        if not isinstance(token,str) or len(token)!=43: raise ValueError('This link has expired or was already used. Request a new link.')
-        row = self.a.db.execute('''SELECT g.*,u.frozen,u.deleted_at,p.email current_email,p.email_verified_at
+        if purpose not in ('reset','verify') or not isinstance(token,str) or len(token)!=43: raise ValueError('This link has expired or was already used. Request a new link.')
+        row = self.a.db.execute('''SELECT g.*,u.approved,u.frozen,u.deleted_at,p.email current_email,p.email_verified_at
            FROM email_grants g JOIN users u ON u.id=g.user_id JOIN profiles p ON p.user_id=u.id
            WHERE g.digest=? AND g.purpose=? AND g.expires>?''',
            (self.a.digest(token),purpose,int(time.time()))).fetchone()
@@ -117,7 +123,7 @@ class AccountEmail:
         if purpose=='reset':
             try:self.mailer.send(row['email'],'Your Arrify password changed','Your password has been changed and all devices have been signed out. If this was not you, contact your Arrify administrator immediately.')
             except queue.Full: pass
-        return {'message': 'Email verified. An administrator must approve your account before you can listen.' if purpose=='verify' else 'Password updated. Sign in with your new password. All devices have been signed out.'}
+        return {'message': ('Email verified. Your account is approved. You can sign in now.' if row['approved'] else 'Email verified. An administrator must approve your account before you can listen.') if purpose=='verify' else 'Password updated. Sign in with your new password. All devices have been signed out.'}
 
 
 def configure(accounts):

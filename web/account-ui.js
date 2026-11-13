@@ -9,9 +9,10 @@ window.ArrifyPassword = {
    toggle.onclick=()=>{const show=field.type==='password';field.type=show?'text':'password';toggle.setAttribute('aria-pressed',String(show));toggle.setAttribute('aria-label',show?'Hide password':'Show password')};wrap.append(toggle);
   }
   if(!confirmation)return;
+  if(input.accountPasswordUpdate){input.accountPasswordUpdate();return;}
   const hint=document.createElement('small');hint.className='password-feedback';input.closest('label').append(hint);
   const match=document.createElement('small');match.className='password-feedback';confirmation.closest('label').append(match);
   function update(){const p=input.value,ok=p.length>=15&&p.length<=128;hint.textContent=ok?'✓ Length requirement met. Use a unique password.':'Use 15–128 characters. Try a few unrelated words.';hint.classList.toggle('met',ok);const same=!!confirmation.value&&p===confirmation.value;match.textContent=same?'✓ Passwords match':confirmation.value?'Passwords don’t match yet.':'';match.classList.toggle('met',same);confirmation.setCustomValidity(confirmation.value&&!same?'Passwords must match.':'')}
-  input.addEventListener('input',update);confirmation.addEventListener('input',update);update();
+  input.accountPasswordUpdate=update;input.addEventListener('input',update);confirmation.addEventListener('input',update);update();
  }
 };

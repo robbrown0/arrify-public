@@ -421,6 +421,7 @@ extension LaunchTests {
         }
         XCTAssertTrue(create.exists && create.isHittable)
         create.tap()
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "administrator")).firstMatch.exists)
         app.textFields["newUsername"].tap(); app.textFields["newUsername"].typeText("newlistener")
         app.textFields["newEmail"].tap(); app.textFields["newEmail"].typeText("new@example.invalid")
         app.secureTextFields["newPassword"].tap(); app.secureTextFields["newPassword"].typeText("long-new-password")
@@ -453,4 +454,19 @@ extension LaunchTests {
         XCTAssertTrue(app.buttons["Requested"].waitForExistence(timeout: 10))
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Native Browse chart"; shot.lifetime = .keepAlways; add(shot)
     }
+    @MainActor func testLibraryTabAlwaysReturnsToRoot() {
+        let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        let library = app.buttons["Library"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 10)); library.tap()
+        let browse = app.buttons["Browse"].firstMatch
+        XCTAssertTrue(browse.waitForExistence(timeout: 5)); browse.tap()
+        library.tap()
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Browse"].firstMatch.exists)
+    }
+
 }
