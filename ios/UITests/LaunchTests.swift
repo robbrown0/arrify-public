@@ -133,7 +133,7 @@ final class LaunchTests: XCTestCase {
         password.tap(); password.typeText("fixture")
         app.buttons["signIn"].tap()
         XCTAssertTrue(app.buttons["Songs"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["On the record."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["On the record"].waitForExistence(timeout: 5))
         let homeShot = XCTAttachment(screenshot: app.screenshot()); homeShot.name = "Artwork-led Home"; homeShot.lifetime = .keepAlways; add(homeShot)
         XCTAssertFalse(app.buttons["refreshLibrary"].exists)
         app.scrollViews.firstMatch.swipeDown()

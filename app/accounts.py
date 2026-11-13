@@ -271,7 +271,7 @@ class Accounts:
     def update_profile_authenticated(self,user_id,display_name,email,text_size=None,password=None):
         email=self.normalize_email(email)
         with self.transaction():
-            current=self.db.execute('SELECT p.email,u.password FROM profiles p JOIN users u ON u.id=p.user_id WHERE p.user_id=?',(user_id,)).fetchone()
+            current=self.db.execute("SELECT coalesce(p.email,'') email,u.password FROM users u LEFT JOIN profiles p ON p.user_id=u.id WHERE u.id=?",(user_id,)).fetchone()
             if current and current['email']!=email:
                 if not isinstance(password,str) or not 1<=len(password)<=128 or not hmac.compare_digest(self.hash_password(password,current['password'].split(':')[0]),current['password']):
                     raise PermissionError('Enter your current password to change your email address.')
@@ -464,8 +464,8 @@ class Accounts:
         with self.recovery_lock():return {'username':self.recovery_identity(token)['username']}
 
     def finish_recovery(self,token,password):
-        if not isinstance(password,str) or not 12<=len(password)<=128:
-            raise ValueError('Use a password of 12–128 characters.')
+        from .password_policy import validate
+        validate(password)
         with self.recovery_lock(),self.lock:
             grant=self.recovery_identity(token)
             encoded=self.hash_password(password)

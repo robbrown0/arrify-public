@@ -137,3 +137,22 @@ class EmailChangeTests(AccountEmailTests):
         self.assertFalse(self.a.profile(uid)['email_verified'])
         self.service.finish(self.mail.token(),'verify')
         self.assertTrue(self.a.profile(uid)['email_verified'])
+
+class ExistingEmailMigrationTests(unittest.TestCase):
+    def test_owner_opt_in_runs_once_and_never_trusts_changed_or_new_email(self):
+        import json,os
+        from unittest.mock import patch
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            a=Accounts(directory);a.register('existing','Existing secure password 891','old@example.com');a.db.close()
+            config=Path(directory)/'smtp.json';config.write_text(json.dumps({'trust_existing_emails':True}))
+            mail=FakeMail()
+            with patch.dict(os.environ,{'ARRIFY_SMTP_CONFIG':str(config),'ARRIFY_ORIGIN':'https://music.example'}),patch('app.account_email.Mailer',return_value=mail):
+                a=Accounts(directory)
+                uid=a.db.execute("SELECT id FROM users WHERE username='existing'").fetchone()[0]
+                self.assertTrue(a.profile(uid)['email_verified'])
+                a.update_profile(uid,'Name','changed@example.com')
+                a.register_public('newuser','A new secure password 189','new@example.com');a.db.close()
+                a=Accounts(directory)
+                self.assertEqual(a.db.execute('SELECT count(*) FROM profiles WHERE email_verified_at>0').fetchone()[0],0)
+                a.db.close()

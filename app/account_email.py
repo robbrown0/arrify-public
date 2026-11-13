@@ -51,7 +51,7 @@ class Mailer:
 class AccountEmail:
     def __init__(self, accounts, origin, mailer):
         parsed = urlsplit(origin)
-        if parsed.scheme != 'https' or not parsed.netloc or parsed.username or parsed.query or parsed.fragment:
+        if parsed.scheme != 'https' or not parsed.netloc or parsed.username is not None or parsed.path not in ('','/') or parsed.query or parsed.fragment:
             raise ValueError('Account email requires a trusted HTTPS public origin.')
         self.a, self.origin, self.mailer = accounts, origin.rstrip('/'), mailer
         accounts.db.executescript('''
