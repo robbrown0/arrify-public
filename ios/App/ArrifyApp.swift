@@ -155,14 +155,16 @@ struct MainView: View {
     @Bindable var model: AppModel
     @State private var showPlayer = false
     @State private var selectedTab = "Home"
+    @State private var keyboardVisible = false
     @State private var libraryRoot = UUID()
-    @ScaledMetric(relativeTo: .subheadline) private var playerScrollClearance = 72
     var body: some View {
         ZStack {
             if UIDevice.current.userInterfaceIdiom == .pad {
                 TabletShell(model: model) { showPlayer = true }
             } else { tabs }
         }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
         .task { await model.refreshBranding(); await model.favorites.refresh() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(model: model) }
     }
     private var tabs: some View {
@@ -178,30 +180,34 @@ struct MainView: View {
         .tabViewStyle(.sidebarAdaptable)
     }
     private func withPlayer<Content: View>(_ content: Content) -> some View {
-        content
-        .contentMargins(.bottom, UIDevice.current.userInterfaceIdiom != .pad && model.playback.track != nil ? playerScrollClearance : 0, for: .scrollContent)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 8) {
-                // Keep status beside playback controls. A top inset outside the
-                // navigation stack can cover its search field and consume taps.
-                if model.playback.hasOtherOutput {
-                    PlaybackTakeoverBanner(playback: model.playback)
-                }
-                if model.playback.connectionInterrupted {
-                    Label("Reconnecting… Playback continues where possible.", systemImage: "wifi.exclamationmark")
-                        .font(.footnote).padding().frame(maxWidth: .infinity).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                }
-                if let message = model.playback.message {
-                    Text(message).font(.footnote).padding().frame(maxWidth: .infinity)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                        .accessibilityIdentifier("playbackStatusMessage")
-                }
-                if UIDevice.current.userInterfaceIdiom != .pad, model.playback.track != nil {
-                    // A stable content inset keeps the player usable while searching.
-                    miniPlayer.background(.regularMaterial, in: Capsule())
-                }
-            }.padding(.horizontal, 16).padding(.bottom, 8)
+        // Reserve the footer's actual height outside navigation/scroll content.
+        // A fixed scroll margin cannot cover banners, wrapping text, and errors.
+        VStack(spacing: 0) {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+            // iOS places the search field directly above its keyboard. Keep
+            // playback controls out of that input area and restore them afterward.
+            if selectedTab != "Search" || !keyboardVisible { playbackFooter }
         }
+    }
+    private var playbackFooter: some View {
+        VStack(spacing: 8) {
+            // Keep status beside playback controls and out of search fields.
+            if model.playback.hasOtherOutput {
+                PlaybackTakeoverBanner(playback: model.playback)
+            }
+            if model.playback.connectionInterrupted {
+                Label("Reconnecting… Playback continues where possible.", systemImage: "wifi.exclamationmark")
+                    .font(.footnote).padding().frame(maxWidth: .infinity).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+            if let message = model.playback.message {
+                Text(message).font(.footnote).padding().frame(maxWidth: .infinity)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityIdentifier("playbackStatusMessage")
+            }
+            if UIDevice.current.userInterfaceIdiom != .pad, model.playback.track != nil {
+                miniPlayer.background(.regularMaterial, in: Capsule())
+            }
+        }.padding(.horizontal, 16).padding(.bottom, 8)
     }
     private var miniPlayer: some View {
         MiniPlayerView(playback: model.playback) { showPlayer = true }
@@ -247,7 +253,7 @@ struct SettingsView: View {
                     NavigationLink { DeleteAccountView(model: model, signedIn: true) } label: { Text("Delete account").foregroundStyle(.red) }.accessibilityIdentifier("deleteAccountSettings")
                     Button("Sign out", role: .destructive) { Task { await model.logout() } }
                 }
-                Section { Text("Arrify • \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown") (build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"))").foregroundStyle(.secondary) }
+                Section { Text("Arrify • \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown") (build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"))").foregroundStyle(.secondary).accessibilityIdentifier("settingsBuildVersion") }
             }.navigationTitle("Settings").task { await model.refreshBranding() }
         }
     }

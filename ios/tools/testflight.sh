@@ -46,6 +46,7 @@ xcodebuild -exportArchive -archivePath build/Arrify.xcarchive \
 # Inspect the exact distribution-signed payload before uploading it.
 IPA_PATH=$(find build/TestFlight -maxdepth 1 -name '*.ipa' -print -quit)
 [ -n "$IPA_PATH" ] || { echo "Missing exported IPA" >&2; exit 1; }
+python3 ios/tools/report_bundle_size.py "$IPA_PATH" | tee build/bundle-size.txt
 VERIFY_DIR="$SIGNING_DIR/verify"
 mkdir "$VERIFY_DIR"
 unzip -q "$IPA_PATH" -d "$VERIFY_DIR"

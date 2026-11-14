@@ -32,6 +32,7 @@ jobs:
         working-directory: ios
         run: swift test
       - name: Build for physical devices without signing
+        id: device_build
         run: xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build/device CODE_SIGNING_ALLOWED=NO build
       - name: Verify archive capability preservation
         run: bash ios/tools/prepare_entitlements.sh build/device/Build/Products/Release-iphoneos/Arrify.app ios/App/Arrify.entitlements
@@ -48,12 +49,13 @@ jobs:
         if: ${{ inputs.ipad_only != true }}
         run: xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$ARRIFY_SIMULATOR" -derivedDataPath build/simulator -resultBundlePath build/UITests.xcresult -only-testing:ArrifyUITests CODE_SIGNING_ALLOWED=NO test
       - name: iPad launch and accessibility smoke test
+        if: ${{ !cancelled() && steps.device_build.outcome == 'success' }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith("iPad")))')
           xcrun simctl shutdown all || true
           xcrun simctl boot "$DEVICE"
           xcrun simctl bootstatus "$DEVICE" -b
-          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/iPadTests.xcresult -only-testing:ArrifyUITests/LaunchTests/testSignInIsAccessibleAndDoesNotAutoplay -only-testing:ArrifyUITests/LaunchTests/testAlbumsChannelsAndMoodNavigation -only-testing:ArrifyUITests/LaunchTests/testLastChannelClearsMiniPlayerAndRepeatControls -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible -only-testing:ArrifyUITests/LaunchTests/testLongTitlePlayerDismissalRestoresSearchResponsiveness -only-testing:ArrifyUITests/LaunchTests/testSearchPopularityAndSongOptions -only-testing:ArrifyUITests/LaunchTests/testTabletNewSearchLeavesPreviousDetail -only-testing:ArrifyUITests/LaunchTests/testCreatePlaylist -only-testing:ArrifyUITests/LaunchTests/testRemotePlaybackOffersTakeoverFromBrowsing -only-testing:ArrifyUITests/LaunchTests/testHomeRecentSongsAndFullScreenSongActions -only-testing:ArrifyUITests/LaunchTests/testAccountDeletionRequiresConfirmationAndPassword -only-testing:ArrifyUITests/LaunchTests/testCreateAccountShowsApprovalAndReturnsToSignIn -only-testing:ArrifyUITests/LaunchTests/testLibraryTabAlwaysReturnsToRoot -only-testing:ArrifyUITests/LaunchTests/testBrowseCategoriesChartsAndRequests CODE_SIGNING_ALLOWED=NO test
+          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/iPadTests.xcresult -only-testing:ArrifyUITests/LaunchTests/testSignInIsAccessibleAndDoesNotAutoplay -only-testing:ArrifyUITests/LaunchTests/testAlbumsChannelsAndMoodNavigation -only-testing:ArrifyUITests/LaunchTests/testLastChannelClearsMiniPlayerAndRepeatControls -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible -only-testing:ArrifyUITests/LaunchTests/testLongTitlePlayerDismissalRestoresSearchResponsiveness -only-testing:ArrifyUITests/LaunchTests/testSearchPopularityAndSongOptions -only-testing:ArrifyUITests/LaunchTests/testTabletNewSearchLeavesPreviousDetail -only-testing:ArrifyUITests/LaunchTests/testCreatePlaylist -only-testing:ArrifyUITests/LaunchTests/testRemotePlaybackOffersTakeoverFromBrowsing -only-testing:ArrifyUITests/LaunchTests/testSettingsClearsPlaybackFooterWithLargeText -only-testing:ArrifyUITests/LaunchTests/testTakeoverFooterClearsAllDestinations -only-testing:ArrifyUITests/LaunchTests/testHomeRecentSongsAndFullScreenSongActions -only-testing:ArrifyUITests/LaunchTests/testAccountDeletionRequiresConfirmationAndPassword -only-testing:ArrifyUITests/LaunchTests/testCreateAccountShowsApprovalAndReturnsToSignIn -only-testing:ArrifyUITests/LaunchTests/testLibraryTabAlwaysReturnsToRoot -only-testing:ArrifyUITests/LaunchTests/testBrowseCategoriesChartsAndRequests CODE_SIGNING_ALLOWED=NO test
       - name: Export test screenshots
         if: always()
         run: |

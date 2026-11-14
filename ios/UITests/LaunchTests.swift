@@ -15,25 +15,36 @@ final class LaunchTests: XCTestCase {
         // Require the entire row to be visible before tapping it.
         for _ in 0..<8 {
             if entry.exists && entry.isHittable && app.frame.insetBy(dx: 0, dy: 90).contains(entry.frame) { break }
-            app.swipeUp()
+            app.collectionViews.firstMatch.swipeUp()
         }
         XCTAssertTrue(entry.exists && entry.isHittable)
         XCTAssertTrue(app.frame.insetBy(dx: 0, dy: 90).contains(entry.frame))
         entry.tap()
         XCTAssertTrue(app.navigationBars["Delete account"].waitForExistence(timeout: 10))
         let password = app.secureTextFields["deletionPassword"]
-        for _ in 0..<5 { if password.exists && password.isHittable { break }; app.swipeUp() }
+        for _ in 0..<5 { if password.exists && password.isHittable { break }; app.collectionViews.firstMatch.swipeUp() }
         XCTAssertTrue(password.exists); password.tap(); password.typeText("wrong")
         let submit = app.buttons["requestAccountDeletion"]
-        for _ in 0..<4 { if submit.isHittable { break }; app.swipeUp() }
+        for _ in 0..<4 { if submit.isHittable { break }; app.collectionViews.firstMatch.swipeUp() }
         submit.tap()
         app.buttons["Cancel"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Delete account"].exists)
+        XCTAssertTrue(app.alerts.firstMatch.waitForNonExistence(timeout: 5))
+        for _ in 0..<6 {
+            if submit.exists && submit.isHittable { break }
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(submit.exists && submit.isHittable)
         submit.tap(); app.buttons["Permanently delete account"].tap()
-        XCTAssertTrue(app.staticTexts["deletionError"].waitForExistence(timeout: 10))
-        for _ in 0..<4 { if password.isHittable { break }; app.swipeDown() }
+        let deletionError = app.staticTexts["deletionError"]
+        for _ in 0..<6 {
+            if deletionError.waitForExistence(timeout: 1) && deletionError.isHittable { break }
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(deletionError.exists && deletionError.isHittable)
+        for _ in 0..<4 { if password.isHittable { break }; app.collectionViews.firstMatch.swipeDown() }
         password.tap(); password.typeText("fixture")
-        for _ in 0..<4 { if submit.isHittable { break }; app.swipeUp() }
+        for _ in 0..<4 { if submit.isHittable { break }; app.collectionViews.firstMatch.swipeUp() }
         submit.tap(); app.buttons["Permanently delete account"].tap()
         XCTAssertTrue(app.alerts["Account deleted"].waitForExistence(timeout: 10))
         app.alerts["Account deleted"].buttons["OK"].tap()
@@ -53,6 +64,16 @@ final class LaunchTests: XCTestCase {
         recent.tap()
         XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
         XCTAssertTrue(app.buttons["More options for Just Like a Pill"].waitForExistence(timeout: 10))
+        app.buttons["serverConnection"].tap()
+        XCTAssertTrue(app.navigationBars["Server connection"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["connectionStatus"].firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["connectionRoute"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["connectionAddress"].exists)
+        XCTAssertFalse(app.buttons["Copy address"].exists)
+        let connectionShot = XCTAttachment(screenshot: app.screenshot())
+        connectionShot.name = "Server connection details"; connectionShot.lifetime = .keepAlways; add(connectionShot)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["More options for Just Like a Pill"].isHittable)
         app.buttons["More options for Just Like a Pill"].tap()
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
@@ -242,6 +263,13 @@ extension LaunchTests {
         expectation(for: NSPredicate(format: "value == 'all'"), evaluatedWith: repeatButton)
         waitForExpectations(timeout: 5)
         XCTAssertLessThan(app.buttons["upNext"].frame.maxY, app.frame.maxY - 12, "Footer must fit above the home indicator")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            let outputDescription = app.staticTexts["playerOutputDescription"].firstMatch
+            XCTAssertTrue(outputDescription.exists)
+            let bottomGap = app.frame.maxY - outputDescription.frame.maxY
+            XCTAssertGreaterThan(bottomGap, 16, "Keep output controls clear of the bottom safe area")
+            XCTAssertLessThan(bottomGap, 100, "Avoid a large unused strip beneath the iPad player controls")
+        }
         let playerShot = XCTAttachment(screenshot: app.screenshot()); playerShot.name = "Redesigned player"; playerShot.lifetime = .keepAlways; add(playerShot)
         app.buttons["upNext"].tap()
         XCTAssertTrue(app.staticTexts["Family Portrait"].waitForExistence(timeout: 5))
@@ -321,6 +349,113 @@ extension LaunchTests {
 
 
 extension LaunchTests {
+    @MainActor func testTakeoverFooterClearsAllDestinations() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
+        app.launchEnvironment["ARRIFY_UI_PERSONAL_PLAYLIST"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        let takeover = app.buttons["Play here"]
+        XCTAssertTrue(takeover.waitForExistence(timeout: 10))
+        func checkBottom(_ element: XCUIElement, _ name: String) {
+            for _ in 0..<12 {
+                if element.exists && element.isHittable && element.frame.maxY < takeover.frame.minY { break }
+                // Start inside content, not over the persistent footer or iPad sidebar.
+                let top = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0))
+                let start = top.withOffset(CGVector(dx: 0, dy: takeover.frame.minY - 40))
+                let end = top.withOffset(CGVector(dx: 0, dy: max(180, takeover.frame.minY - 340)))
+                start.press(forDuration: 0.05, thenDragTo: end)
+            }
+            XCTAssertTrue(element.exists, name)
+            XCTAssertTrue(element.isHittable, name)
+            XCTAssertLessThan(element.frame.maxY, takeover.frame.minY, name)
+            XCTAssertTrue(takeover.isHittable)
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "Takeover footer — " + name; shot.lifetime = .keepAlways; add(shot)
+        }
+        checkBottom(app.otherElements["collectionCard-playlists-1"], "Home personal playlist")
+        app.buttons["Library"].firstMatch.tap()
+        let playlist = app.buttons["libraryPersonal-1"]
+        checkBottom(playlist, "Library final playlist")
+        playlist.tap()
+        let lastSong = app.buttons["Play Try by P!nk"]
+        XCTAssertTrue(app.buttons["playCollection"].waitForExistence(timeout: 10))
+        checkBottom(lastSong, "Playlist detail final song")
+        app.buttons["Home"].firstMatch.tap()
+        if !app.textFields["tabletSearch"].exists {
+            for _ in 0..<8 where !app.buttons["Albums"].firstMatch.isHittable { app.swipeDown() }
+        }
+        app.buttons["Albums"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["M!ssundaztood"].firstMatch.waitForExistence(timeout: 10))
+        app.staticTexts["M!ssundaztood"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["playCollection"].waitForExistence(timeout: 10))
+        checkBottom(lastSong, "Album detail final song")
+        app.buttons["Channels"].firstMatch.tap()
+        checkBottom(app.buttons["Play Station 12"], "Channels final station")
+        let tabletSearch = app.textFields["tabletSearch"]
+        if tabletSearch.exists {
+            tabletSearch.tap(); tabletSearch.typeText("pink")
+        } else {
+            app.buttons["Search"].firstMatch.tap()
+            let search = app.searchFields.firstMatch
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            search.tap(); search.typeText("pink")
+        }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        if tabletSearch.exists {
+            XCTAssertTrue(takeover.isHittable)
+            XCTAssertLessThan(takeover.frame.maxY, app.keyboards.firstMatch.frame.minY)
+        } else {
+            XCTAssertTrue(app.buttons["expandPlayer"].waitForNonExistence(timeout: 5))
+            XCTAssertFalse(takeover.exists, "Phone Search keeps the native keyboard input area clear")
+        }
+        let keyboardShot = XCTAttachment(screenshot: app.screenshot())
+        keyboardShot.name = "Takeover footer — Search keyboard"; keyboardShot.lifetime = .keepAlways; add(keyboardShot)
+        if tabletSearch.exists { tabletSearch.typeText("\n") }
+        else { app.searchFields.firstMatch.typeText("\n") }
+        XCTAssertTrue(takeover.waitForExistence(timeout: 5))
+        XCTAssertTrue(lastSong.waitForExistence(timeout: 10))
+        checkBottom(lastSong, "Search final result")
+        if !tabletSearch.exists {
+            app.buttons["Close"].tap()
+            // Closing input leaves iOS's search-role tab bar collapsed.
+            let collapsed = app.tabBars.buttons["Channels"]
+            if !app.buttons["Settings"].firstMatch.exists && collapsed.exists { collapsed.tap() }
+        }
+        XCTAssertTrue(app.buttons["Settings"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Settings"].firstMatch.tap()
+        checkBottom(app.staticTexts["settingsBuildVersion"], "Settings final row")
+    }
+
+    @MainActor func testSettingsClearsPlaybackFooterWithLargeText() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        let takeover = app.buttons["Play here"]
+        XCTAssertTrue(takeover.waitForExistence(timeout: 10))
+        app.buttons["Settings"].firstMatch.tap()
+        let version = app.staticTexts["settingsBuildVersion"]
+        for _ in 0..<10 {
+            if version.exists && version.frame.maxY < takeover.frame.minY { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(version.isHittable)
+        XCTAssertLessThan(version.frame.maxY, takeover.frame.minY)
+        XCTAssertTrue(app.buttons["Sign out"].isHittable)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Large-text Settings clears playback footer"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     @MainActor func testRemotePlaybackOffersTakeoverFromBrowsing() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
@@ -339,6 +474,18 @@ extension LaunchTests {
         }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Remote playback takeover available"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["Settings"].firstMatch.tap()
+        let version = app.staticTexts["settingsBuildVersion"]
+        for _ in 0..<8 {
+            if version.exists && version.frame.maxY < takeover.frame.minY { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(version.exists)
+        XCTAssertTrue(version.isHittable)
+        XCTAssertLessThan(version.frame.maxY, takeover.frame.minY, "The last Settings row must scroll above the entire playback footer")
+        XCTAssertTrue(app.buttons["Sign out"].isHittable)
+        let settingsShot = XCTAttachment(screenshot: app.screenshot())
+        settingsShot.name = "Settings clears takeover banner"; settingsShot.lifetime = .keepAlways; add(settingsShot)
         takeover.tap()
         let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: takeover)
         XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 10), .completed)
@@ -464,7 +611,7 @@ extension LaunchTests {
         app.segmentedControls.buttons["Albums"].tap()
         XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
         app.navigationBars.buttons.firstMatch.tap()
-        app.buttons["What’s Hot"].firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "What’s Hot,")).firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Unavailable fixture song"].waitForExistence(timeout: 10))
         app.buttons["Request"].tap()
         XCTAssertTrue(app.buttons["Requested"].waitForExistence(timeout: 10))

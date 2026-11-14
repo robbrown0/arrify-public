@@ -4,8 +4,21 @@ import Network
 @preconcurrency import AVFoundation
 @preconcurrency import MediaPlayer
 
+/// Injectable UIKit assertions keep lifecycle ordering testable without device suspension.
+@MainActor protocol PlaybackBackgroundTasks {
+    func begin(_ name: String, expiration: @escaping @MainActor @Sendable () -> Void) -> UIBackgroundTaskIdentifier
+    func end(_ identifier: UIBackgroundTaskIdentifier)
+}
+@MainActor struct SystemPlaybackBackgroundTasks: PlaybackBackgroundTasks {
+    func begin(_ name: String, expiration: @escaping @MainActor @Sendable () -> Void) -> UIBackgroundTaskIdentifier {
+        UIApplication.shared.beginBackgroundTask(withName: name, expirationHandler: expiration)
+    }
+    func end(_ identifier: UIBackgroundTaskIdentifier) { UIApplication.shared.endBackgroundTask(identifier) }
+}
+
 /// One app-lifetime owner of AVPlayer, system controls and server ownership.
 @MainActor @Observable final class PlaybackCoordinator {
+    private let backgroundTasks: any PlaybackBackgroundTasks
     let api: APIClient
     let remoteActivity: RemotePlaybackActivity
     private let localPeer = LocalPeerVerification()
@@ -128,6 +141,7 @@ import Network
     private var navigationTarget: String?
     private var navigationStarted = 0.0
     private var activationTask: Task<Void, Never>?
+    private var deactivationTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
     private var metadataRequestedId: Int?
     private var routeSettlingUntil = 0.0
@@ -142,7 +156,8 @@ import Network
     private var endedInFlight = false
     private var sessionGeneration = UUID()
 
-    init(api: APIClient, audioSession: any PlaybackAudioSession = SystemPlaybackAudioSession(), cache: AudioCache? = nil) {
+    init(api: APIClient, audioSession: any PlaybackAudioSession = SystemPlaybackAudioSession(), cache: AudioCache? = nil, backgroundTasks: any PlaybackBackgroundTasks = SystemPlaybackBackgroundTasks()) {
+        self.backgroundTasks = backgroundTasks
         self.api = api
         self.artworkStore = ArtworkStore(api: api)
         self.cache = cache ?? AudioCache()
@@ -189,8 +204,8 @@ import Network
             owner.endedTransitionID = UUID().uuidString.lowercased()
             owner.endedInFlight = true
             PlaybackDiagnostics.event("track-ended awaiting-server-confirmation")
-            owner.transitionTask = UIApplication.shared.beginBackgroundTask(withName: "Finish song transition") { [weak owner] in
-                Task { @MainActor in owner?.finishBackgroundTransition() }
+            owner.transitionTask = owner.backgroundTasks.begin("Finish song transition") { [weak owner] in
+                owner?.finishBackgroundTransition()
             }
             let playID = owner.state?.playId
             Task {
@@ -379,7 +394,7 @@ import Network
         })
     }
     private func finishBackgroundTransition() {
-        if transitionTask != .invalid { UIApplication.shared.endBackgroundTask(transitionTask); transitionTask = .invalid }
+        if transitionTask != .invalid { backgroundTasks.end(transitionTask); transitionTask = .invalid }
     }
     func start() {
         guard pollTask == nil else { return }
@@ -431,7 +446,13 @@ import Network
         activationTask?.cancel(); activationTask = nil; metadataTask?.cancel(); metadataTask = nil; metadataRequestedId = nil
         finishNavigation(); routeSettlingUntil = 0; progressVerifiedKey = nil
         let audioSession = audioSession
-        Task { try? await audioSession.deactivate() }
+        let generation = sessionGeneration
+        let previousDeactivation = deactivationTask
+        deactivationTask = Task { [weak self] in
+            await previousDeactivation?.value
+            try? await audioSession.deactivate()
+            if self?.sessionGeneration == generation { self?.deactivationTask = nil }
+        }
     }
     private func liveUpdate() async {
         liveConnected = true; liveUpdatePending = true
@@ -571,6 +592,10 @@ import Network
         }
         let generation = sessionGeneration
         if explicitPlayback && (!hasOtherOutput || action == "takeover") {
+            // A quick stop/restart must not let the previous session deactivate
+            // audio after the new session has already activated it.
+            await deactivationTask?.value
+            guard requestGeneration == sessionGeneration else { finishNavigation(); return }
             do { try await audioSession.activate(); guard requestGeneration == sessionGeneration else { finishNavigation(); return }; outputSelectionChanged(trigger: "session-activated") }
             catch {
                 guard requestGeneration == sessionGeneration else { return }
@@ -657,11 +682,25 @@ import Network
         state = PlaybackState.merging(update, into: state)
         guard let metadataState = state else { return }
         let incomingKey = metadataState.currentTrackId.map { "\($0):\(metadataState.ownerEpoch):\(metadataState.playId)" }
+        // Acquire protection while the old audio is still running, before pausing
+        // or removing its item. Starting it inside the asynchronous prepare task
+        // leaves a suspension window for lock-screen skips.
+        if ownsOutput, incomingKey != nil, incomingKey != desiredKey {
+            cancelPreparation()
+            preparationGeneration = UUID()
+            let token = preparationGeneration
+            preparationBackgroundTask = backgroundTasks.begin("Prepare current song") { [weak self] in
+                guard let self, self.preparationGeneration == token else { return }
+                PlaybackDiagnostics.event("preparation-expired")
+                self.failPreparation()
+            }
+            PlaybackDiagnostics.event("preparation-protection granted=\(preparationBackgroundTask != .invalid)")
+        }
         // Fence audio immediately, before any metadata/artwork await can yield.
         if !ownsOutput || !metadataState.playing || (loadedKey != nil && incomingKey != loadedKey) {
             cancelRecovery()
             player.pause()
-            if !ownsOutput || incomingKey != desiredKey { cancelPreparation() }
+            if !ownsOutput { cancelPreparation() }
         }
         if previous?.upcomingTrackIds != metadataState.upcomingTrackIds {
             // A remote queue edit must not wait for an obsolete read-ahead download.
@@ -735,13 +774,26 @@ import Network
             desiredKey = key; loadedKey = key; seekIntent = state.seekIntent
             position = 0; duration = 0; resetProgressClock()
             busy = false; message = nil; updateReceiverMetadata()
+            // A prebuffered item still needs asynchronous session activation.
+            // Keep protection through that handoff just as for a newly prepared item.
+            let token = preparationGeneration
+            prepareTask = Task { [weak self] in
+                guard let self else { return }
+                defer { if self.preparationGeneration == token { self.finishPreparationBackgroundTask() } }
+                do { try await self.waitForPreparedPlayback(key: key, token: token, started: ProcessInfo.processInfo.systemUptime) }
+                catch {
+                    guard !Task.isCancelled, self.preparationGeneration == token else { return }
+                    self.failPreparation()
+                }
+            }
             PlaybackDiagnostics.event("track-transition confirmed")
         }
         if desiredKey != key {
-            desiredKey = key; cancelPreparation(); aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil
+            desiredKey = key; aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil
             player.pause(); player.removeAllItems(); queuedTracks = [:]; loadedKey = nil; busy = true
             position = max(0, state.positionSeconds); duration = 0
-            prepareTask = Task { [weak self] in await self?.prepare(key: key, id: id, epoch: state.ownerEpoch) }
+            let preparationToken = preparationGeneration
+            prepareTask = Task { [weak self] in await self?.prepare(key: key, id: id, epoch: state.ownerEpoch, token: preparationToken) }
         }
         if loadedKey == key, seekIntent != state.seekIntent {
             cancelRecovery(); resumeCheckpoint = nil; resetProgressClock()
@@ -756,19 +808,20 @@ import Network
     }
     private func finishRecoveryBackgroundTask() {
         if recoveryBackgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(recoveryBackgroundTask); recoveryBackgroundTask = .invalid
+            backgroundTasks.end(recoveryBackgroundTask); recoveryBackgroundTask = .invalid
         }
     }
     private func finishPreparationBackgroundTask() {
         if preparationBackgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(preparationBackgroundTask); preparationBackgroundTask = .invalid
+            backgroundTasks.end(preparationBackgroundTask); preparationBackgroundTask = .invalid
         }
     }
     private func cancelPreparation() {
+        preparationGeneration = UUID()
         prepareTask?.cancel(); finishPreparationBackgroundTask()
     }
     private func failPreparation() {
-        cancelPreparation(); player.currentItem?.cancelPendingSeeks()
+        cancelPreparation(); player.pause(); player.currentItem?.cancelPendingSeeks()
         busy = false; preparationSeeking = false; playbackFailed = true
         finishNavigation()
         message = "This song could not be prepared. Tap Retry or choose another song."
@@ -801,12 +854,13 @@ import Network
         guard !recoveryUsed else { failRecovery(); return }
         recoveryUsed = true; recoveryStableSince = nil; recovering = true; playbackFailed = false; progressVerifiedKey = nil
         let token = UUID(); recoveryGeneration = token
-        recoveryBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Recover current song") { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self, self.recoveryGeneration == token else { return }
-                self.failRecovery()
-            }
+        recoveryBackgroundTask = backgroundTasks.begin("Recover current song") { [weak self] in
+            guard let self, self.recoveryGeneration == token else { return }
+            self.failRecovery()
         }
+        // Recovery now owns protection; retire the preparation deadline before it
+        // can fail a replacement item that recovery is already repairing.
+        cancelPreparation()
         let key = loadedKey
         let sample = player.currentTime().seconds
         let resumePosition = resumeCheckpoint ?? (current.status != .failed && sample.isFinite ? max(0, sample) : position)
@@ -911,39 +965,37 @@ import Network
         }
         guard completion.finished == true else { throw PlaybackFailure() }
     }
-    private func prepare(key: String, id: Int, epoch: Int) async {
-        guard !Task.isCancelled, desiredKey == key, ownsOutput else { return }
+    private func prepare(key: String, id: Int, epoch: Int, token preparationToken: UUID) async {
+        guard !Task.isCancelled, desiredKey == key, ownsOutput, preparationGeneration == preparationToken else { return }
         let requestedProfile = profile
         let explicitRetry = retryPreparation; retryPreparation = false
-        let preparationToken = UUID(); preparationGeneration = preparationToken
-        finishPreparationBackgroundTask()
-        preparationBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Prepare current song") { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self, self.preparationGeneration == preparationToken, self.busy else { return }
-                self.failPreparation()
-            }
-        }
+        let started = ProcessInfo.processInfo.systemUptime
+        PlaybackDiagnostics.event("preparation-start")
         let deadline = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(30)) } catch { return }
-            guard let self, self.desiredKey == key, self.preparationGeneration == preparationToken, self.busy else { return }
+            guard let self, self.desiredKey == key, self.preparationGeneration == preparationToken else { return }
             self.failPreparation()
         }
         defer {
             deadline.cancel()
+            PlaybackDiagnostics.event("preparation-finish ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
             if preparationGeneration == preparationToken { finishPreparationBackgroundTask() }
         }
         do {
             for attempt in 0..<8 {
                 try Task.checkCancellation()
+                PlaybackDiagnostics.event("preparation-manifest-start attempt=\(attempt + 1)")
                 let manifest = try await api.manifest(deviceId: deviceId, epoch: epoch, profile: requestedProfile, retry: attempt == 0 && explicitRetry)
                 guard !Task.isCancelled, desiredKey == key, ownsOutput,
                       manifest.ownerEpoch == epoch else { return }
+                PlaybackDiagnostics.event("preparation-manifest-ready")
                 remember(manifest)
                 guard let item = manifest.items.first(where: { $0.trackId == id }) else { throw APIError.invalidResponse }
                 if item.state == "ready" {
                     let url: URL
                     if let local = cache.file(for: item) { url = local } else { url = try await api.mediaURL(item) }
                     guard !Task.isCancelled, desiredKey == key else { return }
+                    PlaybackDiagnostics.event("preparation-item-install cached=\(url.isFileURL)")
                     let current = AVPlayerItem(url: url)
                     player.removeAllItems(); queuedTracks = [ObjectIdentifier(current): id]; queuedEpoch = epoch
                     player.insert(current, after: nil)
@@ -954,7 +1006,11 @@ import Network
                     try await readyAndSeek(current, position: state?.positionSeconds ?? 0)
                     guard !Task.isCancelled, desiredKey == key else { return }
                     preparationSeeking = false; busy = false; playbackFailed = false; resumeCheckpoint = nil; resetProgressClock()
-                    playIfAllowed(); publishNowPlaying(); startReadAhead(); return
+                    playIfAllowed(); publishNowPlaying(); startReadAhead()
+                    // Activation is asynchronous. Keep the assertion until media time advances,
+                    // rather than leaving a suspension gap between preparation and playback.
+                    try await waitForPreparedPlayback(key: key, token: preparationToken, started: started)
+                    return
                 }
                 if ["failed", "unavailable"].contains(item.state) { throw PlaybackFailure() }
                 try await Task.sleep(for: .seconds(min(5, max(1, manifest.retryAfterSeconds))))
@@ -962,6 +1018,20 @@ import Network
             throw PlaybackFailure()
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
             if desiredKey == key { preparationSeeking = false; busy = false; playbackFailed = true; finishNavigation(); message = "This song could not be prepared. Tap Retry or choose another song." }
+        }
+    }
+    private func waitForPreparedPlayback(key: String, token: UUID, started: TimeInterval) async throws {
+        var initialPosition = player.currentTime().seconds
+        while permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true) {
+            try Task.checkCancellation()
+            guard desiredKey == key, preparationGeneration == token, !playbackFailed else { return }
+            let sample = player.currentTime().seconds
+            if sample.isFinite {
+                if !initialPosition.isFinite || sample < initialPosition - 0.5 { initialPosition = sample }
+                if player.timeControlStatus == .playing, sample > initialPosition + 0.1 { return }
+            }
+            guard ProcessInfo.processInfo.systemUptime - started < 30 else { throw PlaybackFailure() }
+            try await Task.sleep(for: .milliseconds(50))
         }
     }
     private func synchronizeQueuedItems() {
@@ -1036,11 +1106,13 @@ import Network
         let generation = sessionGeneration
         activationTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.activationTask = nil }
+            defer { if self.sessionGeneration == generation { self.activationTask = nil } }
             do {
+                await self.deactivationTask?.value
+                guard !Task.isCancelled, self.sessionGeneration == generation else { return }
                 try await self.audioSession.activate()
                 guard !Task.isCancelled, self.sessionGeneration == generation,
-                      self.loadedKey == self.desiredKey, !self.busy, !self.recovering,
+                      self.loadedKey == self.desiredKey, !self.busy, !self.recovering, !self.playbackFailed,
                       self.permission.allowsPlayback(ownsOutput: self.ownsOutput, serverPlaying: self.state?.playing == true, mediaReady: self.loadedKey != nil) else { return }
                 self.refreshOutput(trigger: "playback-activated"); self.player.play()
             } catch {
