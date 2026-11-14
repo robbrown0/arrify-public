@@ -15,25 +15,25 @@ final class LaunchTests: XCTestCase {
         // Require the entire row to be visible before tapping it.
         for _ in 0..<8 {
             if entry.exists && entry.isHittable && app.frame.insetBy(dx: 0, dy: 90).contains(entry.frame) { break }
-            app.swipeUp()
+            app.collectionViews.firstMatch.swipeUp()
         }
         XCTAssertTrue(entry.exists && entry.isHittable)
         XCTAssertTrue(app.frame.insetBy(dx: 0, dy: 90).contains(entry.frame))
         entry.tap()
         XCTAssertTrue(app.navigationBars["Delete account"].waitForExistence(timeout: 10))
         let password = app.secureTextFields["deletionPassword"]
-        for _ in 0..<5 { if password.exists && password.isHittable { break }; app.swipeUp() }
+        for _ in 0..<5 { if password.exists && password.isHittable { break }; app.collectionViews.firstMatch.swipeUp() }
         XCTAssertTrue(password.exists); password.tap(); password.typeText("wrong")
         let submit = app.buttons["requestAccountDeletion"]
-        for _ in 0..<4 { if submit.isHittable { break }; app.swipeUp() }
+        for _ in 0..<4 { if submit.isHittable { break }; app.collectionViews.firstMatch.swipeUp() }
         submit.tap()
         app.buttons["Cancel"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Delete account"].exists)
         submit.tap(); app.buttons["Permanently delete account"].tap()
         XCTAssertTrue(app.staticTexts["deletionError"].waitForExistence(timeout: 10))
-        for _ in 0..<4 { if password.isHittable { break }; app.swipeDown() }
+        for _ in 0..<4 { if password.isHittable { break }; app.collectionViews.firstMatch.swipeDown() }
         password.tap(); password.typeText("fixture")
-        for _ in 0..<4 { if submit.isHittable { break }; app.swipeUp() }
+        for _ in 0..<4 { if submit.isHittable { break }; app.collectionViews.firstMatch.swipeUp() }
         submit.tap(); app.buttons["Permanently delete account"].tap()
         XCTAssertTrue(app.alerts["Account deleted"].waitForExistence(timeout: 10))
         app.alerts["Account deleted"].buttons["OK"].tap()
@@ -372,7 +372,7 @@ extension LaunchTests {
         checkBottom(playlist, "Library final playlist")
         playlist.tap()
         let lastSong = app.buttons["Play Try by P!nk"]
-        XCTAssertTrue(lastSong.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["playCollection"].waitForExistence(timeout: 10))
         checkBottom(lastSong, "Playlist detail final song")
         app.buttons["Home"].firstMatch.tap()
         if !app.textFields["tabletSearch"].exists {
@@ -381,7 +381,7 @@ extension LaunchTests {
         app.buttons["Albums"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["M!ssundaztood"].firstMatch.waitForExistence(timeout: 10))
         app.staticTexts["M!ssundaztood"].firstMatch.tap()
-        XCTAssertTrue(lastSong.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["playCollection"].waitForExistence(timeout: 10))
         checkBottom(lastSong, "Album detail final song")
         app.buttons["Channels"].firstMatch.tap()
         checkBottom(app.buttons["Play Station 12"], "Channels final station")
@@ -403,6 +403,7 @@ extension LaunchTests {
         else { app.searchFields.firstMatch.typeText("\n") }
         XCTAssertTrue(lastSong.waitForExistence(timeout: 10))
         checkBottom(lastSong, "Search final result")
+        if !tabletSearch.exists { app.buttons["Close"].tap() }
         app.buttons["Settings"].firstMatch.tap()
         checkBottom(app.staticTexts["settingsBuildVersion"], "Settings final row")
     }
@@ -587,7 +588,7 @@ extension LaunchTests {
         app.segmentedControls.buttons["Albums"].tap()
         XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
         app.navigationBars.buttons.firstMatch.tap()
-        app.buttons["What’s Hot"].firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "What’s Hot,")).firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Unavailable fixture song"].waitForExistence(timeout: 10))
         app.buttons["Request"].tap()
         XCTAssertTrue(app.buttons["Requested"].waitForExistence(timeout: 10))
