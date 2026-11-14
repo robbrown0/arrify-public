@@ -171,7 +171,7 @@ struct MainView: View {
             Tab("Home", systemImage: "house", value: "Home") { withPlayer(HomeScreen(model: model)) }
             Tab("Library", systemImage: "square.stack", value: "Library") { withPlayer(LibraryHome(model: model).id(libraryRoot)) }
             Tab("Channels", systemImage: "antenna.radiowaves.left.and.right", value: "Channels") { withPlayer(NavigationStack { CollectionScreen(model: model, section: "channels", title: "Channels") }) }
-            Tab("Search", systemImage: "magnifyingglass", value: "Search", role: .search) { withPlayer(SearchScreen(model: model)) }
+            Tab("Search", systemImage: "magnifyingglass", value: "Search", role: .search) { SearchScreen(model: model) { playbackFooter } }
             Tab("Settings", systemImage: "gearshape", value: "Settings") { withPlayer(SettingsView(model: model)) }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -181,6 +181,10 @@ struct MainView: View {
         // A fixed scroll margin cannot cover banners, wrapping text, and errors.
         VStack(spacing: 0) {
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
+            playbackFooter
+        }
+    }
+    private var playbackFooter: some View {
             VStack(spacing: 8) {
                 // Keep status beside playback controls and out of search fields.
                 if model.playback.hasOtherOutput {
@@ -199,7 +203,6 @@ struct MainView: View {
                     miniPlayer.background(.regularMaterial, in: Capsule())
                 }
             }.padding(.horizontal, 16).padding(.bottom, 8)
-        }
     }
     private var miniPlayer: some View {
         MiniPlayerView(playback: model.playback) { showPlayer = true }
