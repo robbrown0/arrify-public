@@ -320,8 +320,15 @@ struct AirPlayPicker: UIViewRepresentable {
 // Keep the native control's identity stable during route-name and playback updates.
 // MediaPlayer owns receiver-volume synchronization; never seed it from the phone's
 // outputVolume or write a remembered value when this view appears.
-// MediaPlayer owns drawing and touch geometry. Only the iPad mini-player opts
-// into centering the whole view using its public native sizing information.
+// Observe native layout without altering the system slider's frame or value.
+final class LayoutReportingVolumeView: MPVolumeView {
+    var didLayout: (() -> Void)?
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        didLayout?()
+    }
+}
+
 final class VolumeControlContainer: UIView {
     let volumeView: MPVolumeView
     private let centersNativeHeight: Bool
@@ -332,21 +339,40 @@ final class VolumeControlContainer: UIView {
         volumeView.frame = bounds
         volumeView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(volumeView)
+        if centersNativeHeight, let reportingView = volumeView as? LayoutReportingVolumeView {
+            reportingView.didLayout = { [weak self] in self?.alignVisibleTrack() }
+        }
     }
     override func layoutSubviews() {
         super.layoutSubviews()
         guard centersNativeHeight else { return }
-        // Center the whole native view at its preferred height, not its internal slider.
-        let preferred = volumeView.sizeThatFits(bounds.size).height
-        let height = preferred.isFinite && preferred > 0 ? min(preferred, bounds.height) : bounds.height
-        volumeView.frame = CGRect(x: 0, y: (bounds.height - height) / 2, width: bounds.width, height: height)
+        volumeView.transform = .identity
+        volumeView.frame = bounds
         volumeView.layoutIfNeeded()
-        let slider = volumeView.volumeSliderRect(forBounds: volumeView.bounds)
-        if !slider.isEmpty {
-            // The native track can be asymmetric within its preferred frame.
-            // Translate the complete control so drawing and touch coordinates stay together.
-            volumeView.frame.origin.y = bounds.midY - slider.midY
+        alignVisibleTrack()
+    }
+    // MPVolumeView's drawing-rectangle API does not necessarily describe the
+    // laid-out UISlider on current iPadOS. Read public UISlider geometry only;
+    // translate the entire MPVolumeView so drawing and hit testing move together.
+    private func alignVisibleTrack() {
+        guard centersNativeHeight else { return }
+        func visibleSlider(in view: UIView) -> UISlider? {
+            for child in view.subviews where !child.isHidden && child.alpha > 0 {
+                if let slider = child as? UISlider { return slider }
+                if let slider = visibleSlider(in: child) { return slider }
+            }
+            return nil
         }
+        guard let slider = visibleSlider(in: volumeView) else {
+            volumeView.transform = .identity
+            return
+        }
+        let track = slider.trackRect(forBounds: slider.bounds)
+        guard !track.isEmpty else { return }
+        let center = slider.convert(CGPoint(x: track.midX, y: track.midY), to: volumeView)
+        guard center.y.isFinite else { return }
+        // Measure in untransformed native coordinates: repeated layouts cannot drift.
+        volumeView.transform = CGAffineTransform(translationX: 0, y: bounds.midY - center.y)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
@@ -355,7 +381,10 @@ struct SystemVolumeSlider: UIViewRepresentable {
     var centersNativeHeight = false
     var onCreate: (MPVolumeView) -> Void = { _ in }
     func makeUIView(context: Context) -> VolumeControlContainer {
-        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44)); view.showsRouteButton = false; view.tintColor = .white
+        let view: MPVolumeView = centersNativeHeight
+            ? LayoutReportingVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+            : MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        view.showsRouteButton = false; view.tintColor = .white
         onCreate(view)
         return VolumeControlContainer(volumeView: view, centersNativeHeight: centersNativeHeight)
     }
