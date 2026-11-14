@@ -389,24 +389,35 @@ extension NowPlayingArtworkTests {
         }
     }
     @MainActor func testTabletVolumeUsesNativeHeightCenteredInControlRow() {
-        let volume = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
-        volume.showsRouteButton = false
+        // A real UISlider supplies asymmetric geometry even when the simulator
+        // omits MPVolumeView's system slider. This is a layout regression test,
+        // not a claim of physical-device visual verification.
+        let volume = LayoutReportingVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
         let container = VolumeControlContainer(volumeView: volume, centersNativeHeight: true)
+        container.frame = CGRect(x: 0, y: 0, width: 130, height: 44)
+        container.layoutIfNeeded()
+        for child in volume.subviews { child.isHidden = true }
+        let slider = UISlider(frame: CGRect(x: 0, y: -8, width: 130, height: 30))
+        volume.addSubview(slider)
         for width in [130.0, 240.0, 130.0] {
-            container.frame = CGRect(x: 0, y: 0, width: width, height: 44)
+            container.frame.size.width = width
             container.setNeedsLayout()
             container.layoutIfNeeded()
-            volume.layoutIfNeeded()
-            XCTAssertEqual(volume.frame.height, volume.sizeThatFits(container.bounds.size).height, accuracy: 0.5)
-            // The simulator has no system-volume slider. Verify its fallback frame,
-            // and verify the public slider geometry whenever the native control supplies it.
-            let nativeTrack = volume.volumeSliderRect(forBounds: volume.bounds)
-            let visibleFrame = nativeTrack.isEmpty ? volume.frame : volume.convert(nativeTrack, to: container)
-            XCTAssertEqual(visibleFrame.midY, container.bounds.midY, accuracy: 0.5)
-            let settledFrame = volume.frame
-            container.setNeedsLayout()
-            container.layoutIfNeeded()
-            XCTAssertEqual(volume.frame, settledFrame, "Repeated layout must not accumulate an offset")
+            for y in [-8.0, 0.0, 6.0] {
+                slider.frame = CGRect(x: 0, y: y, width: width, height: 30)
+                let originalFrame = slider.frame
+                // Native layout may change after the parent has already laid out.
+                volume.didLayout?()
+                let track = slider.trackRect(forBounds: slider.bounds)
+                XCTAssertEqual(slider.convert(track, to: container).midY, container.bounds.midY, accuracy: 0.5)
+                XCTAssertEqual(slider.frame, originalFrame, "Never reposition the native slider itself")
+                let settledTransform = volume.transform
+                volume.didLayout?()
+                XCTAssertEqual(volume.transform, settledTransform, "Repeated layout must not accumulate an offset")
+                let point = CGPoint(x: track.midX, y: track.midY)
+                let displayedPoint = slider.convert(point, to: container)
+                XCTAssertEqual(container.convert(displayedPoint, to: slider).y, point.y, accuracy: 0.01)
+            }
         }
     }
     func testLegacyActivityStateStillDecodesWithoutArtwork() throws {
