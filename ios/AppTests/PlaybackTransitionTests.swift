@@ -1,10 +1,11 @@
 import XCTest
+import UIKit
 import ArrifyCore
 @preconcurrency import AVFoundation
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
-    @MainActor func fixture(onHistoryRecorded: (@MainActor () -> Void)? = nil, audioSession: any PlaybackAudioSession = UITestAudioSession()) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
+    @MainActor func fixture(onHistoryRecorded: (@MainActor () -> Void)? = nil, audioSession: any PlaybackAudioSession = UITestAudioSession(), backgroundTasks: any PlaybackBackgroundTasks = SystemPlaybackBackgroundTasks()) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
         let transport = CallResumeTransitionTransport()
         let api = APIClient(transport: transport, store: UITestStore())
         try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
@@ -29,7 +30,7 @@ final class PlaybackTransitionTests: XCTestCase {
             try bytes.write(to: target)
             return (target, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
-        let coordinator = PlaybackCoordinator(api: api, audioSession: audioSession, cache: cache)
+        let coordinator = PlaybackCoordinator(api: api, audioSession: audioSession, cache: cache, backgroundTasks: backgroundTasks)
         coordinator.onHistoryRecorded = onHistoryRecorded
         await transport.setOwner(coordinator.deviceId)
         let manifest = try await api.manifest(deviceId: coordinator.deviceId, epoch: 1, profile: "original")
@@ -47,6 +48,52 @@ final class PlaybackTransitionTests: XCTestCase {
             throw NSError(domain: "PlaybackFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: detail])
         }
         return (coordinator, transport)
+    }
+
+    @MainActor func testBackgroundProtectionPrecedesRemovalAndExpiresSynchronously() async throws {
+        let assertions = RecordingBackgroundTasks()
+        let (player, transport) = try await fixture(backgroundTasks: assertions)
+        defer { player.stop() }
+        var protectedOldItem = false
+        assertions.onPreparation = { protectedOldItem = player.player.currentItem != nil }
+        let next = Task { await player.send("next") }
+        for _ in 0..<500 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        await transport.delayMedia()
+        await transport.releaseNext()
+        await next.value
+        for _ in 0..<500 { if await transport.mediaWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(protectedOldItem)
+        let identifier = try XCTUnwrap(assertions.preparation)
+        XCTAssertFalse(assertions.ended.contains(identifier))
+        assertions.expirations[identifier]?()
+        XCTAssertTrue(assertions.ended.contains(identifier), "Expiration must end the assertion before returning")
+        XCTAssertTrue(player.playbackFailed)
+        XCTAssertFalse(player.navigationPending)
+        await transport.releaseMedia()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(player.playbackFailed)
+        XCTAssertEqual(assertions.ended.filter { $0 == identifier }.count, 1)
+    }
+
+    @MainActor func testPreparationProtectionCoversDelayedActivation() async throws {
+        let assertions = RecordingBackgroundTasks()
+        let session = DelayedActivationSession()
+        let (player, transport) = try await fixture(audioSession: session, backgroundTasks: assertions)
+        defer { player.stop() }
+        session.hold = true
+        let next = Task { await player.send("next") }
+        for _ in 0..<500 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        await transport.releaseNext()
+        await next.value
+        for _ in 0..<500 where !session.waiting { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(session.waiting)
+        let identifier = try XCTUnwrap(assertions.preparation)
+        XCTAssertFalse(assertions.ended.contains(identifier))
+        session.release()
+        for _ in 0..<500 where !assertions.ended.contains(identifier) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(assertions.ended.contains(identifier))
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(assertions.ended.filter { $0 == identifier }.count, 1)
     }
 
     @MainActor func testFailedManualNextReleasesNavigationGate() async throws {
@@ -595,4 +642,18 @@ private final class ActivationCalls: @unchecked Sendable {
     }
     func release() { continuation?.resume(); continuation = nil; hold = false }
     func deactivate() async throws {}
+}
+
+@MainActor private final class RecordingBackgroundTasks: PlaybackBackgroundTasks {
+    var preparation: UIBackgroundTaskIdentifier?
+    var expirations: [UIBackgroundTaskIdentifier: @MainActor @Sendable () -> Void] = [:]
+    var ended: [UIBackgroundTaskIdentifier] = []
+    var onPreparation: (() -> Void)?
+    func begin(_ name: String, expiration: @escaping @MainActor @Sendable () -> Void) -> UIBackgroundTaskIdentifier {
+        let identifier = UIBackgroundTaskIdentifier(rawValue: expirations.count + 1)
+        expirations[identifier] = expiration
+        if name == "Prepare current song" { preparation = identifier; onPreparation?() }
+        return identifier
+    }
+    func end(_ identifier: UIBackgroundTaskIdentifier) { ended.append(identifier) }
 }
