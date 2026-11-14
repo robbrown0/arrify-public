@@ -141,6 +141,7 @@ import Network
     private var navigationTarget: String?
     private var navigationStarted = 0.0
     private var activationTask: Task<Void, Never>?
+    private var deactivationTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
     private var metadataRequestedId: Int?
     private var routeSettlingUntil = 0.0
@@ -445,7 +446,11 @@ import Network
         activationTask?.cancel(); activationTask = nil; metadataTask?.cancel(); metadataTask = nil; metadataRequestedId = nil
         finishNavigation(); routeSettlingUntil = 0; progressVerifiedKey = nil
         let audioSession = audioSession
-        Task { try? await audioSession.deactivate() }
+        let generation = sessionGeneration
+        deactivationTask = Task { [weak self] in
+            try? await audioSession.deactivate()
+            if self?.sessionGeneration == generation { self?.deactivationTask = nil }
+        }
     }
     private func liveUpdate() async {
         liveConnected = true; liveUpdatePending = true
@@ -585,6 +590,10 @@ import Network
         }
         let generation = sessionGeneration
         if explicitPlayback && (!hasOtherOutput || action == "takeover") {
+            // A quick stop/restart must not let the previous session deactivate
+            // audio after the new session has already activated it.
+            await deactivationTask?.value
+            guard requestGeneration == sessionGeneration else { finishNavigation(); return }
             do { try await audioSession.activate(); guard requestGeneration == sessionGeneration else { finishNavigation(); return }; outputSelectionChanged(trigger: "session-activated") }
             catch {
                 guard requestGeneration == sessionGeneration else { return }
@@ -1091,8 +1100,10 @@ import Network
         let generation = sessionGeneration
         activationTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.activationTask = nil }
+            defer { if self.sessionGeneration == generation { self.activationTask = nil } }
             do {
+                await self.deactivationTask?.value
+                guard !Task.isCancelled, self.sessionGeneration == generation else { return }
                 try await self.audioSession.activate()
                 guard !Task.isCancelled, self.sessionGeneration == generation,
                       self.loadedKey == self.desiredKey, !self.busy, !self.recovering, !self.playbackFailed,

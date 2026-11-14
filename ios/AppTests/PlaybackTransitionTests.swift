@@ -144,6 +144,27 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(assertions.ended.filter { $0 == current }.count, 1)
     }
 
+    @MainActor func testRestartWaitsForPreviousAudioDeactivation() async throws {
+        let session = DelayedDeactivationSession()
+        let (player, _) = try await fixture(audioSession: session)
+        defer { session.release(); player.stop() }
+        session.hold = true
+        player.stop()
+        for _ in 0..<100 where !session.waiting { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(session.waiting)
+        let activations = session.activations
+        let manifest = try await player.api.manifest(deviceId: player.deviceId, epoch: 1, profile: "original")
+        await player.cache.fill(manifest, api: player.api)
+        let resume = Task { await player.send("resume") }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(session.activations, activations, "New activation must wait for outstanding deactivation")
+        session.release()
+        await resume.value
+        for _ in 0..<500 where !player.isPlaying { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertGreaterThan(session.activations, activations)
+    }
+
     @MainActor func testFailedManualNextReleasesNavigationGate() async throws {
         let (player, transport) = try await fixture()
         defer { player.stop() }
@@ -704,4 +725,16 @@ private final class ActivationCalls: @unchecked Sendable {
         return identifier
     }
     func end(_ identifier: UIBackgroundTaskIdentifier) { ended.append(identifier) }
+}
+
+@MainActor private final class DelayedDeactivationSession: PlaybackAudioSession {
+    var hold = false
+    var waiting = false
+    var activations = 0
+    private var continuation: CheckedContinuation<Void, Never>?
+    func activate() async throws { activations += 1 }
+    func deactivate() async throws {
+        if hold { waiting = true; await withCheckedContinuation { continuation = $0 } }
+    }
+    func release() { hold = false; continuation?.resume(); continuation = nil }
 }
