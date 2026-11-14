@@ -155,6 +155,7 @@ struct MainView: View {
     @Bindable var model: AppModel
     @State private var showPlayer = false
     @State private var selectedTab = "Home"
+    @State private var keyboardVisible = false
     @State private var libraryRoot = UUID()
     var body: some View {
         ZStack {
@@ -162,6 +163,8 @@ struct MainView: View {
                 TabletShell(model: model) { showPlayer = true }
             } else { tabs }
         }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
         .task { await model.refreshBranding(); await model.favorites.refresh() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(model: model) }
     }
     private var tabs: some View {
@@ -171,7 +174,7 @@ struct MainView: View {
             Tab("Home", systemImage: "house", value: "Home") { withPlayer(HomeScreen(model: model)) }
             Tab("Library", systemImage: "square.stack", value: "Library") { withPlayer(LibraryHome(model: model).id(libraryRoot)) }
             Tab("Channels", systemImage: "antenna.radiowaves.left.and.right", value: "Channels") { withPlayer(NavigationStack { CollectionScreen(model: model, section: "channels", title: "Channels") }) }
-            Tab("Search", systemImage: "magnifyingglass", value: "Search", role: .search) { SearchScreen(model: model) { playbackFooter } }
+            Tab("Search", systemImage: "magnifyingglass", value: "Search", role: .search) { withPlayer(SearchScreen(model: model)) }
             Tab("Settings", systemImage: "gearshape", value: "Settings") { withPlayer(SettingsView(model: model)) }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -181,28 +184,30 @@ struct MainView: View {
         // A fixed scroll margin cannot cover banners, wrapping text, and errors.
         VStack(spacing: 0) {
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
-            playbackFooter
+            // iOS places the search field directly above its keyboard. Keep
+            // playback controls out of that input area and restore them afterward.
+            if selectedTab != "Search" || !keyboardVisible { playbackFooter }
         }
     }
     private var playbackFooter: some View {
-            VStack(spacing: 8) {
-                // Keep status beside playback controls and out of search fields.
-                if model.playback.hasOtherOutput {
-                    PlaybackTakeoverBanner(playback: model.playback)
-                }
-                if model.playback.connectionInterrupted {
-                    Label("Reconnecting… Playback continues where possible.", systemImage: "wifi.exclamationmark")
-                        .font(.footnote).padding().frame(maxWidth: .infinity).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                }
-                if let message = model.playback.message {
-                    Text(message).font(.footnote).padding().frame(maxWidth: .infinity)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                        .accessibilityIdentifier("playbackStatusMessage")
-                }
-                if UIDevice.current.userInterfaceIdiom != .pad, model.playback.track != nil {
-                    miniPlayer.background(.regularMaterial, in: Capsule())
-                }
-            }.padding(.horizontal, 16).padding(.bottom, 8)
+        VStack(spacing: 8) {
+            // Keep status beside playback controls and out of search fields.
+            if model.playback.hasOtherOutput {
+                PlaybackTakeoverBanner(playback: model.playback)
+            }
+            if model.playback.connectionInterrupted {
+                Label("Reconnecting… Playback continues where possible.", systemImage: "wifi.exclamationmark")
+                    .font(.footnote).padding().frame(maxWidth: .infinity).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+            if let message = model.playback.message {
+                Text(message).font(.footnote).padding().frame(maxWidth: .infinity)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityIdentifier("playbackStatusMessage")
+            }
+            if UIDevice.current.userInterfaceIdiom != .pad, model.playback.track != nil {
+                miniPlayer.background(.regularMaterial, in: Capsule())
+            }
+        }.padding(.horizontal, 16).padding(.bottom, 8)
     }
     private var miniPlayer: some View {
         MiniPlayerView(playback: model.playback) { showPlayer = true }

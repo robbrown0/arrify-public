@@ -387,24 +387,17 @@ struct DetailScreen: View {
     }
 }
 
-struct SearchScreen<Footer: View>: View {
+struct SearchScreen: View {
     let model: AppModel
-    @ViewBuilder let footer: () -> Footer
     @State private var kind = "tracks"
     var body: some View {
         NavigationStack {
-            // Keep the footer inside navigation's keyboard/search safe area.
-            // The search-role tab can place its field above the keyboard.
-            VStack(spacing: 0) {
-                BrowserScreen(model: model, title: kind == "tracks" ? "Songs" : kind.capitalized, kind: kind).id(kind)
-                    .safeAreaInset(edge: .top) {
-                        Picker("Search category", selection: $kind) {
-                            Text("Songs").tag("tracks"); Text("Albums").tag("albums"); Text("Artists").tag("artists")
-                        }.pickerStyle(.segmented).padding().background(.bar)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                footer()
-            }
+            BrowserScreen(model: model, title: kind == "tracks" ? "Songs" : kind.capitalized, kind: kind).id(kind)
+                .safeAreaInset(edge: .top) {
+                    Picker("Search category", selection: $kind) {
+                        Text("Songs").tag("tracks"); Text("Albums").tag("albums"); Text("Artists").tag("artists")
+                    }.pickerStyle(.segmented).padding().background(.bar)
+                }
         }
     }
 }

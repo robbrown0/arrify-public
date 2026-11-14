@@ -395,16 +395,18 @@ extension LaunchTests {
             search.tap(); search.typeText("pink")
         }
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(takeover.isHittable)
-        XCTAssertLessThan(takeover.frame.maxY, app.keyboards.firstMatch.frame.minY)
-        if !tabletSearch.exists {
-            XCTAssertLessThan(app.buttons["expandPlayer"].frame.maxY, app.searchFields.firstMatch.frame.minY,
-                              "Search field must not overlap the mini-player")
+        if tabletSearch.exists {
+            XCTAssertTrue(takeover.isHittable)
+            XCTAssertLessThan(takeover.frame.maxY, app.keyboards.firstMatch.frame.minY)
+        } else {
+            XCTAssertTrue(app.buttons["expandPlayer"].waitForNonExistence(timeout: 5))
+            XCTAssertFalse(takeover.exists, "Phone Search keeps the native keyboard input area clear")
         }
         let keyboardShot = XCTAttachment(screenshot: app.screenshot())
         keyboardShot.name = "Takeover footer — Search keyboard"; keyboardShot.lifetime = .keepAlways; add(keyboardShot)
         if tabletSearch.exists { tabletSearch.typeText("\n") }
         else { app.searchFields.firstMatch.typeText("\n") }
+        XCTAssertTrue(takeover.waitForExistence(timeout: 5))
         XCTAssertTrue(lastSong.waitForExistence(timeout: 10))
         checkBottom(lastSong, "Search final result")
         if !tabletSearch.exists { app.buttons["Close"].tap() }
