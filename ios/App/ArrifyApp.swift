@@ -156,7 +156,6 @@ struct MainView: View {
     @State private var showPlayer = false
     @State private var selectedTab = "Home"
     @State private var libraryRoot = UUID()
-    @ScaledMetric(relativeTo: .subheadline) private var playerScrollClearance = 72
     var body: some View {
         ZStack {
             if UIDevice.current.userInterfaceIdiom == .pad {
@@ -178,12 +177,12 @@ struct MainView: View {
         .tabViewStyle(.sidebarAdaptable)
     }
     private func withPlayer<Content: View>(_ content: Content) -> some View {
-        content
-        .contentMargins(.bottom, UIDevice.current.userInterfaceIdiom != .pad && model.playback.track != nil ? playerScrollClearance : 0, for: .scrollContent)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        // Reserve the footer's actual height outside navigation/scroll content.
+        // A fixed scroll margin cannot cover banners, wrapping text, and errors.
+        VStack(spacing: 0) {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
             VStack(spacing: 8) {
-                // Keep status beside playback controls. A top inset outside the
-                // navigation stack can cover its search field and consume taps.
+                // Keep status beside playback controls and out of search fields.
                 if model.playback.hasOtherOutput {
                     PlaybackTakeoverBanner(playback: model.playback)
                 }
@@ -197,7 +196,6 @@ struct MainView: View {
                         .accessibilityIdentifier("playbackStatusMessage")
                 }
                 if UIDevice.current.userInterfaceIdiom != .pad, model.playback.track != nil {
-                    // A stable content inset keeps the player usable while searching.
                     miniPlayer.background(.regularMaterial, in: Capsule())
                 }
             }.padding(.horizontal, 16).padding(.bottom, 8)
@@ -247,7 +245,7 @@ struct SettingsView: View {
                     NavigationLink { DeleteAccountView(model: model, signedIn: true) } label: { Text("Delete account").foregroundStyle(.red) }.accessibilityIdentifier("deleteAccountSettings")
                     Button("Sign out", role: .destructive) { Task { await model.logout() } }
                 }
-                Section { Text("Arrify • \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown") (build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"))").foregroundStyle(.secondary) }
+                Section { Text("Arrify • \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown") (build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"))").foregroundStyle(.secondary).accessibilityIdentifier("settingsBuildVersion") }
             }.navigationTitle("Settings").task { await model.refreshBranding() }
         }
     }

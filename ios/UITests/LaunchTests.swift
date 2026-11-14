@@ -328,6 +328,31 @@ extension LaunchTests {
 
 
 extension LaunchTests {
+    @MainActor func testSettingsClearsPlaybackFooterWithLargeText() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        let takeover = app.buttons["Play here"]
+        XCTAssertTrue(takeover.waitForExistence(timeout: 10))
+        app.buttons["Settings"].firstMatch.tap()
+        let version = app.staticTexts["settingsBuildVersion"]
+        for _ in 0..<10 {
+            if version.exists && version.frame.maxY < takeover.frame.minY { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(version.isHittable)
+        XCTAssertLessThan(version.frame.maxY, takeover.frame.minY)
+        XCTAssertTrue(app.buttons["Sign out"].isHittable)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Large-text Settings clears playback footer"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     @MainActor func testRemotePlaybackOffersTakeoverFromBrowsing() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
@@ -346,6 +371,18 @@ extension LaunchTests {
         }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Remote playback takeover available"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["Settings"].firstMatch.tap()
+        let version = app.staticTexts["settingsBuildVersion"]
+        for _ in 0..<8 {
+            if version.exists && version.frame.maxY < takeover.frame.minY { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(version.exists)
+        XCTAssertTrue(version.isHittable)
+        XCTAssertLessThan(version.frame.maxY, takeover.frame.minY, "The last Settings row must scroll above the entire playback footer")
+        XCTAssertTrue(app.buttons["Sign out"].isHittable)
+        let settingsShot = XCTAttachment(screenshot: app.screenshot())
+        settingsShot.name = "Settings clears takeover banner"; settingsShot.lifetime = .keepAlways; add(settingsShot)
         takeover.tap()
         let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: takeover)
         XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 10), .completed)

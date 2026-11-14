@@ -96,6 +96,54 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(assertions.ended.filter { $0 == identifier }.count, 1)
     }
 
+    @MainActor func testBufferedTransitionKeepsProtectionAndPauseWinsOverActivation() async throws {
+        let assertions = RecordingBackgroundTasks()
+        let session = DelayedActivationSession()
+        let (player, transport) = try await fixture(audioSession: session, backgroundTasks: assertions)
+        defer { session.release(); player.stop() }
+        let first = try XCTUnwrap(player.player.currentItem)
+        let next = player.player.items()[1]
+        player.player.pause()
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: first)
+        for _ in 0..<500 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        session.hold = true
+        await transport.releaseNext()
+        for _ in 0..<500 where !session.waiting { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(session.waiting)
+        XCTAssertTrue(player.player.currentItem === next)
+        let identifier = try XCTUnwrap(assertions.preparation)
+        XCTAssertFalse(assertions.ended.contains(identifier))
+        await player.send("pause")
+        session.release()
+        for _ in 0..<100 where !assertions.ended.contains(identifier) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(assertions.ended.contains(identifier))
+        XCTAssertEqual(player.player.rate, 0)
+        XCTAssertFalse(player.showsPauseControl)
+    }
+
+    @MainActor func testExpiredOldPreparationCannotCancelNewTrack() async throws {
+        let assertions = RecordingBackgroundTasks()
+        let (player, transport) = try await fixture(backgroundTasks: assertions)
+        defer { player.stop() }
+        let old = try XCTUnwrap(assertions.preparation)
+        let next = Task { await player.send("next") }
+        for _ in 0..<500 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        await transport.delayMedia()
+        await transport.releaseNext()
+        await next.value
+        for _ in 0..<500 { if await transport.mediaWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        let current = try XCTUnwrap(assertions.preparation)
+        XCTAssertNotEqual(old, current)
+        assertions.expirations[old]?()
+        XCTAssertFalse(player.playbackFailed)
+        XCTAssertFalse(assertions.ended.contains(current))
+        await transport.releaseMedia()
+        for _ in 0..<500 where !assertions.ended.contains(current) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(player.state?.currentTrackId, 2)
+        XCTAssertEqual(assertions.ended.filter { $0 == current }.count, 1)
+    }
+
     @MainActor func testFailedManualNextReleasesNavigationGate() async throws {
         let (player, transport) = try await fixture()
         defer { player.stop() }

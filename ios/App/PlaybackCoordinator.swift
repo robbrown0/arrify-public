@@ -763,7 +763,18 @@ import Network
             desiredKey = key; loadedKey = key; seekIntent = state.seekIntent
             position = 0; duration = 0; resetProgressClock()
             busy = false; message = nil; updateReceiverMetadata()
-            finishPreparationBackgroundTask()
+            // A prebuffered item still needs asynchronous session activation.
+            // Keep protection through that handoff just as for a newly prepared item.
+            let token = preparationGeneration
+            prepareTask = Task { [weak self] in
+                guard let self else { return }
+                defer { if self.preparationGeneration == token { self.finishPreparationBackgroundTask() } }
+                do { try await self.waitForPreparedPlayback(key: key, token: token, started: ProcessInfo.processInfo.systemUptime) }
+                catch {
+                    guard !Task.isCancelled, self.preparationGeneration == token else { return }
+                    self.failPreparation()
+                }
+            }
             PlaybackDiagnostics.event("track-transition confirmed")
         }
         if desiredKey != key {
@@ -987,14 +998,7 @@ import Network
                     playIfAllowed(); publishNowPlaying(); startReadAhead()
                     // Activation is asynchronous. Keep the assertion until media time advances,
                     // rather than leaving a suspension gap between preparation and playback.
-                    let initialPosition = player.currentTime().seconds
-                    while permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true) {
-                        try Task.checkCancellation()
-                        guard desiredKey == key, preparationGeneration == preparationToken, !playbackFailed else { return }
-                        if player.currentTime().seconds > initialPosition + 0.1 { break }
-                        guard ProcessInfo.processInfo.systemUptime - started < 30 else { throw PlaybackFailure() }
-                        try await Task.sleep(for: .milliseconds(50))
-                    }
+                    try await waitForPreparedPlayback(key: key, token: preparationToken, started: started)
                     return
                 }
                 if ["failed", "unavailable"].contains(item.state) { throw PlaybackFailure() }
@@ -1003,6 +1007,16 @@ import Network
             throw PlaybackFailure()
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
             if desiredKey == key { preparationSeeking = false; busy = false; playbackFailed = true; finishNavigation(); message = "This song could not be prepared. Tap Retry or choose another song." }
+        }
+    }
+    private func waitForPreparedPlayback(key: String, token: UUID, started: TimeInterval) async throws {
+        let initialPosition = player.currentTime().seconds
+        while permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true) {
+            try Task.checkCancellation()
+            guard desiredKey == key, preparationGeneration == token, !playbackFailed else { return }
+            if player.currentTime().seconds > initialPosition + 0.1 { return }
+            guard ProcessInfo.processInfo.systemUptime - started < 30 else { throw PlaybackFailure() }
+            try await Task.sleep(for: .milliseconds(50))
         }
     }
     private func synchronizeQueuedItems() {
