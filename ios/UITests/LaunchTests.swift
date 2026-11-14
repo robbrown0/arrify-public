@@ -29,6 +29,12 @@ final class LaunchTests: XCTestCase {
         submit.tap()
         app.buttons["Cancel"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Delete account"].exists)
+        XCTAssertTrue(app.alerts.firstMatch.waitForNonExistence(timeout: 5))
+        for _ in 0..<6 {
+            if submit.exists && submit.isHittable { break }
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(submit.exists && submit.isHittable)
         submit.tap(); app.buttons["Permanently delete account"].tap()
         XCTAssertTrue(app.staticTexts["deletionError"].waitForExistence(timeout: 10))
         for _ in 0..<4 { if password.isHittable { break }; app.collectionViews.firstMatch.swipeDown() }
@@ -409,7 +415,13 @@ extension LaunchTests {
         XCTAssertTrue(takeover.waitForExistence(timeout: 5))
         XCTAssertTrue(lastSong.waitForExistence(timeout: 10))
         checkBottom(lastSong, "Search final result")
-        if !tabletSearch.exists { app.buttons["Close"].tap() }
+        if !tabletSearch.exists {
+            app.buttons["Close"].tap()
+            // Closing input leaves iOS's search-role tab bar collapsed.
+            let collapsed = app.tabBars.buttons["Channels"]
+            if !app.buttons["Settings"].firstMatch.exists && collapsed.exists { collapsed.tap() }
+        }
+        XCTAssertTrue(app.buttons["Settings"].firstMatch.waitForExistence(timeout: 5))
         app.buttons["Settings"].firstMatch.tap()
         checkBottom(app.staticTexts["settingsBuildVersion"], "Settings final row")
     }
