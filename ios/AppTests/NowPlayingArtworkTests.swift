@@ -388,7 +388,7 @@ extension NowPlayingArtworkTests {
             XCTAssertEqual(volume.frame, container.bounds)
         }
     }
-    @MainActor func testTabletVolumeUsesNativeHeightCenteredInControlRow() throws {
+    @MainActor func testTabletVolumeUsesNativeHeightCenteredInControlRow() {
         let volume = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
         volume.showsRouteButton = false
         let container = VolumeControlContainer(volumeView: volume, centersNativeHeight: true)
@@ -399,10 +399,11 @@ extension NowPlayingArtworkTests {
             volume.layoutIfNeeded()
             XCTAssertEqual(volume.frame.midY, container.bounds.midY, accuracy: 0.5)
             XCTAssertEqual(volume.frame.height, volume.sizeThatFits(container.bounds.size).height, accuracy: 0.5)
-            // Read-only geometry check: production never accesses or moves this slider.
-            let slider = try XCTUnwrap(volume.subviews.compactMap({ $0 as? UISlider }).first)
-            let track = slider.convert(slider.trackRect(forBounds: slider.bounds), to: container)
-            XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 2)
+            // Query public native geometry; do not assume private slider subview types.
+            let track = volume.convert(volume.volumeSliderRect(forBounds: volume.bounds), to: container)
+            XCTAssertFalse(track.isEmpty)
+            XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 2,
+                           "Native frame: \(volume.frame); slider rectangle: \(track)")
         }
     }
     func testLegacyActivityStateStillDecodesWithoutArtwork() throws {
