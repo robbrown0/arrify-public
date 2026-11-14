@@ -320,8 +320,8 @@ struct AirPlayPicker: UIViewRepresentable {
 // Keep the native control's identity stable during route-name and playback updates.
 // MediaPlayer owns receiver-volume synchronization; never seed it from the phone's
 // outputVolume or write a remembered value when this view appears.
-// Let MediaPlayer own both drawing and touch geometry. Moving the view using a
-// calculated track rectangle can disagree with the native control's route layout.
+// MediaPlayer owns drawing and touch geometry. Only the iPad mini-player opts
+// into centering the whole view using its public native sizing information.
 final class VolumeControlContainer: UIView {
     let volumeView: MPVolumeView
     private let centersNativeHeight: Bool
