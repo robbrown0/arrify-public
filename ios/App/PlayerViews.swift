@@ -442,23 +442,85 @@ struct ServerConnectionBadge: View {
     let connection: ServerConnection
     @State private var showDetails = false
     private var color: Color { !connection.connected ? .red : connection.degraded ? .yellow : .green }
-    private var details: String {
-        var lines = [connection.detail]
-        if let address = connection.address { lines.append(address) }
-        if let notice = connection.homeNotice { lines.append(notice) }
-        return lines.joined(separator: "\n\n")
-    }
     var body: some View {
         Button { showDetails = true } label: {
             Image(systemName: connection.home ? "wifi.router" : "globe")
                 .font(.callout).foregroundStyle(color).frame(width: 44, height: 44)
         }.buttonStyle(.plain)
             .accessibilityLabel("Server connection: " + (!connection.connected ? "unreachable" : connection.degraded ? "slow or interrupted" : connection.home ? "local network" : "public"))
-            .alert("Server connection", isPresented: $showDetails) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(details)
+            .accessibilityIdentifier("serverConnection")
+            .sheet(isPresented: $showDetails) {
+                ServerConnectionDetails(connection: connection)
             }
+    }
+}
+
+/// A live, informational sheet rather than an alert requiring acknowledgement.
+private struct ServerConnectionDetails: View {
+    let connection: ServerConnection
+    @Environment(\.dismiss) private var dismiss
+    private var status: String {
+        !connection.connected ? "Unavailable" : connection.degraded ? "Slow or interrupted" : "Connected"
+    }
+    private var address: String {
+        guard let raw = connection.address else { return "" }
+        // Keep ports and paths visible, omitting only the redundant HTTPS scheme.
+        return raw.hasPrefix("https://") ? String(raw.dropFirst(8)) : raw
+    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    row("Status", value: status)
+                        .accessibilityIdentifier("connectionStatus")
+                    if connection.address != nil {
+                        row("Route", value: connection.home ? "Local network" : "Public address")
+                            .accessibilityIdentifier("connectionRoute")
+                    }
+                }
+                if let fullAddress = connection.address {
+                    Section("Server address") {
+                        ScrollView(.horizontal) {
+                            Text(address).font(.subheadline.monospaced()).lineLimit(1)
+                                .textSelection(.enabled)
+                                .accessibilityIdentifier("connectionAddress")
+                        }
+                        .accessibilityHint("Scroll horizontally to read the full address")
+                        Button {
+                            UIPasteboard.general.string = fullAddress
+                        } label: {
+                            Label("Copy address", systemImage: "doc.on.doc")
+                        }
+                    }
+                }
+                Section {
+                    if !connection.connected || connection.degraded {
+                        Text(connection.detail)
+                    }
+                    if let notice = connection.homeNotice { Text(notice) }
+                    Text("The app checks your server while you browse, even when music is paused. It prefers a verified local address when available.")
+                }.font(.footnote).foregroundStyle(.secondary)
+            }
+            .navigationTitle("Server connection")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .tint(.green)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+    private func row(_ title: String, value: String) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                Text(title).fixedSize()
+                Spacer()
+                Text(value).foregroundStyle(.secondary).fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                Text(value).foregroundStyle(.secondary)
+            }
+        }.lineLimit(1).accessibilityElement(children: .combine)
     }
 }
 
