@@ -447,7 +447,9 @@ import Network
         finishNavigation(); routeSettlingUntil = 0; progressVerifiedKey = nil
         let audioSession = audioSession
         let generation = sessionGeneration
+        let previousDeactivation = deactivationTask
         deactivationTask = Task { [weak self] in
+            await previousDeactivation?.value
             try? await audioSession.deactivate()
             if self?.sessionGeneration == generation { self?.deactivationTask = nil }
         }

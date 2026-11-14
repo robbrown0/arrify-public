@@ -152,6 +152,7 @@ final class PlaybackTransitionTests: XCTestCase {
         player.stop()
         for _ in 0..<100 where !session.waiting { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(session.waiting)
+        player.stop() // Repeated teardown must join the same ordered handoff.
         let activations = session.activations
         let manifest = try await player.api.manifest(deviceId: player.deviceId, epoch: 1, profile: "original")
         await player.cache.fill(manifest, api: player.api)
