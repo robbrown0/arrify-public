@@ -58,7 +58,7 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["connectionStatus"].firstMatch.exists)
         XCTAssertTrue(app.descendants(matching: .any)["connectionRoute"].firstMatch.exists)
         XCTAssertTrue(app.staticTexts["connectionAddress"].exists)
-        XCTAssertTrue(app.buttons["Copy address"].isHittable)
+        XCTAssertFalse(app.buttons["Copy address"].exists)
         let connectionShot = XCTAttachment(screenshot: app.screenshot())
         connectionShot.name = "Server connection details"; connectionShot.lifetime = .keepAlways; add(connectionShot)
         app.buttons["Done"].tap()

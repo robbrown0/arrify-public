@@ -478,7 +478,7 @@ private struct ServerConnectionDetails: View {
                             .accessibilityIdentifier("connectionRoute")
                     }
                 }
-                if let fullAddress = connection.address {
+                if connection.address != nil {
                     Section("Server address") {
                         ScrollView(.horizontal) {
                             Text(address).font(.subheadline.monospaced()).lineLimit(1)
@@ -486,11 +486,6 @@ private struct ServerConnectionDetails: View {
                                 .accessibilityIdentifier("connectionAddress")
                         }
                         .accessibilityHint("Scroll horizontally to read the full address")
-                        Button {
-                            UIPasteboard.general.string = fullAddress
-                        } label: {
-                            Label("Copy address", systemImage: "doc.on.doc")
-                        }
                     }
                 }
                 Section {
