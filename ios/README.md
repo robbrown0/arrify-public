@@ -405,3 +405,7 @@ starting directly on the thumb, at low/mid/high levels on local output and AirPl
 Repeat after reopening the player and changing routes. Check for an initial jump,
 correct direction, and agreement with the system route control. Simulator geometry
 tests cannot validate receiver-volume behavior.
+
+iPad portrait artwork uses the available height within 48-point side margins instead
+of a 68%-of-screen-width cap. Controls retain their measured spacing and bottom
+padding; the layout still scrolls when larger text needs more room.

@@ -242,6 +242,13 @@ extension LaunchTests {
         expectation(for: NSPredicate(format: "value == 'all'"), evaluatedWith: repeatButton)
         waitForExpectations(timeout: 5)
         XCTAssertLessThan(app.buttons["upNext"].frame.maxY, app.frame.maxY - 12, "Footer must fit above the home indicator")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            let outputDescription = app.staticTexts["playerOutputDescription"].firstMatch
+            XCTAssertTrue(outputDescription.exists)
+            let bottomGap = app.frame.maxY - outputDescription.frame.maxY
+            XCTAssertGreaterThan(bottomGap, 16, "Keep output controls clear of the bottom safe area")
+            XCTAssertLessThan(bottomGap, 100, "Avoid a large unused strip beneath the iPad player controls")
+        }
         let playerShot = XCTAttachment(screenshot: app.screenshot()); playerShot.name = "Redesigned player"; playerShot.lifetime = .keepAlways; add(playerShot)
         app.buttons["upNext"].tap()
         XCTAssertTrue(app.staticTexts["Family Portrait"].waitForExistence(timeout: 5))

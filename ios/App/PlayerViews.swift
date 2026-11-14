@@ -69,7 +69,7 @@ struct NowPlayingView: View {
                         } else {
                             PortraitPlayerLayout(
                                 availableHeight: max(0, proxy.size.height - 100),
-                                maximumArtworkWidth: tablet ? proxy.size.width * 0.68 : proxy.size.width - 48,
+                                maximumArtworkWidth: max(0, proxy.size.width - (tablet ? 96 : 48)),
                                 maximumControlsWidth: tablet ? 640 : 520
                             ) {
                                 cover
