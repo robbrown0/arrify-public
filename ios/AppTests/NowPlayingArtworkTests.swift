@@ -397,13 +397,16 @@ extension NowPlayingArtworkTests {
             container.setNeedsLayout()
             container.layoutIfNeeded()
             volume.layoutIfNeeded()
-            XCTAssertEqual(volume.frame.midY, container.bounds.midY, accuracy: 0.5)
             XCTAssertEqual(volume.frame.height, volume.sizeThatFits(container.bounds.size).height, accuracy: 0.5)
-            // Query public native geometry; do not assume private slider subview types.
-            let track = volume.convert(volume.volumeSliderRect(forBounds: volume.bounds), to: container)
-            XCTAssertFalse(track.isEmpty)
-            XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 2,
-                           "Native frame: \(volume.frame); slider rectangle: \(track)")
+            // The simulator has no system-volume slider. Verify its fallback frame,
+            // and verify the public slider geometry whenever the native control supplies it.
+            let nativeTrack = volume.volumeSliderRect(forBounds: volume.bounds)
+            let visibleFrame = nativeTrack.isEmpty ? volume.frame : volume.convert(nativeTrack, to: container)
+            XCTAssertEqual(visibleFrame.midY, container.bounds.midY, accuracy: 0.5)
+            let settledFrame = volume.frame
+            container.setNeedsLayout()
+            container.layoutIfNeeded()
+            XCTAssertEqual(volume.frame, settledFrame, "Repeated layout must not accumulate an offset")
         }
     }
     func testLegacyActivityStateStillDecodesWithoutArtwork() throws {

@@ -340,6 +340,13 @@ final class VolumeControlContainer: UIView {
         let preferred = volumeView.sizeThatFits(bounds.size).height
         let height = preferred.isFinite && preferred > 0 ? min(preferred, bounds.height) : bounds.height
         volumeView.frame = CGRect(x: 0, y: (bounds.height - height) / 2, width: bounds.width, height: height)
+        volumeView.layoutIfNeeded()
+        let slider = volumeView.volumeSliderRect(forBounds: volumeView.bounds)
+        if !slider.isEmpty {
+            // The native track can be asymmetric within its preferred frame.
+            // Translate the complete control so drawing and touch coordinates stay together.
+            volumeView.frame.origin.y = bounds.midY - slider.midY
+        }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
