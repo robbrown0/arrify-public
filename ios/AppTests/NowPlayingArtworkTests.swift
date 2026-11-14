@@ -388,6 +388,27 @@ extension NowPlayingArtworkTests {
             XCTAssertEqual(volume.frame, container.bounds)
         }
     }
+    @MainActor func testTabletVolumeUsesNativeHeightCenteredInControlRow() {
+        let volume = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
+        volume.showsRouteButton = false
+        let container = VolumeControlContainer(volumeView: volume, centersNativeHeight: true)
+        for width in [130.0, 240.0, 130.0] {
+            container.frame = CGRect(x: 0, y: 0, width: width, height: 44)
+            container.setNeedsLayout()
+            container.layoutIfNeeded()
+            volume.layoutIfNeeded()
+            XCTAssertEqual(volume.frame.height, volume.sizeThatFits(container.bounds.size).height, accuracy: 0.5)
+            // The simulator has no system-volume slider. Verify its fallback frame,
+            // and verify the public slider geometry whenever the native control supplies it.
+            let nativeTrack = volume.volumeSliderRect(forBounds: volume.bounds)
+            let visibleFrame = nativeTrack.isEmpty ? volume.frame : volume.convert(nativeTrack, to: container)
+            XCTAssertEqual(visibleFrame.midY, container.bounds.midY, accuracy: 0.5)
+            let settledFrame = volume.frame
+            container.setNeedsLayout()
+            container.layoutIfNeeded()
+            XCTAssertEqual(volume.frame, settledFrame, "Repeated layout must not accumulate an offset")
+        }
+    }
     func testLegacyActivityStateStillDecodesWithoutArtwork() throws {
         let data = Data(#"{"title":"Song","artist":"Artist","destination":"Office","playing":true,"updatedAt":100}"#.utf8)
         let state = try JSONDecoder().decode(PlaybackActivityAttributes.ContentState.self, from: data)

@@ -321,6 +321,10 @@ extension LaunchTests {
         play.tap()
         let player = app.otherElements["tabletPlayer"]
         XCTAssertTrue(player.waitForExistence(timeout: 5))
+        let volumeShot = XCTAttachment(screenshot: app.screenshot())
+        volumeShot.name = "iPad mini-player volume alignment"
+        volumeShot.lifetime = .keepAlways
+        add(volumeShot)
         let search = app.textFields["tabletSearch"]
         search.tap(); search.typeText("pink")
         XCTAssertTrue(search.isHittable)

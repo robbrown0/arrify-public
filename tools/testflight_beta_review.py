@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Build 27: Improved background track transitions and recovery ordering. Volume uses Apple’s native control for layout and touch handling. Reduced excess bottom spacing in the iPad player. The Play here banner now reserves space above browsing content, including Library and Settings; phone Search keeps keyboard input clear. Connection details now show status, route, and a selectable server address in a compact sheet. Please test Next from the lock screen without reopening Arrify, repeated skips, AirPlay volume adjustments, sleep/wake, and speaker changes. Physical-device confirmation of playback and volume behavior is still needed.'}
+    attrs = {'whatsNew': '27a (build 28): iPad-only mini-player layout correction. Center the native volume control vertically with the adjacent playback and AirPlay controls. iPhone and full-screen player layouts are unchanged. Please verify alignment on iPad in portrait and landscape; volume remains controlled by Apple’s native slider.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:
