@@ -388,7 +388,7 @@ extension NowPlayingArtworkTests {
             XCTAssertEqual(volume.frame, container.bounds)
         }
     }
-    @MainActor func testTabletVolumeUsesNativeHeightCenteredInControlRow() {
+    @MainActor func testTabletVolumeUsesNativeHeightCenteredInControlRow() throws {
         let volume = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
         volume.showsRouteButton = false
         let container = VolumeControlContainer(volumeView: volume, centersNativeHeight: true)
@@ -400,10 +400,9 @@ extension NowPlayingArtworkTests {
             XCTAssertEqual(volume.frame.midY, container.bounds.midY, accuracy: 0.5)
             XCTAssertEqual(volume.frame.height, volume.sizeThatFits(container.bounds.size).height, accuracy: 0.5)
             // Read-only geometry check: production never accesses or moves this slider.
-            if let slider = volume.subviews.compactMap({ $0 as? UISlider }).first {
-                let track = slider.convert(slider.trackRect(forBounds: slider.bounds), to: container)
-                XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 2)
-            }
+            let slider = try XCTUnwrap(volume.subviews.compactMap({ $0 as? UISlider }).first)
+            let track = slider.convert(slider.trackRect(forBounds: slider.bounds), to: container)
+            XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 2)
         }
     }
     func testLegacyActivityStateStillDecodesWithoutArtwork() throws {
