@@ -328,6 +328,75 @@ extension LaunchTests {
 
 
 extension LaunchTests {
+    @MainActor func testTakeoverFooterClearsAllDestinations() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
+        app.launchEnvironment["ARRIFY_UI_PERSONAL_PLAYLIST"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        let takeover = app.buttons["Play here"]
+        XCTAssertTrue(takeover.waitForExistence(timeout: 10))
+        func checkBottom(_ element: XCUIElement, _ name: String) {
+            for _ in 0..<12 {
+                if element.exists && element.isHittable && element.frame.maxY < takeover.frame.minY { break }
+                // Start inside content, not over the persistent footer or iPad sidebar.
+                let top = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0))
+                let start = top.withOffset(CGVector(dx: 0, dy: takeover.frame.minY - 40))
+                let end = top.withOffset(CGVector(dx: 0, dy: max(180, takeover.frame.minY - 340)))
+                start.press(forDuration: 0.05, thenDragTo: end)
+            }
+            XCTAssertTrue(element.exists, name)
+            XCTAssertTrue(element.isHittable, name)
+            XCTAssertLessThan(element.frame.maxY, takeover.frame.minY, name)
+            XCTAssertTrue(takeover.isHittable)
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "Takeover footer — " + name; shot.lifetime = .keepAlways; add(shot)
+        }
+        checkBottom(app.otherElements["collectionCard-playlists-1"], "Home personal playlist")
+        app.buttons["Library"].firstMatch.tap()
+        let playlist = app.buttons["libraryPersonal-1"]
+        checkBottom(playlist, "Library final playlist")
+        playlist.tap()
+        let lastSong = app.buttons["Play Try by P!nk"]
+        XCTAssertTrue(lastSong.waitForExistence(timeout: 10))
+        checkBottom(lastSong, "Playlist detail final song")
+        app.buttons["Home"].firstMatch.tap()
+        if !app.textFields["tabletSearch"].exists {
+            for _ in 0..<8 where !app.buttons["Albums"].firstMatch.isHittable { app.swipeDown() }
+        }
+        app.buttons["Albums"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["M!ssundaztood"].firstMatch.waitForExistence(timeout: 10))
+        app.staticTexts["M!ssundaztood"].firstMatch.tap()
+        XCTAssertTrue(lastSong.waitForExistence(timeout: 10))
+        checkBottom(lastSong, "Album detail final song")
+        app.buttons["Channels"].firstMatch.tap()
+        checkBottom(app.buttons["Play Station 12"], "Channels final station")
+        let tabletSearch = app.textFields["tabletSearch"]
+        if tabletSearch.exists {
+            tabletSearch.tap(); tabletSearch.typeText("pink")
+        } else {
+            app.buttons["Search"].firstMatch.tap()
+            let search = app.searchFields.firstMatch
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            search.tap(); search.typeText("pink")
+        }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(takeover.isHittable)
+        XCTAssertLessThan(takeover.frame.maxY, app.keyboards.firstMatch.frame.minY)
+        let keyboardShot = XCTAttachment(screenshot: app.screenshot())
+        keyboardShot.name = "Takeover footer — Search keyboard"; keyboardShot.lifetime = .keepAlways; add(keyboardShot)
+        if tabletSearch.exists { tabletSearch.typeText("\n") }
+        else { app.searchFields.firstMatch.typeText("\n") }
+        XCTAssertTrue(lastSong.waitForExistence(timeout: 10))
+        checkBottom(lastSong, "Search final result")
+        app.buttons["Settings"].firstMatch.tap()
+        checkBottom(app.staticTexts["settingsBuildVersion"], "Settings final row")
+    }
+
     @MainActor func testSettingsClearsPlaybackFooterWithLargeText() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"

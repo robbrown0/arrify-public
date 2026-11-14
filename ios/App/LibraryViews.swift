@@ -85,6 +85,7 @@ struct LibraryHome: View {
                         Section("Your playlists") {
                             ForEach(personal, id: \.identity) { item in
                                 NavigationLink { DetailScreen(model: model, entry: item) } label: { EntryRow(item: item, artwork: model.artwork) }
+                                    .accessibilityIdentifier("libraryPersonal-" + item.id)
                             }
                         }
                     }
@@ -172,7 +173,8 @@ struct CollectionCard: View {
                 if item.kind == "albums" { Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
                 else { Text("\(item.trackCount) songs").font(.caption).foregroundStyle(.secondary) }
             } else if item.trackCount == 0 { Text("Preparing songs…").font(.caption).foregroundStyle(.secondary) }
-        }
+        }.accessibilityElement(children: .contain)
+            .accessibilityIdentifier("collectionCard-" + item.kind + "-" + item.id)
     }
 }
 

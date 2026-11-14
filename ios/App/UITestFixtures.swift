@@ -20,7 +20,8 @@ actor UITestTransport: HTTPTransport {
     private var playbackContext = "null"
     private var repeatMode = "off"
     private var shuffle = false
-    private var playlists: [[String: Any]] = []
+    private var playlists: [[String: Any]] = ProcessInfo.processInfo.environment["ARRIFY_UI_PERSONAL_PLAYLIST"] == "1"
+        ? [["id": "1", "kind": "playlists", "name": "Rain", "subtitle": "", "section": "personal", "track_count": 2]] : []
     private var favoriteIds: Set<Int> = []
     private let album = #"{"id":"aaaaaaaaaaaaaaaaaaaaaaaa","kind":"albums","name":"M!ssundaztood","subtitle":"P!nk","section":"","artwork":null,"track_count":2}"#
     private let station = #"{"id":"sirius-80son8","kind":"channels","name":"80s on 8","subtitle":"","section":"channels","artwork":null,"track_count":2}"#
