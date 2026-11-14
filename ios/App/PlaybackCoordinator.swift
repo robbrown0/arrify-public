@@ -836,6 +836,9 @@ import Network
             guard let self, self.recoveryGeneration == token else { return }
             self.failRecovery()
         }
+        // Recovery now owns protection; retire the preparation deadline before it
+        // can fail a replacement item that recovery is already repairing.
+        cancelPreparation()
         let key = loadedKey
         let sample = player.currentTime().seconds
         let resumePosition = resumeCheckpoint ?? (current.status != .failed && sample.isFinite ? max(0, sample) : position)
