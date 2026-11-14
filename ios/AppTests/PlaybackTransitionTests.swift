@@ -55,7 +55,7 @@ final class PlaybackTransitionTests: XCTestCase {
         let (player, transport) = try await fixture(backgroundTasks: assertions)
         defer { player.stop() }
         var protectedOldItem = false
-        assertions.onPreparation = { protectedOldItem = player.player.currentItem != nil }
+        assertions.onPreparation = { [weak player] in protectedOldItem = player?.player.currentItem != nil }
         let next = Task { await player.send("next") }
         for _ in 0..<500 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
         await transport.delayMedia()
@@ -80,9 +80,9 @@ final class PlaybackTransitionTests: XCTestCase {
         let session = DelayedActivationSession()
         let (player, transport) = try await fixture(audioSession: session, backgroundTasks: assertions)
         defer { player.stop() }
-        session.hold = true
         let next = Task { await player.send("next") }
         for _ in 0..<500 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        session.hold = true
         await transport.releaseNext()
         await next.value
         for _ in 0..<500 where !session.waiting { try await Task.sleep(for: .milliseconds(10)) }
