@@ -83,11 +83,17 @@ final class PlaybackTransitionTests: XCTestCase {
         let next = Task { await player.send("next") }
         for _ in 0..<500 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
         session.hold = true
+        await transport.setPosition(60)
         await transport.releaseNext()
         await next.value
         for _ in 0..<500 where !session.waiting { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(session.waiting)
         let identifier = try XCTUnwrap(assertions.preparation)
+        XCTAssertFalse(assertions.ended.contains(identifier))
+        // Rewinding during activation must reset the progress baseline instead
+        // of holding protection until the old position is reached again.
+        let rewound = await player.player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+        XCTAssertTrue(rewound)
         XCTAssertFalse(assertions.ended.contains(identifier))
         session.release()
         for _ in 0..<500 where !assertions.ended.contains(identifier) { try await Task.sleep(for: .milliseconds(10)) }
@@ -594,6 +600,8 @@ actor CallResumeTransitionTransport: HTTPTransport {
     private var owner = ""
     private var size = 0
     private var current = 1
+    private var positionSeconds = 0.0
+    func setPosition(_ seconds: Double) { positionSeconds = seconds }
     private var revision = 1
     private var playing = true
     private var delayOnePoll = false
@@ -618,7 +626,7 @@ actor CallResumeTransitionTransport: HTTPTransport {
     func releaseNext() { pendingNext?.resume(); pendingNext = nil }
     private func state() throws -> HTTPResult {
         HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: [
-            "partial": false, "current_track_id": current, "position_seconds": 0,
+            "partial": false, "current_track_id": current, "position_seconds": positionSeconds,
             "server_time": revision, "queue_revision": revision, "owner_device_id": owner,
             "owner_epoch": 1, "intent": revision, "playing": playing, "observed": "playing",
             "seek_target_seconds": 0, "seek_intent": current, "play_id": current,

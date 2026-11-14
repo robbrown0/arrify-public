@@ -1021,11 +1021,15 @@ import Network
         }
     }
     private func waitForPreparedPlayback(key: String, token: UUID, started: TimeInterval) async throws {
-        let initialPosition = player.currentTime().seconds
+        var initialPosition = player.currentTime().seconds
         while permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true) {
             try Task.checkCancellation()
             guard desiredKey == key, preparationGeneration == token, !playbackFailed else { return }
-            if player.currentTime().seconds > initialPosition + 0.1 { return }
+            let sample = player.currentTime().seconds
+            if sample.isFinite {
+                if !initialPosition.isFinite || sample < initialPosition - 0.5 { initialPosition = sample }
+                if player.timeControlStatus == .playing, sample > initialPosition + 0.1 { return }
+            }
             guard ProcessInfo.processInfo.systemUptime - started < 30 else { throw PlaybackFailure() }
             try await Task.sleep(for: .milliseconds(50))
         }
