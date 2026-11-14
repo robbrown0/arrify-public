@@ -388,6 +388,24 @@ extension NowPlayingArtworkTests {
             XCTAssertEqual(volume.frame, container.bounds)
         }
     }
+    @MainActor func testTabletVolumeUsesNativeHeightCenteredInControlRow() {
+        let volume = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
+        volume.showsRouteButton = false
+        let container = VolumeControlContainer(volumeView: volume, centersNativeHeight: true)
+        for width in [130.0, 240.0, 130.0] {
+            container.frame = CGRect(x: 0, y: 0, width: width, height: 44)
+            container.setNeedsLayout()
+            container.layoutIfNeeded()
+            volume.layoutIfNeeded()
+            XCTAssertEqual(volume.frame.midY, container.bounds.midY, accuracy: 0.5)
+            XCTAssertEqual(volume.frame.height, volume.sizeThatFits(container.bounds.size).height, accuracy: 0.5)
+            // Read-only geometry check: production never accesses or moves this slider.
+            if let slider = volume.subviews.compactMap({ $0 as? UISlider }).first {
+                let track = slider.convert(slider.trackRect(forBounds: slider.bounds), to: container)
+                XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 2)
+            }
+        }
+    }
     func testLegacyActivityStateStillDecodesWithoutArtwork() throws {
         let data = Data(#"{"title":"Song","artist":"Artist","destination":"Office","playing":true,"updatedAt":100}"#.utf8)
         let state = try JSONDecoder().decode(PlaybackActivityAttributes.ContentState.self, from: data)

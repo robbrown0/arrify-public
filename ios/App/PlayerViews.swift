@@ -324,22 +324,33 @@ struct AirPlayPicker: UIViewRepresentable {
 // calculated track rectangle can disagree with the native control's route layout.
 final class VolumeControlContainer: UIView {
     let volumeView: MPVolumeView
-    init(volumeView: MPVolumeView) {
+    private let centersNativeHeight: Bool
+    init(volumeView: MPVolumeView, centersNativeHeight: Bool = false) {
         self.volumeView = volumeView
+        self.centersNativeHeight = centersNativeHeight
         super.init(frame: .zero)
         volumeView.frame = bounds
         volumeView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(volumeView)
     }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard centersNativeHeight else { return }
+        // Center the whole native view at its preferred height, not its internal slider.
+        let preferred = volumeView.sizeThatFits(bounds.size).height
+        let height = preferred.isFinite && preferred > 0 ? min(preferred, bounds.height) : bounds.height
+        volumeView.frame = CGRect(x: 0, y: (bounds.height - height) / 2, width: bounds.width, height: height)
+    }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
 struct SystemVolumeSlider: UIViewRepresentable {
+    var centersNativeHeight = false
     var onCreate: (MPVolumeView) -> Void = { _ in }
     func makeUIView(context: Context) -> VolumeControlContainer {
         let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44)); view.showsRouteButton = false; view.tintColor = .white
         onCreate(view)
-        return VolumeControlContainer(volumeView: view)
+        return VolumeControlContainer(volumeView: view, centersNativeHeight: centersNativeHeight)
     }
     func updateUIView(_ uiView: VolumeControlContainer, context: Context) {}
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: VolumeControlContainer, context: Context) -> CGSize? {
@@ -390,7 +401,7 @@ struct TabletPlayerBar: View {
                     }
                 }.frame(width: 180)
                 if !playback.hasOtherOutput {
-                    SystemVolumeSlider().frame(width: 130, height: 44)
+                    SystemVolumeSlider(centersNativeHeight: true).frame(width: 130, height: 44)
                         .accessibilityIdentifier("localVolumeControl")
                 }
                 if !playback.serverConnection.connected || playback.serverConnection.degraded { ServerConnectionBadge(connection: playback.serverConnection) }
