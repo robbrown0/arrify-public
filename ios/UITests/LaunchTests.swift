@@ -36,7 +36,12 @@ final class LaunchTests: XCTestCase {
         }
         XCTAssertTrue(submit.exists && submit.isHittable)
         submit.tap(); app.buttons["Permanently delete account"].tap()
-        XCTAssertTrue(app.staticTexts["deletionError"].waitForExistence(timeout: 10))
+        let deletionError = app.staticTexts["deletionError"]
+        for _ in 0..<6 {
+            if deletionError.waitForExistence(timeout: 1) && deletionError.isHittable { break }
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(deletionError.exists && deletionError.isHittable)
         for _ in 0..<4 { if password.isHittable { break }; app.collectionViews.firstMatch.swipeDown() }
         password.tap(); password.typeText("fixture")
         for _ in 0..<4 { if submit.isHittable { break }; app.collectionViews.firstMatch.swipeUp() }
