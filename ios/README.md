@@ -306,7 +306,7 @@ Real-device checks still required: home Wi-Fi → cellular and back during playb
 
 Remote Live Activity state now includes a bounded inline JPEG thumbnail, rendered in the card instead of a permanent music-note icon. The app prepares the initial cover; server push updates carry the current cover when the app is suspended. No widget network request or public artwork URL is needed. Encoded covers stay below 2 KB and the server drops artwork if metadata would exceed its reserved payload budget. Missing artwork leaves a placeholder and never blocks transport controls. This is a cover inside the remote-control Live Activity, not Apple's full-screen local Now Playing presentation.
 
-The volume view overrides the public `volumeSliderRect(forBounds:)` layout hook to center its track within the 44-point control frame. MediaPlayer still owns volume values and receiver synchronization. Physical AirPlay volume behavior and Lock Screen APNs artwork must be validated in TestFlight.
+The native `MPVolumeView` fills a 44-point container using UIKit autoresizing. Arrify does not subclass it, reposition its track, inspect its internal slider, or write volume values. MediaPlayer owns drawing, touch geometry, volume values, and receiver synchronization. Physical AirPlay volume behavior and Lock Screen APNs artwork must be validated in TestFlight.
 
 References: [Live Activity presentation and data limits](https://developer.apple.com/documentation/activitykit/displaying-live-data-with-live-activities), [native volume slider layout](https://developer.apple.com/documentation/mediaplayer/mpvolumeview/volumesliderrect(forbounds:)).
 
@@ -384,3 +384,24 @@ Behavior references: [Apple Music](https://support.apple.com/en-ca/guide/iphone/
 [TIDAL queue controls](https://support.tidal.com/hc/en-us/articles/360004182777-Play-Queue).
 Apple and Spotify document the on/off distinction; TIDAL's queue guide does not specify
 shuffle-off restoration details. Remaining-occurrence restoration is Arrify's policy.
+
+### Background preparation and size auditing
+
+Track replacement acquires a finite UIKit background task before pausing/removing
+current audio. Protection continues through asynchronous activation until media time
+advances, with cancellation and a 30-second deadline. Expiration handlers end their
+assertions synchronously. Preparation-stage diagnostics distinguish manifest delays
+from item installation and audio startup; lock-screen/AirPlay behavior still needs
+physical-device verification.
+
+TestFlight export writes `build/bundle-size.txt` with IPA bytes, uncompressed payload
+bytes, file count, and the largest 20 files. The workflow preserves it alongside test
+results. These are pre-App-Store measurements, not thinned download/install sizes.
+Audio (512 MB maximum) and artwork (100 MB maximum) caches are separate from app
+binary size. No third-party Swift package dependencies are currently included.
+
+For volume verification, compare the untouched thumb position with a small drag
+starting directly on the thumb, at low/mid/high levels on local output and AirPlay.
+Repeat after reopening the player and changing routes. Check for an initial jump,
+correct direction, and agreement with the system route control. Simulator geometry
+tests cannot validate receiver-volume behavior.

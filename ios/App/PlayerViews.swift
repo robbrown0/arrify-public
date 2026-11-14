@@ -320,27 +320,18 @@ struct AirPlayPicker: UIViewRepresentable {
 // Keep the native control's identity stable during route-name and playback updates.
 // MediaPlayer owns receiver-volume synchronization; never seed it from the phone's
 // outputVolume or write a remembered value when this view appears.
-// Apple does not support subclassing MPVolumeView. Center its native track by
-// positioning the whole control in a container, without changing its internals.
+// Let MediaPlayer own both drawing and touch geometry. Moving the view using a
+// calculated track rectangle can disagree with the native control's route layout.
 final class VolumeControlContainer: UIView {
     let volumeView: MPVolumeView
     init(volumeView: MPVolumeView) {
         self.volumeView = volumeView
         super.init(frame: .zero)
+        volumeView.frame = bounds
+        volumeView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(volumeView)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        let preferred = volumeView.sizeThatFits(bounds.size)
-        let height = preferred.height.isFinite && preferred.height > 0 ? min(bounds.height, preferred.height) : bounds.height
-        volumeView.frame = CGRect(x: bounds.minX, y: bounds.midY - height / 2, width: bounds.width, height: height)
-        volumeView.layoutIfNeeded()
-        let track = volumeView.volumeSliderRect(forBounds: volumeView.bounds)
-        if !track.isEmpty {
-            volumeView.frame.origin.y = bounds.midY - track.midY
-        }
-    }
 }
 
 struct SystemVolumeSlider: UIViewRepresentable {

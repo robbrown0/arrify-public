@@ -375,21 +375,17 @@ extension NowPlayingArtworkTests {
 }
 
 extension NowPlayingArtworkTests {
-    @MainActor func testNativeVolumeTrackIsCenteredInContainer() {
+    @MainActor func testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets() {
         let volume = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
         let container = VolumeControlContainer(volumeView: volume)
-        container.frame = CGRect(x: 0, y: 0, width: 130, height: 44)
-        container.layoutIfNeeded()
-        XCTAssertTrue(volume.superview === container)
-        let nativeTrack = volume.volumeSliderRect(forBounds: volume.bounds)
-        if nativeTrack.isEmpty {
-            // Simulator and routes without a volume slider have no track to center.
-            // Keep the native control available to display its own route UI.
-            XCTAssertEqual(volume.frame.midY, container.bounds.midY, accuracy: 0.5)
-            XCTAssertEqual(volume.frame.width, container.bounds.width)
-        } else {
-            let track = volume.convert(nativeTrack, to: container)
-            XCTAssertEqual(track.midY, container.bounds.midY, accuracy: 0.5)
+        for width in [130.0, 300.0, 240.0] {
+            container.frame = CGRect(x: 0, y: 0, width: width, height: 44)
+            container.layoutIfNeeded()
+            XCTAssertTrue(volume.superview === container)
+            XCTAssertEqual(volume.frame, container.bounds)
+            container.setNeedsLayout()
+            container.layoutIfNeeded()
+            XCTAssertEqual(volume.frame, container.bounds)
         }
     }
     func testLegacyActivityStateStillDecodesWithoutArtwork() throws {
