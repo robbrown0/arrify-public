@@ -239,6 +239,58 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Explicit ordering; omitted search queries retain legacy relevance order. Recent uses catalog insertion order.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "title",
+                "artist",
+                "recent"
+              ]
+            }
+          },
+          {
+            "name": "liked",
+            "in": "query",
+            "required": false,
+            "description": "Songs liked by the authenticated account only.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "artist",
+            "in": "query",
+            "required": false,
+            "description": "Filter album rows to this artist ID.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "around",
+            "in": "query",
+            "required": false,
+            "description": "Return a bounded window around this song ID; missing songs return the first page.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "letter",
+            "in": "query",
+            "required": false,
+            "description": "Jump within title ordering without fetching previous pages.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[#A-Z]$"
+            }
           }
         ]
       }
@@ -337,6 +389,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "around",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Bounded window around the first matching song occurrence, retaining original playlist order."
           }
         ]
       }
@@ -985,6 +1046,18 @@
                 }
               ]
             }
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Absolute index of the first returned row; optional for older servers."
+          },
+          "previous_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Earlier page offset for a directly positioned window; optional for older servers."
           }
         },
         "required": [
@@ -1435,6 +1508,18 @@
             "type": "integer",
             "nullable": true,
             "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Absolute index of the first returned row; optional for older servers."
+          },
+          "previous_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Earlier page offset for a directly positioned window; optional for older servers."
           }
         },
         "required": [

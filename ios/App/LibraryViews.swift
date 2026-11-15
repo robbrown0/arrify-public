@@ -231,12 +231,14 @@ struct BrowserScreen: View {
     @AppStorage("albumGrid") private var albumGrid = true
     @State private var likedOnly = false
     @State private var loadedRequestKey: String?
+    @State private var globalSearch = false
     let externalQuery: String?
     let artist: String?
+    let isGlobalSearch: Bool
     private var activeQuery: String { externalQuery ?? query }
     private var requestKey: String { activeQuery + "|" + sortOrder + "|" + String(likedOnly) }
-    init(model: AppModel, title: String, kind: String, externalQuery: String? = nil, artist: String? = nil) {
-        self.model = model; self.title = title; self.externalQuery = externalQuery; self.artist = artist
+    init(model: AppModel, title: String, kind: String, externalQuery: String? = nil, artist: String? = nil, isGlobalSearch: Bool = false) {
+        self.model = model; self.title = title; self.externalQuery = externalQuery; self.artist = artist; self.isGlobalSearch = isGlobalSearch
         _browser = State(initialValue: LibraryBrowser(api: model.api, kind: kind))
         _sortOrder = AppStorage(wrappedValue: "title", "librarySort-" + kind)
     }
@@ -274,7 +276,7 @@ struct BrowserScreen: View {
                         ForEach(section.rows) { row in
                             SongRow(track: row.track, model: model) {
                                 Task { await model.playback.play(source: catalogSource, trackId: row.track.id) }
-                            }.id(row.id)
+                            }.id("song-\(row.id)")
                         }
                     }
                 }
@@ -314,8 +316,12 @@ struct BrowserScreen: View {
                     .task(id: offset) { await browser.load(query: activeQuery, more: true) }
             }
             if browser.error != nil { Button("Retry") { Task { await browser.load(query: activeQuery) } } }
+            if externalQuery == nil && !isGlobalSearch && !activeQuery.isEmpty {
+                Button("Search entire library", systemImage: "magnifyingglass") { globalSearch = true }
+            }
         }
         .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $globalSearch) { SearchScreen(model: model).presentationDragIndicator(.visible) }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -425,7 +431,7 @@ struct FollowingSongList<Content: View>: View {
     }
     private func center(_ proxy: ScrollViewProxy) {
         guard let currentID, let row = browser.trackRows.first(where: { $0.track.id == currentID }) else { return }
-        proxy.scrollTo(row.id, anchor: .center)
+        proxy.scrollTo("song-\(row.id)", anchor: .center)
     }
 }
 
@@ -593,7 +599,7 @@ struct DetailScreen: View {
                 RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
                 ForEach(browser.trackRows) { row in
                     let track = row.track
-                    SongRow(track: track, model: model) { Task { await model.playback.play(source: item.source, trackId: track.id) } }.id(row.id)
+                    SongRow(track: track, model: model) { Task { await model.playback.play(source: item.source, trackId: track.id) } }.id("song-\(row.id)")
                 }
                 if let offset = browser.nextOffset { ProgressView().frame(maxWidth: .infinity).task(id: offset) { await browser.load(more: true) } }
                 if browser.error != nil { Button("Retry") { Task { await browser.load() } } }
@@ -610,7 +616,7 @@ struct SearchScreen: View {
     @State private var kind = "tracks"
     var body: some View {
         NavigationStack {
-            BrowserScreen(model: model, title: kind == "tracks" ? "Songs" : kind.capitalized, kind: kind).id(kind)
+            BrowserScreen(model: model, title: kind == "tracks" ? "Songs" : kind.capitalized, kind: kind, isGlobalSearch: true).id(kind)
                 .safeAreaInset(edge: .top) {
                     Picker("Search category", selection: $kind) {
                         Text("Songs").tag("tracks"); Text("Albums").tag("albums"); Text("Artists").tag("artists")
