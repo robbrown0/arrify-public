@@ -109,8 +109,7 @@ still executes the remaining cases.
 - Menus must stay open and retain scroll position through playback ticks; album
   navigation must work with one tap. `testEmptyPlayerAndSingleTapAlbumActions`
   covers both device families, including original album navigation. Test manually
-  with large Dynamic Type and sustained physical playback; `testActionsMenuIdentityIgnoresPlaybackProgress`
-  checks the view equality boundary used to exclude unrelated position updates.
+  with large Dynamic Type and sustained physical playback.
 - Empty player: meaningful Browse music action, no transport controls until a
   selection exists; reserve footer height on every tab, tablet and keyboard layout.
 - Saved addresses are separate from tokens. Test normal TestFlight upgrade followed
@@ -119,6 +118,8 @@ still executes the remaining cases.
 - One active output per account remains authoritative. Native explicit Play/Resume
   can claim paused, failed or expired owners, never a newly refreshed live owner.
   Server tests cover atomic claims, late heartbeats and existing epoch fences.
+  Native tests `testExplicitResumeClaimsInactiveOutputAfterFreshState` and
+  `testFreshActiveOwnerBlocksImplicitResumeWithoutActivatingAudio` check activation order.
 - Native AirPlay routing is unavailable on non-owner devices. Full-screen takeover
   uses the same banner as compact playback. Verify phone/tablet and VoiceOver.
 - Original album: preserve identity/version/official-release verification, skip

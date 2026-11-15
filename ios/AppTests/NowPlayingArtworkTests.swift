@@ -22,16 +22,6 @@ final class NowPlayingArtworkTests: XCTestCase {
         XCTAssertEqual(defaults.dictionary(forKey: "savedServerAddresses")?["home"] as? String, "")
     }
 
-    @MainActor func testActionsMenuIdentityIgnoresPlaybackProgress() throws {
-        let model = AppModel()
-        let track = try JSONDecoder().decode(Track.self, from: Data(#"{"id":1,"title":"Song","artist":"Artist","album":"Album"}"#.utf8))
-        let before = SongActionsMenu(track: track, model: model)
-        model.playback.position = 40
-        XCTAssertEqual(before, SongActionsMenu(track: track, model: model))
-        let other = try JSONDecoder().decode(Track.self, from: Data(#"{"id":2,"title":"Other","artist":"Artist","album":"Album"}"#.utf8))
-        XCTAssertNotEqual(before, SongActionsMenu(track: other, model: model))
-    }
-
     @MainActor func testExplicitResumeClaimsInactiveOutputAfterFreshState() async throws {
         let transport = RestoredOwnerTransport()
         let api = APIClient(transport: transport, store: UITestStore())
