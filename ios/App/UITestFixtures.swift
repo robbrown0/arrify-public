@@ -16,7 +16,7 @@ actor UITestStore: CredentialStore {
 }
 actor UITestTransport: HTTPTransport {
     private var owner: String? = (ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1") ? "other-device" : nil
-    private var playing = ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1"
+    private var playing = ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1"
     private var currentTrack = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_LIST"] == "1" ? 75 : 1
     private var playbackContext = "null"
     private var repeatMode = "off"

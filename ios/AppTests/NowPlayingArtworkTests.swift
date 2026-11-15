@@ -336,7 +336,7 @@ private actor TransitionTransport: HTTPTransport {
             }
             value = ["partial": false, "current_track_id": current,
                 "position_seconds": 0, "server_time": 1, "queue_revision": current,
-                "owner_device_id": owner, "owner_epoch": 1, "intent": current,
+                "owner_device_id": owner.isEmpty ? NSNull() : owner as Any, "owner_active": !owner.isEmpty, "owner_epoch": 1, "intent": current,
                 "playing": true, "observed": "playing", "seek_target_seconds": 0,
                 "seek_intent": 0, "play_id": current, "upcoming_track_ids": current == 1 ? [2] : []]
         } else if path.hasSuffix("/manifest") {

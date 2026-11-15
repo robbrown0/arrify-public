@@ -88,6 +88,7 @@ struct TabletShell: View {
         return Button { searching = false; if value == "Library" { libraryRoot = UUID() }; destination = value } label: {
             Label(title, systemImage: icon).font(.subheadline.weight(.medium)).lineLimit(2)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 10)
+                .contentShape(Rectangle())
                 .foregroundStyle(destination == value ? Color.green : Color.secondary)
                 .background(destination == value ? Color.green.opacity(0.1) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         }.buttonStyle(.plain)

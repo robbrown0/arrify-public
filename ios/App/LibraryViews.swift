@@ -581,7 +581,7 @@ struct SongActionsMenu: View, Equatable {
     @State private var addingToPlaylist = false
     @State private var showQueue = false
     @State private var destination: LibraryEntry?
-    @State private var showOriginalAlbum = false
+    @State private var originalAlbumTrack: Track?
     var body: some View {
         Menu {
             Button(favorites.ids.contains(track.id) ? "Remove from Liked songs" : "Add to Liked songs", systemImage: favorites.ids.contains(track.id) ? "checkmark.circle.fill" : "plus.circle") { Task { await favorites.toggle(track.id) } }
@@ -599,7 +599,7 @@ struct SongActionsMenu: View, Equatable {
             if let id = track.albumId {
                 Button("Go to album", systemImage: "square.stack") { destination = LibraryEntry(id: id, kind: "albums", name: track.album) }
             }
-            Button("Browse original album", systemImage: "square.stack") { showOriginalAlbum = true }
+            Button("Browse original album", systemImage: "square.stack") { originalAlbumTrack = track }
         } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44).foregroundStyle(.secondary) }
             .accessibilityLabel("More options for \(track.title)")
         .sheet(isPresented: $addingToPlaylist) { AddToPlaylistView(model: model, track: track) }
@@ -607,7 +607,7 @@ struct SongActionsMenu: View, Equatable {
         .sheet(item: $destination) { entry in
             NavigationStack { DetailScreen(model: model, entry: entry).toolbar { Button("Done") { destination = nil } } }
         }
-        .sheet(isPresented: $showOriginalAlbum) { OriginalAlbumView(model: model, track: track) }
+        .sheet(item: $originalAlbumTrack) { selected in OriginalAlbumView(model: model, track: selected) }
     }
 }
 

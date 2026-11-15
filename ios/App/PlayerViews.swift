@@ -354,6 +354,8 @@ struct AirPlayPicker: UIViewRepresentable {
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
         context.coordinator.onDismiss = onDismiss; context.coordinator.onPresent = onPresent
         uiView.isUserInteractionEnabled = enabled
+        uiView.isAccessibilityElement = !enabled
+        uiView.accessibilityLabel = enabled ? nil : "AirPlay unavailable"
         uiView.alpha = enabled ? 1 : 0.35
         uiView.accessibilityHint = enabled ? nil : "Play on this device to choose an AirPlay speaker"
         if enabled { uiView.accessibilityTraits.remove(.notEnabled) }
