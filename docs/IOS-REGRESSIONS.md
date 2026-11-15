@@ -148,3 +148,9 @@ layout updates, overlapping refreshes, and restoration after termination. Extend
 coverage beyond the existing already-loaded-list centering test to cold/off-page
 loads and failed-load retry. Do not identify a root cause or claim a fix without
 crash evidence or reproduction. Track the post-launch error separately until linked.
+
+## Open acceptance: action menu refresh and original-album latency (#37)
+
+Confirmed on iPhone 0.3.0 (32): playlist and full-player action menus refresh roughly every ten seconds; the lower menu item is clipped and scrolling can reset. Original-album lookup for Hold Me Now / Thompson Twins failed after about thirty seconds. iPad not yet retested by user.
+
+Regression coverage must keep the menu open across background refresh cycles, retain its scroll position, reach the last item, and execute album navigation once. Menu contents are captured per opening so selection targets cannot change during playback refresh. Album browsing must retain artist/version/release verification, avoid redundant recording fetches, bound the interactive helper wait, and show provider failures without disrupting playback. Simulator success does not replace the reported real-device acceptance. Retain #35 separately; its crash remains unconfirmed.

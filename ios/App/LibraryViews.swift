@@ -569,6 +569,34 @@ struct SongRow: View {
     }
 }
 
+/// UIKit owns the presented menu and its scroll position. SwiftUI updates only
+/// the provider for the next opening, not UIButton.menu while it is onscreen.
+struct StableSongMenu: UIViewRepresentable {
+    let label: String
+    let actions: @MainActor () -> [UIMenuElement]
+    @MainActor final class Coordinator {
+        var actions: @MainActor () -> [UIMenuElement]
+        init(actions: @escaping @MainActor () -> [UIMenuElement]) { self.actions = actions }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(actions: actions) }
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "ellipsis"), for: .normal)
+        button.tintColor = .secondaryLabel
+        button.showsMenuAsPrimaryAction = true
+        let coordinator = context.coordinator
+        button.menu = UIMenu(children: [UIDeferredMenuElement.uncached { completion in
+            completion(coordinator.actions())
+        }])
+        button.accessibilityLabel = label
+        return button
+    }
+    func updateUIView(_ button: UIButton, context: Context) {
+        context.coordinator.actions = actions
+        button.accessibilityLabel = label
+    }
+}
+
 struct SongActionsMenu: View, Equatable {
     // Playback ticks must not rebuild an open menu. Local presentation state
     // and observed favorites still invalidate this view normally.
@@ -578,32 +606,41 @@ struct SongActionsMenu: View, Equatable {
     let track: Track
     let model: AppModel
     private var favorites: FavoritesStore { model.favorites }
-    @State private var addingToPlaylist = false
+    @State private var playlistTrack: Track?
     @State private var showQueue = false
     @State private var destination: LibraryEntry?
     @State private var originalAlbumTrack: Track?
     var body: some View {
-        Menu {
-            Button(favorites.ids.contains(track.id) ? "Remove from Liked songs" : "Add to Liked songs", systemImage: favorites.ids.contains(track.id) ? "checkmark.circle.fill" : "plus.circle") { Task { await favorites.toggle(track.id) } }
-                .disabled(favorites.pending.contains(track.id))
-                .accessibilityIdentifier("songActionLike")
-            Button("Add to playlist", systemImage: "music.note.list") { addingToPlaylist = true }
-            Button("Add to queue", systemImage: "text.badge.plus") { Task { await model.playback.send("queue", ids: [track.id]) } }
-            Button("Go to song radio", systemImage: "dot.radiowaves.left.and.right") {
-                destination = LibraryEntry(id: String(track.id), kind: "radio-track", name: track.title + " Radio")
+        StableSongMenu(label: "More options for \(track.title)") {
+            // Evaluated once when the menu opens. Playback/metadata updates may
+            // change the next menu, never the one the listener is scrolling.
+            let selected = track
+            @MainActor func action(_ title: String, _ image: String, _ perform: @escaping @MainActor () -> Void) -> UIAction {
+                UIAction(title: title, image: UIImage(systemName: image)) { _ in perform() }
             }
-            if let id = track.artistId {
-                Button("Go to artist radio", systemImage: "dot.radiowaves.left.and.right") { destination = LibraryEntry(id: id, kind: "radio-artist", name: track.artist + " Radio") }
-                Button("Go to artist", systemImage: "person") { destination = LibraryEntry(id: id, kind: "artists", name: track.artist) }
+            let liked = favorites.ids.contains(selected.id)
+            let like = action(liked ? "Remove from Liked songs" : "Add to Liked songs", liked ? "checkmark.circle.fill" : "plus.circle") {
+                Task { await favorites.toggle(selected.id) }
             }
-            Button("Go to queue", systemImage: "list.bullet") { showQueue = true }
-            if let id = track.albumId {
-                Button("Go to album", systemImage: "square.stack") { destination = LibraryEntry(id: id, kind: "albums", name: track.album) }
+            if favorites.pending.contains(selected.id) { like.attributes = .disabled }
+            var actions: [UIMenuElement] = [like,
+                action("Add to playlist", "music.note.list") { playlistTrack = selected },
+                action("Add to queue", "text.badge.plus") { Task { await model.playback.send("queue", ids: [selected.id]) } },
+                action("Go to song radio", "dot.radiowaves.left.and.right") {
+                    destination = LibraryEntry(id: String(selected.id), kind: "radio-track", name: selected.title + " Radio")
+                }]
+            if let id = selected.artistId {
+                actions.append(action("Go to artist radio", "dot.radiowaves.left.and.right") { destination = LibraryEntry(id: id, kind: "radio-artist", name: selected.artist + " Radio") })
+                actions.append(action("Go to artist", "person") { destination = LibraryEntry(id: id, kind: "artists", name: selected.artist) })
             }
-            Button("Browse original album", systemImage: "square.stack") { originalAlbumTrack = track }
-        } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44).foregroundStyle(.secondary) }
-            .accessibilityLabel("More options for \(track.title)")
-        .sheet(isPresented: $addingToPlaylist) { AddToPlaylistView(model: model, track: track) }
+            actions.append(action("Go to queue", "list.bullet") { showQueue = true })
+            if let id = selected.albumId {
+                actions.append(action("Go to album", "square.stack") { destination = LibraryEntry(id: id, kind: "albums", name: selected.album) })
+            }
+            actions.append(action("Browse original album", "square.stack") { originalAlbumTrack = selected })
+            return actions
+        }.frame(width: 44, height: 44)
+        .sheet(item: $playlistTrack) { selected in AddToPlaylistView(model: model, track: selected) }
         .sheet(isPresented: $showQueue) { UpNextView(playback: model.playback) }
         .sheet(item: $destination) { entry in
             NavigationStack { DetailScreen(model: model, entry: entry).toolbar { Button("Done") { destination = nil } } }
@@ -793,7 +830,11 @@ struct OriginalAlbumView: View {
         do { result = try await model.api.originalAlbum(trackId: track.id) }
         catch {
             guard !Task.isCancelled else { return }
-            self.error = "The album lookup couldn’t finish. Please try again; your music can keep playing."
+            if case let APIError.rejected(_, _, message) = error {
+                self.error = message
+            } else {
+                self.error = "The album service isn’t responding. Please try again; your music can keep playing."
+            }
         }
     }
 }

@@ -194,8 +194,9 @@ final class LaunchTests: XCTestCase {
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
         }
-        let likeAction = app.buttons["songActionLike"]
+        let likeAction = app.buttons.matching(NSPredicate(format: "label == %@", "Add to Liked songs")).firstMatch
         XCTAssertTrue(likeAction.isHittable)
+        XCTAssertFalse(likeAction.waitForNonExistence(timeout: 12), "Menu must stay presented across refreshes")
         likeAction.press(forDuration: 0.15)
         XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
         XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
@@ -227,7 +228,12 @@ final class LaunchTests: XCTestCase {
         let original = app.buttons["Browse original album"]
         XCTAssertTrue(original.waitForExistence(timeout: 5))
         if !original.isHittable { app.swipeUp() }
-        XCTAssertTrue(original.isHittable); original.tap()
+        XCTAssertTrue(original.isHittable)
+        let originalFrame = original.frame
+        XCTAssertFalse(original.waitForNonExistence(timeout: 12), "Open menu must survive background refreshes")
+        XCTAssertTrue(original.isHittable, "Refresh must not reset the menu scroll position")
+        XCTAssertEqual(original.frame.midY, originalFrame.midY, accuracy: 3)
+        original.tap()
         XCTAssertTrue(app.navigationBars["Original album"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Original album from one tap"; shot.lifetime = .keepAlways; add(shot)
@@ -252,8 +258,9 @@ final class LaunchTests: XCTestCase {
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
         }
-        let likeAction = app.buttons["songActionLike"]
+        let likeAction = app.buttons.matching(NSPredicate(format: "label == %@", "Add to Liked songs")).firstMatch
         XCTAssertTrue(likeAction.isHittable)
+        XCTAssertFalse(likeAction.waitForNonExistence(timeout: 12), "Menu must stay presented across refreshes")
         likeAction.press(forDuration: 0.15)
         XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
         XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))

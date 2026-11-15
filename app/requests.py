@@ -7,11 +7,13 @@ from urllib.parse import urlencode
 class UnixHTTP(http.client.HTTPConnection):
     def connect(self):
         self.sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
-        self.sock.settimeout(65)
+        self.sock.settimeout(self.timeout)
         self.sock.connect('/requests/request.sock')
 
 def call(path,data=None):
-    conn=UnixHTTP('localhost',timeout=65)
+    # Interactive album browsing must not queue behind a long metadata job.
+    timeout=15 if path.startswith('/album-for-song?') else 65
+    conn=UnixHTTP('localhost',timeout=timeout)
     try:
         conn.request('POST' if data is not None else 'GET',path,body=json.dumps(data) if data is not None else None,headers={'Content-Type':'application/json'})
         response=conn.getresponse();value=json.loads(response.read(1024*1024))
