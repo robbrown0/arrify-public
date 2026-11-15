@@ -1,5 +1,36 @@
 import XCTest
 final class LaunchTests: XCTestCase {
+    @MainActor func testCurrentTrackIsMarkedInListAndQueue() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_ROW_PLAYBACK"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Library"].firstMatch.tap()
+        app.buttons["Songs"].firstMatch.tap()
+        let current = app.buttons["songRow-1"]
+        let other = app.buttons["songRow-2"]
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
+        XCTAssertEqual(current.value as? String, "Now playing")
+        XCTAssertEqual(other.value as? String ?? "", "")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Current song highlighted in list"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["Pause"].firstMatch.tap()
+        let paused = NSPredicate(format: "value == %@", "Paused")
+        expectation(for: paused, evaluatedWith: current)
+        waitForExpectations(timeout: 10)
+        app.buttons["expandPlayer"].tap()
+        XCTAssertTrue(app.buttons["upNext"].waitForExistence(timeout: 5))
+        app.buttons["upNext"].tap()
+        let queueCurrent = app.descendants(matching: .any)["queueCurrentTrack"].firstMatch
+        XCTAssertTrue(queueCurrent.waitForExistence(timeout: 10))
+        XCTAssertEqual(queueCurrent.value as? String, "Paused")
+        XCTAssertTrue(app.buttons["Play queued Family Portrait"].exists)
+        let queueShot = XCTAttachment(screenshot: app.screenshot()); queueShot.name = "Queue current track and context"; queueShot.lifetime = .keepAlways; add(queueShot)
+    }
     @MainActor func testAccountDeletionRequiresConfirmationAndPassword() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"

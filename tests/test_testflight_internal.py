@@ -34,5 +34,31 @@ class InternalDistributionTests(unittest.TestCase):
         self.assertEqual(self.run_distribution(automatic=False), ['/v1/betaGroups/internal/relationships/builds'])
 
     def test_pending_state_does_not_report_success(self):
-        with self.assertRaisesRegex(RuntimeError, 'not yet testing'):
+        with self.assertRaisesRegex(RuntimeError, 'not ready'):
             self.run_distribution(state='PROCESSING')
+
+
+import unittest
+from tools.testflight_internal import wait_for_internal_testing
+
+
+class InternalDistributionPollingTests(unittest.TestCase):
+    def test_eventual_assignment_polls_only_the_exact_build(self):
+        states = iter(['READY_FOR_BETA_TESTING', 'READY_FOR_BETA_TESTING', 'IN_BETA_TESTING'])
+        paths, sleeps = [], []
+        def api(path):
+            paths.append(path)
+            return {'data': {'attributes': {'internalBuildState': next(states)}}}
+        wait_for_internal_testing(api, 'build-30', sleep=sleeps.append)
+        self.assertEqual(paths, ['/v1/builds/build-30/buildBetaDetail'] * 3)
+        self.assertEqual(sleeps, [10, 10])
+
+    def test_timeout_does_not_claim_distribution(self):
+        api = lambda _: {'data': {'attributes': {'internalBuildState': 'READY_FOR_BETA_TESTING'}}}
+        with self.assertRaisesRegex(RuntimeError, 'still pending'):
+            wait_for_internal_testing(api, 'build-30', sleep=lambda _: None, attempts=2)
+
+    def test_unexpected_state_does_not_retry_or_release(self):
+        api = lambda _: {'data': {'attributes': {'internalBuildState': 'EXPIRED'}}}
+        with self.assertRaisesRegex(RuntimeError, 'not ready'):
+            wait_for_internal_testing(api, 'build-30', sleep=lambda _: self.fail('Unexpected retry'))

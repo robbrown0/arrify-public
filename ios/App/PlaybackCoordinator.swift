@@ -84,6 +84,7 @@ import Network
     private var connectionFailures = 0
     var profile = "original"
     var isPlaying: Bool { player.timeControlStatus == .playing }
+    private(set) var rowOutputIsPlaying = false
     var ownsOutput: Bool { state?.ownerDeviceId == deviceId }
     var hasOtherOutput: Bool { state?.ownerDeviceId != nil && !ownsOutput }
     var showsPauseControl: Bool {
@@ -337,6 +338,7 @@ import Network
         }
     }
     private func playerStateChanged() {
+        rowOutputIsPlaying = isPlaying
         let item = player.currentItem
         let waiting: String
         switch player.reasonForWaitingToPlay {

@@ -375,6 +375,17 @@ extension NowPlayingArtworkTests {
 }
 
 extension NowPlayingArtworkTests {
+    func testTrackRowStatusFollowsIdentityAndPlaybackWithoutMarkingUpcomingDuplicates() {
+        XCTAssertNil(TrackPlaybackStatus.resolve(trackID: 1, currentTrackID: nil, playing: true, wantsPlayback: true))
+        XCTAssertNil(TrackPlaybackStatus.resolve(trackID: 2, currentTrackID: 1, playing: true, wantsPlayback: true))
+        XCTAssertEqual(TrackPlaybackStatus.resolve(trackID: 1, currentTrackID: 1, playing: true, wantsPlayback: true), .playing)
+        XCTAssertEqual(TrackPlaybackStatus.resolve(trackID: 1, currentTrackID: 1, playing: false, wantsPlayback: false), .paused)
+        XCTAssertEqual(TrackPlaybackStatus.resolve(trackID: 1, currentTrackID: 1, playing: false, wantsPlayback: true), .preparing)
+        XCTAssertNil(TrackPlaybackStatus.resolve(trackID: 1, currentTrackID: 1, upcoming: true, playing: true, wantsPlayback: true))
+        // After Next, the previous song loses its marker and the new song gains it.
+        XCTAssertNil(TrackPlaybackStatus.resolve(trackID: 1, currentTrackID: 2, playing: true, wantsPlayback: true))
+        XCTAssertEqual(TrackPlaybackStatus.resolve(trackID: 2, currentTrackID: 2, playing: true, wantsPlayback: true), .playing)
+    }
     @MainActor func testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets() {
         let volume = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
         let container = VolumeControlContainer(volumeView: volume)

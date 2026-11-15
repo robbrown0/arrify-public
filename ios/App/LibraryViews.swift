@@ -266,9 +266,48 @@ struct BrowserScreen: View {
     }
 }
 
+// Shared by catalog lists, recent songs, and the queue's current entry.
+// Upcoming queue occurrences are deliberately never marked, even for the same ID.
+enum TrackPlaybackStatus: String {
+    case playing = "Now playing"
+    case paused = "Paused"
+    case preparing = "Starting playback"
+
+    static func resolve(trackID: Int, currentTrackID: Int?, upcoming: Bool = false,
+                        playing: Bool, wantsPlayback: Bool) -> Self? {
+        guard !upcoming, currentTrackID == trackID else { return nil }
+        return playing ? .playing : (wantsPlayback ? .preparing : .paused)
+    }
+    var symbol: String {
+        switch self {
+        case .playing: "speaker.wave.2.fill"
+        case .paused: "pause.fill"
+        case .preparing: "speaker.fill"
+        }
+    }
+}
+
+extension PlaybackCoordinator {
+    func rowStatus(for trackID: Int) -> TrackPlaybackStatus? {
+        TrackPlaybackStatus.resolve(trackID: trackID, currentTrackID: state?.currentTrackId,
+            playing: hasOtherOutput ? state?.observed == "playing" && state?.playing == true : rowOutputIsPlaying,
+            wantsPlayback: showsPauseControl)
+    }
+}
+
+struct TrackPlaybackLabel: View {
+    let status: TrackPlaybackStatus
+    var body: some View {
+        Label(status.rawValue, systemImage: status.symbol)
+            .font(.caption.weight(.semibold)).foregroundStyle(.green)
+            .accessibilityHidden(true)
+    }
+}
+
 struct SongRow: View {
     let track: Track
     let model: AppModel
+    private var playbackStatus: TrackPlaybackStatus? { model.playback.rowStatus(for: track.id) }
     private var artwork: ArtworkStore { model.artwork }
     private var favorites: FavoritesStore { model.favorites }
     @State private var showPopularity = false
@@ -279,13 +318,16 @@ struct SongRow: View {
             HStack(spacing: 12) {
                 RemoteCover(path: track.artwork ?? "/api/v1/artwork/\(track.id)", title: "", artwork: artwork).frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(track.title).foregroundStyle(.primary)
+                    Text(track.title).foregroundStyle(playbackStatus == nil ? Color.primary : Color.green)
                     Text(track.artist).font(.subheadline).foregroundStyle(.secondary)
+                    if let playbackStatus { TrackPlaybackLabel(status: playbackStatus) }
                 }
                 Spacer(minLength: 0)
 
             }.frame(minHeight: 48).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel("Play \(track.title) by \(track.artist)")
+            .accessibilityValue(playbackStatus?.rawValue ?? "")
+            .accessibilityIdentifier("songRow-\(track.id)")
         if let popularity = track.popularity, popularity.doubloons > 0 {
             Button { showPopularity = true } label: {
                 Text(String(repeating: "🟡", count: min(3, max(0, popularity.doubloons))) + (popularity.rising == true ? " ↗" : ""))
@@ -295,6 +337,7 @@ struct SongRow: View {
         FavoriteButton(favorites: favorites, track: track)
         SongActionsMenu(track: track, model: model)
         }
+        .listRowBackground(playbackStatus == nil ? nil : Color.green.opacity(0.12))
         .sheet(isPresented: $showPopularity) {
             NavigationStack {
                 List {
@@ -382,7 +425,7 @@ struct DetailScreen: View {
                 if !browser.loading && browser.total == 0 && browser.error == nil { Text("No local songs yet.").foregroundStyle(.secondary) }
             }
         }.scrollContentBackground(.hidden).background(Color.black)
-        .navigationTitle(entry.kind == "channels" ? "Channel" : "Details").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(item.name).navigationBarTitleDisplayMode(.inline)
         .task { await browser.load(); await browser.refreshPopularity() }.refreshable { await browser.load() }
     }
 }
@@ -449,9 +492,12 @@ struct HomeScreen: View {
                                 RemoteCover(path: track.artwork ?? "/api/v1/artwork/\(track.id)", title: "", artwork: model.artwork)
                                     .frame(width: cardWidth, height: cardWidth).clipShape(RoundedRectangle(cornerRadius: 12))
                                 Text(track.title).font(.headline).lineLimit(2)
+                                    .foregroundStyle(model.playback.rowStatus(for: track.id) == nil ? Color.primary : Color.green)
                                 Text(track.artist).foregroundStyle(.secondary).lineLimit(1)
+                                if let status = model.playback.rowStatus(for: track.id) { TrackPlaybackLabel(status: status) }
                             }.frame(width: cardWidth, alignment: .leading)
                         }.buttonStyle(.plain).accessibilityLabel("Play recently played song \(track.title) by \(track.artist)")
+                            .accessibilityValue(model.playback.rowStatus(for: track.id)?.rawValue ?? "")
                     }
                 }
             }
