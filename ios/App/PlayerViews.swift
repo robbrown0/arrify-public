@@ -164,7 +164,7 @@ struct NowPlayingView: View {
                     .disabled(playback.state?.queueControlsAvailable != true)
             }.buttonStyle(.plain)
             if playback.hasOtherOutput {
-                if playback.needsTakeover { PlaybackTakeoverBanner(playback: playback).tint(.green) }
+                if playback.needsTakeover { PlaybackTakeoverBanner(playback: playback, actionIdentifier: "fullScreenTakeOverPlayback").tint(.green) }
             } else {
                 SystemVolumeSlider(onCreate: { playback.expandedVolumeView = $0 })
                     .frame(height: 44).padding(.top, 6)
@@ -441,6 +441,7 @@ struct SystemVolumeSlider: UIViewRepresentable {
 
 struct PlaybackTakeoverBanner: View {
     @Bindable var playback: PlaybackCoordinator
+    var actionIdentifier = "takeOverPlayback"
     var body: some View {
         HStack(spacing: 16) {
             Text("Playing on another device").font(.subheadline.weight(.medium))
@@ -449,7 +450,7 @@ struct PlaybackTakeoverBanner: View {
                 .foregroundStyle(.green)
                 .font(.subheadline.weight(.semibold))
                 .frame(minHeight: 44)
-                .accessibilityIdentifier("takeOverPlayback")
+                .accessibilityIdentifier(actionIdentifier)
         }
         .padding(.horizontal, 16).padding(.vertical, 4)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))

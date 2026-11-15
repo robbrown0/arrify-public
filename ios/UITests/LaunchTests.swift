@@ -633,12 +633,11 @@ extension LaunchTests {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Remote playback takeover available"; shot.lifetime = .keepAlways; add(shot)
         XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
-        let fullPlayer = app.otherElements["fullScreenPlayer"]
-        let fullTakeover = fullPlayer.buttons["takeOverPlayback"]
+        let fullTakeover = app.buttons["fullScreenTakeOverPlayback"]
         XCTAssertTrue(fullTakeover.waitForExistence(timeout: 10))
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: fullTakeover)
         XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 10), .completed)
-        let route = fullPlayer.descendants(matching: .any)["playerAirPlay"].firstMatch
+        let route = app.descendants(matching: .any)["playerAirPlay"].firstMatch
         XCTAssertTrue(route.exists); XCTAssertFalse(route.isEnabled)
         XCTAssertFalse(app.staticTexts["Adjust volume on the playing device"].exists)
         let fullShot = XCTAttachment(screenshot: app.screenshot()); fullShot.name = "Full-screen remote playback banner"; fullShot.lifetime = .keepAlways; add(fullShot)

@@ -130,7 +130,7 @@ still executes the remaining cases.
 - Keep every prior regression and native volume geometry test. Do not publish an
   external build; internal device acceptance is still required after qualification.
 
-Qualification notes: scope full-screen takeover assertions to `fullScreenPlayer`
+Qualification notes: give full-screen takeover its own `fullScreenTakeOverPlayback` identifier
 because the compact banner remains in the underlying view hierarchy. Its button
 must be hittable after presentation and AirPlay must be unavailable. The slow-state
 feedback test holds all state reads during its assertion so a concurrent background
