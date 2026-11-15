@@ -1,5 +1,88 @@
 import XCTest
 final class LaunchTests: XCTestCase {
+    @MainActor func testCollectionShuffleStartsPlaybackAndReflectsState() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_ROW_PLAYBACK"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Albums"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Albums"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["M!ssundaztood"].firstMatch.waitForExistence(timeout: 10))
+        app.staticTexts["M!ssundaztood"].firstMatch.tap()
+        let shuffle = app.buttons["shuffleCollection"]
+        let play = app.buttons["playCollection"]
+        XCTAssertTrue(shuffle.waitForExistence(timeout: 10))
+        XCTAssertEqual(shuffle.value as? String, "off")
+        shuffle.tap()
+        expectation(for: NSPredicate(format: "value == 'on' AND enabled == true"), evaluatedWith: shuffle)
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(play.label, "Pause")
+        XCTAssertTrue(app.navigationBars["M!ssundaztood"].exists)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Collection shuffle active"; shot.lifetime = .keepAlways; add(shot)
+        play.tap()
+        expectation(for: NSPredicate(format: "label == 'Play' AND enabled == true"), evaluatedWith: play)
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(shuffle.value as? String, "on")
+        shuffle.tap()
+        expectation(for: NSPredicate(format: "label == 'Pause' AND enabled == true"), evaluatedWith: play)
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(shuffle.value as? String, "on", "Resume must retain shuffle")
+        app.buttons["expandPlayer"].tap()
+        let playerShuffle = app.buttons["Shuffle upcoming songs"]
+        XCTAssertTrue(playerShuffle.waitForExistence(timeout: 10))
+        XCTAssertEqual(playerShuffle.value as? String, "on")
+        playerShuffle.tap()
+        expectation(for: NSPredicate(format: "value == 'off'"), evaluatedWith: playerShuffle)
+        waitForExpectations(timeout: 10)
+        app.buttons["Close player"].tap()
+        XCTAssertEqual(shuffle.value as? String, "off", "Both shuffle controls must reflect the same state")
+        shuffle.tap()
+        expectation(for: NSPredicate(format: "value == 'on' AND enabled == true"), evaluatedWith: shuffle)
+        waitForExpectations(timeout: 10)
+        shuffle.tap()
+        expectation(for: NSPredicate(format: "value == 'off' AND enabled == true"), evaluatedWith: shuffle)
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(play.label, "Pause", "Turning shuffle off must not stop playback")
+    }
+    @MainActor func testCurrentTrackIsMarkedInListAndQueue() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_ROW_PLAYBACK"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Library"].firstMatch.tap()
+        app.buttons["Songs"].firstMatch.tap()
+        let current = app.buttons["songRow-1"]
+        let other = app.buttons["songRow-2"]
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
+        XCTAssertEqual(current.value as? String, "Now playing")
+        XCTAssertEqual(other.value as? String ?? "", "")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Current song highlighted in list"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["Pause"].firstMatch.tap()
+        let paused = NSPredicate(format: "value == %@", "Paused")
+        expectation(for: paused, evaluatedWith: current)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.buttons["Close player"].exists, "Playback controls must not open the player")
+        let expand = app.buttons["expandPlayer"]
+        expand.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.85)).tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5), "The open metadata area must open the player")
+        XCTAssertTrue(app.buttons["upNext"].waitForExistence(timeout: 5))
+        app.buttons["upNext"].tap()
+        let queueCurrent = app.descendants(matching: .any)["queueCurrentTrack"].firstMatch
+        XCTAssertTrue(queueCurrent.waitForExistence(timeout: 10))
+        XCTAssertEqual(queueCurrent.value as? String, "Paused")
+        XCTAssertTrue(app.buttons["Play queued Family Portrait"].exists)
+        XCTAssertEqual(app.buttons["Play queued Just Like a Pill"].value as? String ?? "", "", "An upcoming duplicate must not be marked current")
+        let queueShot = XCTAttachment(screenshot: app.screenshot()); queueShot.name = "Queue current track and context"; queueShot.lifetime = .keepAlways; add(queueShot)
+    }
     @MainActor func testAccountDeletionRequiresConfirmationAndPassword() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
@@ -163,15 +246,20 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Arrify library"; attachment.lifetime = .keepAlways; add(attachment)
-        let search = app.searchFields.firstMatch
+        let tabletSearch = app.textFields["tabletSearch"]
+        let search = tabletSearch.exists ? tabletSearch : app.searchFields.firstMatch
         if !search.waitForExistence(timeout: 5) {
             app.buttons["Search"].firstMatch.tap()
         }
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap(); search.typeText("missing")
         XCTAssertTrue(app.staticTexts["No matching songs"].waitForExistence(timeout: 10))
-        let closeSearch = app.buttons["Close"].exists ? app.buttons["Close"] : app.buttons["Cancel"]
-        closeSearch.tap()
+        if tabletSearch.exists {
+            search.typeText("\n")
+        } else {
+            let closeSearch = app.buttons["Close"].exists ? app.buttons["Close"] : app.buttons["Cancel"]
+            closeSearch.tap()
+        }
         app.buttons["Settings"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["privacyPolicy"].firstMatch.exists)
@@ -293,7 +381,7 @@ extension LaunchTests {
         XCTAssertTrue(addSong.waitForExistence(timeout: 10)); addSong.tap()
         XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
         app.buttons["Library"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["Liked songs"].waitForExistence(timeout: 5)); app.buttons["Liked songs"].tap()
+        XCTAssertTrue(app.buttons["Liked songs"].firstMatch.waitForExistence(timeout: 5)); app.buttons["Liked songs"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Liked songs"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["Remove from Liked songs: Just Like a Pill"].tap()

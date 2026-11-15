@@ -1,5 +1,8 @@
 # Release baseline
 
+Native releases must also follow the [iOS regression register](IOS-REGRESSIONS.md).
+Both iPhone and iPad qualification are mandatory before every TestFlight upload.
+
 This is the first preparation step for native iOS development. It reconciles the
 player fixes previously supplied through production bind mounts and establishes
 an independently buildable, tested player image. The request/acquisition helper

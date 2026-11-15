@@ -10,6 +10,22 @@ else:
     from testflight_beta_review import API, request, signing_token
 
 
+def wait_for_internal_testing(api, build_id, sleep=time.sleep, attempts=30):
+    # Apple can report READY briefly after VALID and automatic group assignment.
+    # Poll read-only; never re-upload or fall back to external distribution.
+    for attempt in range(attempts):
+        detail = api(f"/v1/builds/{build_id}/buildBetaDetail")['data']['attributes']
+        state = detail.get('internalBuildState')
+        if state == 'IN_BETA_TESTING':
+            return
+        if state != 'READY_FOR_BETA_TESTING':
+            raise RuntimeError('Internal build not ready: ' + str(state))
+        if attempt + 1 < attempts:
+            print('Waiting for internal distribution state', flush=True)
+            sleep(10)
+    raise RuntimeError('Internal distribution still pending; retry assignment later')
+
+
 def main():
     number, version = os.environ['BUILD_NUMBER'], os.environ['APP_VERSION']
     if not re.fullmatch(r'[1-9][0-9]*', number) or not re.fullmatch(r'\d+\.\d+\.\d+', version):
@@ -41,9 +57,7 @@ def main():
         path = f"/v1/betaGroups/{group['id']}/relationships/builds"
         if not any(x['id']==build['id'] for x in api(path+'?limit=200')['data']):
             api(path,'POST',{'data':[{'type':'builds','id':build['id']}]})
-    detail = api(f"/v1/builds/{build['id']}/buildBetaDetail")['data']['attributes']
-    if detail.get('internalBuildState') != 'IN_BETA_TESTING':
-        raise RuntimeError('Internal build not yet testing: ' + str(detail.get('internalBuildState')))
+    wait_for_internal_testing(api, build["id"])
     print(f'Arrify {version} ({number}) assigned to internal groups only. No beta-review submission.')
 
 if __name__ == '__main__':

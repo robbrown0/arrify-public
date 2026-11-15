@@ -215,7 +215,11 @@ struct UpNextView: View {
         NavigationStack {
             List {
                 if let track = playback.track {
-                    Section(playback.contextName) { trackRow(track) }
+                    Section {
+                        trackRow(track, status: playback.rowStatus(for: track.id))
+                            .listRowBackground(Color.green.opacity(0.12))
+                            .accessibilityIdentifier("queueCurrentTrack")
+                    } header: { Text("Current track") } footer: { Text(playback.contextName) }
                 }
                 Section("Up Next · \(total)") {
                     if let error { Text(error).foregroundStyle(.orange) }
@@ -254,8 +258,12 @@ struct UpNextView: View {
                 .disabled(editing)
         }.presentationDetents([.large])
     }
-    private func trackRow(_ track: Track) -> some View {
-        VStack(alignment: .leading, spacing: 4) { Text(track.title).lineLimit(2); Text(track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
+    private func trackRow(_ track: Track, status: TrackPlaybackStatus? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(track.title).lineLimit(2).foregroundStyle(status == nil ? Color.primary : Color.green)
+            Text(track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            if let status { TrackPlaybackLabel(status: status) }
+        }.accessibilityElement(children: .combine).accessibilityValue(status?.rawValue ?? "")
     }
     private func load(offset: Int = 0) async {
         guard offset == 0 || !loading else { return }
@@ -425,7 +433,7 @@ struct TabletPlayerBar: View {
                             Text(track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                             Text(playback.contextName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    }.contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
                 VStack(spacing: 8) {
                     HStack(spacing: 16) {
