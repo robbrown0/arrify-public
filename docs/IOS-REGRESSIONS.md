@@ -87,7 +87,9 @@ parallel device matrix and distribution still depends on both passing.
 
 Qualification caught a user-scroll regression in the initial navigation change:
 the long Songs list moved, but the phase callback did not suspend following on
-iPad. Lists now also observe vertical drags with a simultaneous gesture, preserving
-native scrolling and row controls. The same safeguard applies to the queue. Keep
+iPad. Lists now also observe the native scroll view pan recognizer from the current
+row, without adding a competing gesture or replacing its delegate. A first
+simultaneous-gesture attempt interfered with a song menu; retain menu tests as
+well as scroll tests. The same safeguard applies to the queue. Keep
 the long-list test's actual drag, return-button assertion and recenter assertion;
 initial positioning alone is insufficient evidence that manual browsing works.

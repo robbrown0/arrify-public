@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import ArrifyCore
 
 struct RemoteCover: View {
@@ -258,7 +259,7 @@ struct BrowserScreen: View {
         }
     }
     private var results: some View {
-        FollowingSongList(model: model, browser: browser, query: activeQuery, follows: browser.kind == "tracks" && activeQuery.isEmpty && !likedOnly) {
+        FollowingSongList(model: model, browser: browser, query: activeQuery, follows: browser.kind == "tracks" && activeQuery.isEmpty && !likedOnly) { suspendFollowing in
             Section {
                 if let artist {
                     NavigationLink("All songs") {
@@ -274,7 +275,7 @@ struct BrowserScreen: View {
                 ForEach(Array(trackSections.enumerated()), id: \.offset) { _, section in
                     Section(section.name) {
                         ForEach(section.rows) { row in
-                            SongRow(track: row.track, model: model) {
+                            SongRow(track: row.track, model: model, onScroll: suspendFollowing) {
                                 browser.resumeFollowingRequest += 1
                                 Task { await model.playback.play(source: catalogSource, trackId: row.track.id) }
                             }.id("song-\(row.id)")
@@ -386,6 +387,42 @@ struct BrowserScreen: View {
     }
 }
 
+// Observe the existing UIKit pan recognizer from a visible current-song row.
+// No new recognizer, delegate replacement or hit-testing layer: native menus,
+// row taps, swipe actions and queue reordering retain their input handling.
+struct NativeListScrollObserver: UIViewRepresentable {
+    var onScroll: () -> Void
+    func makeUIView(context: Context) -> ObserverView { ObserverView() }
+    func updateUIView(_ view: ObserverView, context: Context) { view.onScroll = onScroll; view.connect() }
+    static func dismantleUIView(_ view: ObserverView, coordinator: ()) { view.disconnect() }
+    final class ObserverView: UIView {
+        var onScroll: (() -> Void)?
+        private weak var pan: UIPanGestureRecognizer?
+        override init(frame: CGRect) { super.init(frame: frame); isUserInteractionEnabled = false }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func didMoveToWindow() { super.didMoveToWindow(); if window == nil { disconnect() } else { connect() } }
+        override func didMoveToSuperview() { super.didMoveToSuperview(); connect() }
+        override func layoutSubviews() { super.layoutSubviews(); connect() }
+        func connect() {
+            var ancestor = superview
+            while let view = ancestor {
+                if let scroll = view as? UIScrollView {
+                    let recognizer = scroll.panGestureRecognizer
+                    guard pan !== recognizer else { return }
+                    disconnect(); pan = recognizer
+                    recognizer.addTarget(self, action: #selector(scrolled(_:)))
+                    return
+                }
+                ancestor = view.superview
+            }
+        }
+        func disconnect() { pan?.removeTarget(self, action: #selector(scrolled(_:))); pan = nil }
+        @objc private func scrolled(_ recognizer: UIPanGestureRecognizer) {
+            if recognizer.state == .began { onScroll?() }
+        }
+    }
+}
+
 /// User-driven scrolling always wins over playback following. Only the active
 /// collection (or the unfiltered Songs view) follows, never a different playlist.
 struct FollowingSongList<Content: View>: View {
@@ -393,23 +430,17 @@ struct FollowingSongList<Content: View>: View {
     let browser: LibraryBrowser
     var query = ""
     var follows: Bool
-    @ViewBuilder let content: () -> Content
+    @ViewBuilder let content: (@escaping () -> Void) -> Content
     @State private var following = true
     @State private var jump = 0
     private var currentID: Int? { model.playback.state?.currentTrackId }
     var body: some View {
         ScrollViewReader { proxy in
-            List { content() }
+            List { content { following = false } }
                 .scrollContentBackground(.hidden).background(Color.black)
                 .onScrollPhaseChange { _, phase in
                     if phase == .interacting || phase == .tracking { following = false }
                 }
-                // List can omit phase callbacks during a touch-driven scroll.
-                // Observe the drag simultaneously so native scrolling and row
-                // controls keep their own gestures and browsing always wins.
-                .simultaneousGesture(DragGesture(minimumDistance: 10).onChanged { value in
-                    if abs(value.translation.height) > abs(value.translation.width) { following = false }
-                })
                 .onChange(of: query) { following = false }
                 .onChange(of: browser.navigationRevision) { following = false }
                 .onChange(of: browser.sort) { following = false }
@@ -486,6 +517,7 @@ struct TrackPlaybackLabel: View {
 struct SongRow: View {
     let track: Track
     let model: AppModel
+    var onScroll: (() -> Void)? = nil
     private var playbackStatus: TrackPlaybackStatus? { model.playback.rowStatus(for: track.id) }
     private var artwork: ArtworkStore { model.artwork }
     private var favorites: FavoritesStore { model.favorites }
@@ -515,6 +547,11 @@ struct SongRow: View {
         }
         FavoriteButton(favorites: favorites, track: track)
         SongActionsMenu(track: track, model: model)
+        }
+        .background {
+            if track.id == model.playback.state?.currentTrackId, let onScroll {
+                NativeListScrollObserver(onScroll: onScroll)
+            }
         }
         .listRowBackground(playbackStatus == nil ? nil : Color.green.opacity(0.12))
         .sheet(isPresented: $showPopularity) {
@@ -579,7 +616,7 @@ struct DetailScreen: View {
     }
     var body: some View {
         let item = browser.item ?? entry
-        FollowingSongList(model: model, browser: browser, follows: model.playback.isCurrentSource(item.source)) {
+        FollowingSongList(model: model, browser: browser, follows: model.playback.isCurrentSource(item.source)) { suspendFollowing in
             Section {
                 VStack(spacing: 16) {
                     RemoteCover(path: item.artwork ?? entry.artwork, title: item.name, artwork: model.artwork, channel: item.kind == "channels").frame(maxWidth: 260).clipShape(RoundedRectangle(cornerRadius: 16))
@@ -608,7 +645,7 @@ struct DetailScreen: View {
                 RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
                 ForEach(browser.trackRows) { row in
                     let track = row.track
-                    SongRow(track: track, model: model) { browser.resumeFollowingRequest += 1; Task { await model.playback.play(source: item.source, trackId: track.id) } }.id("song-\(row.id)")
+                    SongRow(track: track, model: model, onScroll: suspendFollowing) { browser.resumeFollowingRequest += 1; Task { await model.playback.play(source: item.source, trackId: track.id) } }.id("song-\(row.id)")
                 }
                 if let offset = browser.nextOffset { ProgressView().frame(maxWidth: .infinity).task(id: offset) { await browser.load(more: true) } }
                 if browser.error != nil { Button("Retry") { Task { await browser.load() } } }
