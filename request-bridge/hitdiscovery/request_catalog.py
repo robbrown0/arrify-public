@@ -33,7 +33,7 @@ def choose_release(recording):
     if not choices:return None
     _,release,group=min(choices,key=lambda x:x[0])
     return {'resolution_status':'resolved','recording_id':recording['id'],'title':recording['title'],'artist':artists[0]['name'],
-            'artist_mbid':aid,'album':group['title'],'album_year':(group.get('first-release-date') or release.get('date',''))[:4],'album_type':group['primary-type'],'release_group_id':group['id'],
+            'artist_mbid':aid,'album':group['title'],'album_year':(group.get('first-release-date') or release.get('date',''))[:4],'album_type':group['primary-type'],'album_secondary_types':group.get('secondary-types',[]),'release_group_id':group['id'],
             'release_id':release['id'],'release_date':recording.get('first-release-date') or release.get('date',''),
             'isrcs':recording.get('isrcs',[]),'metadata_url':'https://musicbrainz.org/recording/'+recording['id']}
 
@@ -206,7 +206,7 @@ def album_for_song(artist,title,get):
             # Missing dates keep the full verification path; never guess an album.
             year=result.get('year','')
             remaining=candidates[index+1:]
-            if (result.get('album_type')=='Album' and re.fullmatch(r'\d{4}',year or '')
+            if (result.get('album_type')=='Album' and not result['resolved'].get('album_secondary_types') and re.fullmatch(r'\d{4}',year or '')
                     and all(re.match(r'^\d{4}',r.get('first-release-date',''))
                             and r['first-release-date'][:4]>=year for r in remaining)):
                 break
