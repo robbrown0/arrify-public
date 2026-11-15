@@ -15,6 +15,7 @@ regression to obtain a release. Record new user-reported regressions here.
 | Play-here banner hides Settings/Library content | `testTakeoverFooterClearsAllDestinations`, `testSettingsClearsPlaybackFooterWithLargeText`, `testLastChannelClearsMiniPlayerAndRepeatControls` | Home, Library/details, Channels, Search, Settings; banner and reconnect states; Dynamic Type. |
 | Search keyboard obscures content or leaves footer misplaced | `testTabletSearchKeepsHeaderAndPlayerVisible`, `testLongTitlePlayerDismissalRestoresSearchResponsiveness` | Open/close keyboard, open/dismiss full-screen player, rotate. |
 | Connection status wraps awkwardly or misrepresents route | Connection sheet coverage in `testHomeRecentSongsAndFullScreenSongActions`; core route selection/fallback tests | Verify live local/public changes without starting playback; long addresses remain readable. |
+| iPad mini-player empty metadata area does not open full screen | `testCurrentTrackIsMarkedInListAndQueue` taps the trailing open area and verifies Pause does not expand | Tap blank space beside title; playback, volume, AirPlay and Queue remain independent. |
 | Current song cannot be spotted in lists | `testTrackRowStatusFollowsIdentityAndPlayback`, `testCurrentTrackIsMarkedInListAndQueue` on phone and tablet | Playlist, album, mood, station, search, liked songs and recent songs; Next, pause/resume, remote playback. Upcoming duplicates must not appear current. Static icon plus text supports Reduce Motion and differentiation without color. |
 | Internal release reports failure immediately after Apple processing | `tests.test_testflight_internal` | Confirm exact build is VALID, INTERNAL_ONLY and IN_BETA_TESTING. Never submit external review without user authorization. |
 | App/cache growth | Bundle-size artifact on every upload; existing cache bounds and lifecycle tests | Review payload delta before distribution; exported IPA size is not App Store thinned installed size. |
@@ -26,7 +27,7 @@ or pause symbol with a text status make the track identifiable without an animat
 analyzer or audio processing. VoiceOver receives the status as the row value.
 Only the current Queue section receives this treatment; upcoming occurrences are
 not marked by matching their song ID. Detail navigation titles use the collection
-name instead of “Details.” No automatic scrolling or changed row tap behavior.
+name instead of “Details.” No automatic scrolling or changed song-row tap behavior. The iPad mini-player metadata button includes its open space using a rectangular content shape; adjacent controls remain separate.
 
 References reviewed:
 - [Apple Music symbols](https://support.apple.com/en-jo/guide/music/mus131245dbe/mac)

@@ -22,7 +22,10 @@ final class LaunchTests: XCTestCase {
         let paused = NSPredicate(format: "value == %@", "Paused")
         expectation(for: paused, evaluatedWith: current)
         waitForExpectations(timeout: 10)
-        app.buttons["expandPlayer"].tap()
+        XCTAssertFalse(app.buttons["Close player"].exists, "Playback controls must not open the player")
+        let expand = app.buttons["expandPlayer"]
+        expand.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.85)).tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5), "The open metadata area must open the player")
         XCTAssertTrue(app.buttons["upNext"].waitForExistence(timeout: 5))
         app.buttons["upNext"].tap()
         let queueCurrent = app.descendants(matching: .any)["queueCurrentTrack"].firstMatch

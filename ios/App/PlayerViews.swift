@@ -433,7 +433,7 @@ struct TabletPlayerBar: View {
                             Text(track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                             Text(playback.contextName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    }.contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
                 VStack(spacing: 8) {
                     HStack(spacing: 16) {

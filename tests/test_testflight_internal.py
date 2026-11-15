@@ -2,6 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 from tools import testflight_internal as internal
+from tools.testflight_internal import wait_for_internal_testing
 
 
 class InternalDistributionTests(unittest.TestCase):
@@ -36,10 +37,6 @@ class InternalDistributionTests(unittest.TestCase):
     def test_pending_state_does_not_report_success(self):
         with self.assertRaisesRegex(RuntimeError, 'not ready'):
             self.run_distribution(state='PROCESSING')
-
-
-import unittest
-from tools.testflight_internal import wait_for_internal_testing
 
 
 class InternalDistributionPollingTests(unittest.TestCase):
