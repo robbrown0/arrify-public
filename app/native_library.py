@@ -65,7 +65,7 @@ def selection(library, accounts, uid, kind, key):
         from .native_catalog import ordered_ids, liked_ids
         try: options = json.loads(key)
         except (ValueError, TypeError): raise NativeError(400, 'invalid_request', 'Invalid songs selection.') from None
-        if not isinstance(options, dict) or set(options) - {'q', 'sort', 'liked'} or not isinstance(options.get('q', ''), str) or type(options.get('liked', False)) is not bool:
+        if not isinstance(options, dict) or set(options) - {'q', 'sort', 'liked'} or not isinstance(options.get('q', ''), str) or len(options.get('q', '')) > 200 or type(options.get('liked', False)) is not bool:
             raise NativeError(400, 'invalid_request', 'Invalid songs selection.')
         with library.index_lock: index = library.search
         ids = list(ordered_ids(index, 'tracks', options.get('q', ''), options.get('sort', 'title'),

@@ -275,6 +275,7 @@ struct BrowserScreen: View {
                     Section(section.name) {
                         ForEach(section.rows) { row in
                             SongRow(track: row.track, model: model) {
+                                browser.resumeFollowingRequest += 1
                                 Task { await model.playback.play(source: catalogSource, trackId: row.track.id) }
                             }.id("song-\(row.id)")
                         }
@@ -343,7 +344,7 @@ struct BrowserScreen: View {
             }
         }
         .task(id: requestKey) {
-            guard loadedRequestKey != requestKey || browser.updated == nil else { return }
+            if loadedRequestKey == requestKey, let updated = browser.updated, Date().timeIntervalSince(updated) < 30 { return }
             loadedRequestKey = requestKey
             browser.sort = sortOrder; browser.likedOnly = likedOnly; browser.artist = artist
             browser.resetSearch()
@@ -408,6 +409,8 @@ struct FollowingSongList<Content: View>: View {
                 .onChange(of: browser.sort) { following = false }
                 .onChange(of: browser.likedOnly) { following = false }
                 .onChange(of: follows) { if follows && following { jump += 1 } }
+                .onChange(of: browser.resumeFollowingRequest) { following = true }
+                .onChange(of: model.playback.state?.playId) { if following && follows { jump += 1 } }
                 .onChange(of: currentID) { if following && follows { jump += 1 } }
                 .onChange(of: browser.updated) {
                     if following && follows { center(proxy) }
@@ -581,7 +584,7 @@ struct DetailScreen: View {
                         Button { Task { await model.playback.toggleSource(item.source) } } label: { Label(model.playback.sourceShowsPause(item.source) ? "Pause" : "Play", systemImage: model.playback.sourceShowsPause(item.source) ? "pause.fill" : "play.fill").frame(maxWidth: .infinity, minHeight: 36) }.buttonStyle(.borderedProminent).tint(.green).foregroundStyle(.black).accessibilityIdentifier("playCollection")
                         if item.kind != "channels" {
                             let shuffled = model.playback.sourceShowsShuffle(item.source)
-                            Button { Task { await model.playback.shuffleSource(item.source) } } label: {
+                            Button { browser.resumeFollowingRequest += 1; Task { await model.playback.shuffleSource(item.source) } } label: {
                                 Label("Shuffle", systemImage: "shuffle")
                                     .frame(maxWidth: .infinity, minHeight: 36)
                             }.buttonStyle(.borderedProminent)
@@ -599,7 +602,7 @@ struct DetailScreen: View {
                 RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
                 ForEach(browser.trackRows) { row in
                     let track = row.track
-                    SongRow(track: track, model: model) { Task { await model.playback.play(source: item.source, trackId: track.id) } }.id("song-\(row.id)")
+                    SongRow(track: track, model: model) { browser.resumeFollowingRequest += 1; Task { await model.playback.play(source: item.source, trackId: track.id) } }.id("song-\(row.id)")
                 }
                 if let offset = browser.nextOffset { ProgressView().frame(maxWidth: .infinity).task(id: offset) { await browser.load(more: true) } }
                 if browser.error != nil { Button("Retry") { Task { await browser.load() } } }
@@ -607,7 +610,7 @@ struct DetailScreen: View {
             }
         }.scrollContentBackground(.hidden).background(Color.black)
         .navigationTitle(item.name).navigationBarTitleDisplayMode(.inline)
-        .task { if browser.updated == nil { await browser.load(around: model.playback.isCurrentSource(item.source) ? model.playback.state?.currentTrackId : nil) }; await browser.refreshPopularity() }.refreshable { await browser.load() }
+        .task { if browser.updated == nil || Date().timeIntervalSince(browser.updated!) >= 30 { await browser.load(around: model.playback.isCurrentSource(item.source) ? model.playback.state?.currentTrackId : nil) }; await browser.refreshPopularity() }.refreshable { await browser.load() }
     }
 }
 

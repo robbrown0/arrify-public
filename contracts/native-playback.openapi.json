@@ -1053,11 +1053,9 @@
             "description": "Absolute index of the first returned row; optional for older servers."
           },
           "previous_offset": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "description": "Earlier page offset for a directly positioned window; optional for older servers."
+            "type": "integer",
+            "description": "Earlier page offset for a directly positioned window; optional for older servers.",
+            "nullable": true
           }
         },
         "required": [
@@ -1357,12 +1355,14 @@
               "channels",
               "playlists",
               "favorites",
-              "recent"
+              "recent",
+              "catalog"
             ]
           },
           "id": {
             "type": "string",
-            "maxLength": 200
+            "maxLength": 1024,
+            "description": "Source ID. For catalog, JSON containing q (search text), sort (title/artist/recent), and liked (boolean); expands the entire authenticated selection on the server."
           }
         },
         "required": [
@@ -1515,11 +1515,9 @@
             "description": "Absolute index of the first returned row; optional for older servers."
           },
           "previous_offset": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "description": "Earlier page offset for a directly positioned window; optional for older servers."
+            "type": "integer",
+            "description": "Earlier page offset for a directly positioned window; optional for older servers.",
+            "nullable": true
           }
         },
         "required": [

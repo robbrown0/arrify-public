@@ -48,6 +48,7 @@ import CryptoKit
     var likedOnly = false
     var artist: String?
     var navigationRevision = 0
+    var resumeFollowingRequest = 0
     struct TrackRow: Identifiable {
         let id: Int
         let track: Track
