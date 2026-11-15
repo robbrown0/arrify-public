@@ -573,10 +573,10 @@ struct SongRow: View {
 /// the provider for the next opening, not UIButton.menu while it is onscreen.
 struct StableSongMenu: UIViewRepresentable {
     let label: String
-    let actions: () -> [UIMenuElement]
-    final class Coordinator {
-        var actions: () -> [UIMenuElement]
-        init(actions: @escaping () -> [UIMenuElement]) { self.actions = actions }
+    let actions: @MainActor () -> [UIMenuElement]
+    @MainActor final class Coordinator {
+        var actions: @MainActor () -> [UIMenuElement]
+        init(actions: @escaping @MainActor () -> [UIMenuElement]) { self.actions = actions }
     }
     func makeCoordinator() -> Coordinator { Coordinator(actions: actions) }
     func makeUIView(context: Context) -> UIButton {
@@ -615,7 +615,7 @@ struct SongActionsMenu: View, Equatable {
             // Evaluated once when the menu opens. Playback/metadata updates may
             // change the next menu, never the one the listener is scrolling.
             let selected = track
-            func action(_ title: String, _ image: String, _ perform: @escaping () -> Void) -> UIAction {
+            @MainActor func action(_ title: String, _ image: String, _ perform: @escaping @MainActor () -> Void) -> UIAction {
                 UIAction(title: title, image: UIImage(systemName: image)) { _ in perform() }
             }
             let liked = favorites.ids.contains(selected.id)
