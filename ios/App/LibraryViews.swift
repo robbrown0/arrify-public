@@ -227,42 +227,169 @@ struct BrowserScreen: View {
     let title: String
     @State private var browser: LibraryBrowser
     @State private var query = ""
+    @AppStorage private var sortOrder: String
+    @AppStorage("albumGrid") private var albumGrid = true
+    @State private var likedOnly = false
     let externalQuery: String?
+    let artist: String?
     private var activeQuery: String { externalQuery ?? query }
-    init(model: AppModel, title: String, kind: String, externalQuery: String? = nil) {
-        self.model = model; self.title = title; self.externalQuery = externalQuery
+    private var requestKey: String { activeQuery + "|" + sortOrder + "|" + String(likedOnly) }
+    init(model: AppModel, title: String, kind: String, externalQuery: String? = nil, artist: String? = nil) {
+        self.model = model; self.title = title; self.externalQuery = externalQuery; self.artist = artist
         _browser = State(initialValue: LibraryBrowser(api: model.api, kind: kind))
+        _sortOrder = AppStorage(wrappedValue: "title", "librarySort-" + kind)
     }
     var body: some View {
         Group {
-            if externalQuery != nil || UIDevice.current.userInterfaceIdiom == .pad { results }
-            else { results.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(title.lowercased())") }
+            if externalQuery != nil { results }
+            else if UIDevice.current.userInterfaceIdiom == .pad {
+                results.safeAreaInset(edge: .top) {
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search \(title.lowercased())", text: $query)
+                            .accessibilityIdentifier("librarySearch")
+                        if !query.isEmpty { Button("Clear", systemImage: "xmark.circle.fill") { query = "" }.labelStyle(.iconOnly) }
+                    }.padding(12).background(.bar)
+                }
+            } else { results.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(title.lowercased())") }
         }
     }
     private var results: some View {
-        List {
-            Section { RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error) }
+        FollowingSongList(model: model, browser: browser, query: activeQuery, follows: browser.kind == "tracks" && activeQuery.isEmpty) {
+            Section {
+                if let artist {
+                    NavigationLink("All songs") {
+                        DetailScreen(model: model, entry: LibraryEntry(id: artist, kind: "artists", name: title))
+                    }
+                }
+                RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
+            }
+            if browser.previousOffset != nil {
+                Button("Earlier items") { Task { await browser.load(query: activeQuery, previous: true) } }.disabled(browser.loading)
+            }
             if browser.kind == "tracks" {
-                ForEach(browser.tracks) { track in SongRow(track: track, model: model) { Task { await model.playback.play(track, in: browser.tracks) } } }
+                ForEach(browser.trackRows) { row in
+                    let track = row.track
+                    SongRow(track: track, model: model) {
+                        Task { await model.playback.play(source: catalogSource, trackId: track.id) }
+                    }.id(row.id)
+                }
+            } else if browser.kind == "albums" && albumGrid {
+                Section {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 145, maximum: 240))], alignment: .leading, spacing: 20) {
+                        ForEach(browser.entries, id: \.identity) { item in
+                            NavigationLink { DetailScreen(model: model, entry: item) } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    RemoteCover(path: item.artwork, title: item.name, artwork: model.artwork)
+                                        .aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 10))
+                                    Text(item.name).font(.headline).lineLimit(2)
+                                    Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }.listRowBackground(Color.clear)
             } else {
                 ForEach(browser.entries, id: \.identity) { item in
-                    NavigationLink { DetailScreen(model: model, entry: item) } label: { EntryRow(item: item, artwork: model.artwork) }
+                    NavigationLink {
+                        if item.kind == "artists" {
+                            BrowserScreen(model: model, title: item.name, kind: "albums", artist: item.id)
+                        } else { DetailScreen(model: model, entry: item) }
+                    } label: { EntryRow(item: item, artwork: model.artwork) }
                 }
             }
             if !browser.loading && browser.tracks.isEmpty && browser.entries.isEmpty && browser.error == nil {
                 ContentUnavailableView(activeQuery.isEmpty ? "No \(title.lowercased()) yet" : "No matching \(title.lowercased())", systemImage: "magnifyingglass", description: Text(activeQuery.isEmpty ? "Music added to your server will appear here." : "Try another name."))
             }
-            if browser.nextOffset != nil { Button("Load more \(title.lowercased())") { Task { await browser.load(query: activeQuery, more: true) } }.disabled(browser.loading) }
+            if let offset = browser.nextOffset {
+                ProgressView().frame(maxWidth: .infinity)
+                    .task(id: "\(offset)-\(browser.loading)") { await browser.load(query: activeQuery, more: true) }
+            }
             if browser.error != nil { Button("Retry") { Task { await browser.load(query: activeQuery) } } }
-        }.scrollContentBackground(.hidden).background(Color.black)
+        }
         .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
-        .task(id: activeQuery) {
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Sort", selection: $sortOrder) {
+                        Text(browser.kind == "tracks" ? "Title" : "Name").tag("title")
+                        if browser.kind != "artists" { Text("Artist").tag("artist"); Text("Recently added").tag("recent") }
+                    }
+                    if browser.kind == "tracks" { Toggle("Liked songs only", isOn: $likedOnly) }
+                    if browser.kind == "albums" { Toggle("Album grid", isOn: $albumGrid) }
+                    if sortOrder == "title" {
+                        Menu("Jump to letter") {
+                            ForEach(Array("#ABCDEFGHIJKLMNOPQRSTUVWXYZ").map(String.init), id: \.self) { letter in
+                                Button(letter) { Task { await browser.load(query: activeQuery, letter: letter) } }
+                            }
+                        }
+                    }
+                } label: { Image(systemName: "line.3.horizontal.decrease") }
+                .accessibilityLabel("Library options")
+            }
+        }
+        .task(id: requestKey) {
+            browser.sort = sortOrder; browser.likedOnly = likedOnly; browser.artist = artist
             browser.resetSearch()
             do { try await Task.sleep(for: .milliseconds(activeQuery.isEmpty ? 0 : 300)) } catch { return }
-            await browser.load(query: activeQuery)
-            await browser.refreshPopularity(query: activeQuery)
+            await browser.load(query: activeQuery, around: activeQuery.isEmpty && browser.kind == "tracks" ? model.playback.state?.currentTrackId : nil)
         }
         .refreshable { await browser.load(query: activeQuery) }
+    }
+    private var catalogSource: LibrarySource {
+        let options: [String: Any] = ["q": activeQuery, "sort": sortOrder, "liked": likedOnly]
+        let data = (try? JSONSerialization.data(withJSONObject: options, options: .sortedKeys)) ?? Data()
+        return LibrarySource(kind: "catalog", id: String(decoding: data, as: UTF8.self))
+    }
+}
+
+/// User-driven scrolling always wins over playback following. Only the active
+/// collection (or the unfiltered Songs view) follows, never a different playlist.
+struct FollowingSongList<Content: View>: View {
+    let model: AppModel
+    let browser: LibraryBrowser
+    var query = ""
+    var follows: Bool
+    @ViewBuilder let content: () -> Content
+    @State private var following = true
+    @State private var jump = 0
+    private var currentID: Int? { model.playback.state?.currentTrackId }
+    var body: some View {
+        ScrollViewReader { proxy in
+            List { content() }
+                .scrollContentBackground(.hidden).background(Color.black)
+                .onScrollPhaseChange { _, phase in
+                    if phase == .interacting || phase == .tracking { following = false }
+                }
+                .onChange(of: query) { following = false }
+                .onChange(of: browser.navigationRevision) { following = false }
+                .onChange(of: browser.sort) { following = false }
+                .onChange(of: browser.likedOnly) { following = false }
+                .onChange(of: follows) { if follows && following { jump += 1 } }
+                .onChange(of: currentID) { if following && follows { jump += 1 } }
+                .onChange(of: browser.updated) {
+                    if following && follows { center(proxy) }
+                }
+                .task(id: jump) {
+                    guard jump > 0, following, follows, let currentID else { return }
+                    if !browser.tracks.contains(where: { $0.id == currentID }) {
+                        await browser.load(query: query, around: currentID)
+                    }
+                    guard !Task.isCancelled, following, self.currentID == currentID else { return }
+                    center(proxy)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    if !following && follows && currentID != nil {
+                        Button("Show playing song", systemImage: "speaker.wave.2.fill") { following = true; jump += 1 }
+                            .buttonStyle(.borderedProminent).tint(.green).foregroundStyle(.black)
+                            .padding(8).frame(maxWidth: .infinity).background(.bar)
+                    }
+                }
+        }
+    }
+    private func center(_ proxy: ScrollViewProxy) {
+        guard let currentID, let row = browser.trackRows.first(where: { $0.track.id == currentID }) else { return }
+        proxy.scrollTo(row.id, anchor: .center)
     }
 }
 
@@ -400,7 +527,7 @@ struct DetailScreen: View {
     }
     var body: some View {
         let item = browser.item ?? entry
-        List {
+        FollowingSongList(model: model, browser: browser, follows: model.playback.isCurrentSource(item.source)) {
             Section {
                 VStack(spacing: 16) {
                     RemoteCover(path: item.artwork ?? entry.artwork, title: item.name, artwork: model.artwork, channel: item.kind == "channels").frame(maxWidth: 260).clipShape(RoundedRectangle(cornerRadius: 16))
@@ -412,7 +539,7 @@ struct DetailScreen: View {
                         if item.kind != "channels" {
                             let shuffled = model.playback.sourceShowsShuffle(item.source)
                             Button { Task { await model.playback.shuffleSource(item.source) } } label: {
-                                Label(shuffled ? "Shuffle on" : "Shuffle", systemImage: "shuffle")
+                                Label("Shuffle", systemImage: "shuffle")
                                     .frame(maxWidth: .infinity, minHeight: 36)
                             }.buttonStyle(.borderedProminent)
                                 .tint(shuffled ? .green : .green.opacity(0.16))
@@ -425,17 +552,19 @@ struct DetailScreen: View {
                 }.frame(maxWidth: .infinity).padding(.vertical)
             }.listRowBackground(Color.clear)
             Section {
+                if browser.previousOffset != nil { Button("Earlier songs") { Task { await browser.load(previous: true) } }.disabled(browser.loading) }
                 RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
-                ForEach(Array(browser.tracks.enumerated()), id: \.offset) { _, track in
-                    SongRow(track: track, model: model) { Task { await model.playback.play(source: item.source, trackId: track.id) } }
+                ForEach(browser.trackRows) { row in
+                    let track = row.track
+                    SongRow(track: track, model: model) { Task { await model.playback.play(source: item.source, trackId: track.id) } }.id(row.id)
                 }
-                if browser.nextOffset != nil { Button("Load more songs") { Task { await browser.load(more: true) } }.disabled(browser.loading) }
+                if let offset = browser.nextOffset { ProgressView().frame(maxWidth: .infinity).task(id: "\(offset)-\(browser.loading)") { await browser.load(more: true) } }
                 if browser.error != nil { Button("Retry") { Task { await browser.load() } } }
                 if !browser.loading && browser.total == 0 && browser.error == nil { Text("No local songs yet.").foregroundStyle(.secondary) }
             }
         }.scrollContentBackground(.hidden).background(Color.black)
         .navigationTitle(item.name).navigationBarTitleDisplayMode(.inline)
-        .task { await browser.load(); await browser.refreshPopularity() }.refreshable { await browser.load() }
+        .task { await browser.load(around: model.playback.isCurrentSource(item.source) ? model.playback.state?.currentTrackId : nil); await browser.refreshPopularity() }.refreshable { await browser.load() }
     }
 }
 

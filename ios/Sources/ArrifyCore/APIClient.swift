@@ -217,9 +217,12 @@ public actor APIClient {
         guard response.status == 200, response.data.count <= 10 * 1024 * 1024 else { return nil }
         return response.data
     }
-    public func catalog(query: String, offset: Int = 0, revision: String? = nil) async throws -> CatalogPage {
+    public func catalog(query: String, offset: Int = 0, revision: String? = nil, sort: String = "title", liked: Bool = false, around: Int? = nil, letter: String? = nil) async throws -> CatalogPage {
         var c = URLComponents(); c.path = "/api/v1/native/catalog"
         c.queryItems = [URLQueryItem(name: "q", value: query), .init(name: "limit", value: "50"), .init(name: "offset", value: String(offset))]
+        c.queryItems?.append(contentsOf: [.init(name: "sort", value: sort), .init(name: "liked", value: String(liked))])
+        if let around { c.queryItems?.append(.init(name: "around", value: String(around))) }
+        if let letter { c.queryItems?.append(.init(name: "letter", value: letter)) }
         if let revision { c.queryItems?.append(.init(name: "revision", value: revision)) }
         return try await call(c.string!)
     }
@@ -319,16 +322,20 @@ public actor APIClient {
         return try await call("/api/v1/browse/request", method: "POST", body: Self.encoder().encode(Request(genre: genre, entry: entry)))
     }
     public func library() async throws -> LibraryOverview { try await call("/api/v1/native/library") }
-    public func entities(kind: String, query: String, offset: Int = 0, revision: String? = nil) async throws -> EntityPage {
+    public func entities(kind: String, query: String, offset: Int = 0, revision: String? = nil, sort: String = "title", artist: String? = nil, letter: String? = nil) async throws -> EntityPage {
         guard ["albums", "artists"].contains(kind) else { throw APIError.invalidResponse }
         var c = URLComponents(); c.path = "/api/v1/native/catalog"
         c.queryItems = [.init(name: "kind", value: kind), .init(name: "q", value: query), .init(name: "limit", value: "50"), .init(name: "offset", value: String(offset))]
+        c.queryItems?.append(.init(name: "sort", value: sort))
+        if let artist { c.queryItems?.append(.init(name: "artist", value: artist)) }
+        if let letter { c.queryItems?.append(.init(name: "letter", value: letter)) }
         if let revision { c.queryItems?.append(.init(name: "revision", value: revision)) }
         return try await call(c.string!)
     }
-    public func detail(_ source: LibrarySource, offset: Int = 0, revision: String? = nil) async throws -> LibraryDetail {
+    public func detail(_ source: LibrarySource, offset: Int = 0, revision: String? = nil, around: Int? = nil) async throws -> LibraryDetail {
         var c = URLComponents(); c.path = "/api/v1/native/library/detail"
         c.queryItems = [.init(name: "kind", value: source.kind), .init(name: "id", value: source.id), .init(name: "limit", value: "50"), .init(name: "offset", value: String(offset))]
+        if let around { c.queryItems?.append(.init(name: "around", value: String(around))) }
         if let revision { c.queryItems?.append(.init(name: "revision", value: revision)) }
         return try await call(c.string!)
     }

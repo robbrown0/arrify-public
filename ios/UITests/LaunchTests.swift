@@ -17,10 +17,12 @@ final class LaunchTests: XCTestCase {
         let play = app.buttons["playCollection"]
         XCTAssertTrue(shuffle.waitForExistence(timeout: 10))
         XCTAssertEqual(shuffle.value as? String, "off")
+        XCTAssertEqual(shuffle.label, "Shuffle")
         shuffle.tap()
         expectation(for: NSPredicate(format: "value == 'on' AND enabled == true"), evaluatedWith: shuffle)
         waitForExpectations(timeout: 10)
         XCTAssertEqual(play.label, "Pause")
+        XCTAssertEqual(shuffle.label, "Shuffle", "The label stays stable when enabled")
         XCTAssertTrue(app.navigationBars["M!ssundaztood"].exists)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Collection shuffle active"; shot.lifetime = .keepAlways; add(shot)
         play.tap()

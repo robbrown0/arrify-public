@@ -971,6 +971,13 @@ import Network
             PlaybackDiagnostics.record("item-not-ready code=\((item.error as NSError?)?.code ?? 0)")
             throw PlaybackFailure()
         }
+        // A newly installed item already at zero needs no frame-accurate seek.
+        // Keep exact seeking for resume/recovery and any nonzero position.
+        let currentTime = item.currentTime().seconds
+        if position == 0, currentTime.isFinite, currentTime == 0 {
+            PlaybackDiagnostics.event("preparation-seek-skipped-at-start")
+            return
+        }
         let completion = PlaybackSeekCompletion()
         player.seek(to: CMTime(seconds: max(0, position), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { finished in
             Task { @MainActor in completion.finished = finished }

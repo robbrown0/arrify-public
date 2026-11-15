@@ -37,6 +37,8 @@ public struct Track: Codable, Identifiable, Equatable, Sendable {
     public var popularity: SongPopularity?
 }
 public struct CatalogPage: Codable, Sendable {
+    public var offset: Int?
+    public var previousOffset: Int?
     public var popularityPending: Bool?
     public let total: Int?
     public let revision: String

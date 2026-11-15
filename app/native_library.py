@@ -61,6 +61,16 @@ def overview(library, accounts, uid):
 
 
 def selection(library, accounts, uid, kind, key):
+    if kind == 'catalog':
+        from .native_catalog import ordered_ids, liked_ids
+        try: options = json.loads(key)
+        except (ValueError, TypeError): raise NativeError(400, 'invalid_request', 'Invalid songs selection.') from None
+        if not isinstance(options, dict) or set(options) - {'q', 'sort', 'liked'} or not isinstance(options.get('q', ''), str) or type(options.get('liked', False)) is not bool:
+            raise NativeError(400, 'invalid_request', 'Invalid songs selection.')
+        with library.index_lock: index = library.search
+        ids = list(ordered_ids(index, 'tracks', options.get('q', ''), options.get('sort', 'title'),
+                               liked=liked_ids(accounts, uid) if options.get('liked') else None))
+        return {'id': key, 'kind': kind, 'name': 'Songs', 'subtitle': '', 'section': '', 'artwork': None, 'track_count': len(ids)}, ids
     if kind == 'recent' and key == 'played':
         with accounts.lock:
             rows = accounts.db.execute('SELECT track_id,MAX(played_at) played FROM history WHERE user_id=? GROUP BY track_id ORDER BY played DESC,track_id DESC LIMIT 500', (uid,)).fetchall()
@@ -126,11 +136,16 @@ def detail(library, accounts, uid, path):
         supplied = q.get('revision', [None])[0]
         if (offset and not supplied) or (supplied is not None and supplied != revision):
             raise NativeError(409, 'catalog_changed', 'This list changed. Refresh to continue.')
+        around = q.get('around', [None])[0]
+        if around is not None:
+            try: target = int(around)
+            except ValueError: raise NativeError(400, 'invalid_request', 'Invalid song.') from None
+            if target in ids: offset = max(0, ids.index(target) - limit // 2)
         items = [track(library.tracks[i]) for i in ids[offset:offset + limit]]
     items, pending = enrich_popularity(library, items)
     item['track_count'] = len(ids)
     next_offset = offset + len(items)
-    return {'item': item, 'items': items, 'revision': revision, 'total': len(ids), 'popularity_pending': pending,
+    return {'item': item, 'items': items, 'offset': offset, 'previous_offset': max(0, offset - limit) if offset else None, 'revision': revision, 'total': len(ids), 'popularity_pending': pending,
             'next_offset': next_offset if next_offset < len(ids) else None}
 
 
@@ -138,7 +153,7 @@ def expand_playback(library, accounts, uid, data):
     source = data.get('source')
     if not isinstance(source, dict) or set(source) != {'kind', 'id'} or not all(isinstance(v, str) for v in source.values()):
         raise NativeError(400, 'invalid_request', 'Choose a library playback source.')
-    if any(k in data for k in ('ids', 'channel', 'collection', 'browse', 'radio')) or len(source['id']) > 200:
+    if any(k in data for k in ('ids', 'channel', 'collection', 'browse', 'radio')) or len(source['id']) > (1024 if source['kind'] == 'catalog' else 200):
         raise NativeError(400, 'invalid_request', 'Choose one playback source.')
     if source['kind'] in ('radio-track', 'radio-artist'):
         station = library.radio.describe(source['kind'].removeprefix('radio-'), source['id'])

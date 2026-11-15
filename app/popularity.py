@@ -26,8 +26,12 @@ class Popularity:
         with self.lock:
             checked,counts=self.cache.get(key,(0,{}))
             attempt,viewed,status=self.refresh.get(key,(0,0,''))
-            self.refresh[key]=(attempt,int(time.time()),status)
-            self.db.execute('INSERT OR REPLACE INTO refresh_state VALUES(?,?,?,?)',(key,attempt,int(time.time()),status));self.db.commit()
+            now = int(time.time())
+            # Reopening a playlist should read cached evidence, not fsync once
+            # per artist on every request. One minute is ample for scheduling.
+            if now - viewed >= 60:
+                self.refresh[key]=(attempt,now,status)
+                self.db.execute('INSERT OR REPLACE INTO refresh_state VALUES(?,?,?,?)',(key,attempt,now,status));self.db.commit()
             self.enqueue(key,name,0)
             pending=key in self.pending
             values=[counts.get(identity(t['title'])) for t in tracks]

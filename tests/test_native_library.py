@@ -147,3 +147,71 @@ class HomeLibraryTests(NativeLibraryTests):
             self.assertEqual([x['id'] for x in result['items']],[2,1])
             self.assertEqual(expand_playback(self.lib,a,1,{'action':'play','source':{'kind':'recent','id':'played'}})['ids'],[2,1])
             self.assertEqual(overview(self.lib,a,2)['home_albums'],[])
+
+class NativeNavigationTests(NativeLibraryTests):
+    def test_direct_track_window_is_bounded_and_can_page_both_directions(self):
+        result = page(self.lib, '/catalog?around=90')
+        self.assertEqual(result['offset'], 64)
+        self.assertEqual(result['previous_offset'], 14)
+        self.assertEqual(len(result['items']), 50)
+        self.assertEqual(result['items'][25]['id'], 90)
+        self.assertEqual(result['next_offset'], 114)
+        earlier = page(self.lib, '/catalog?offset=14&revision=' + result['revision'])
+        self.assertEqual(earlier['items'][-1]['id'], 64)
+        for suffix in ('?around=bad', '?letter=ZZ', '?sort=bad', '?liked=1'):
+            with self.assertRaises(NativeError): page(self.lib, '/catalog' + suffix)
+
+    def test_detail_window_does_not_reorder_playlist_or_lose_duplicates(self):
+        self.lib.collection_ids = lambda slug: [1, 2, 1] + list(range(3, 121))
+        first = detail(self.lib, None, 1, '/detail?kind=collections&id=mix')
+        self.assertEqual([x['id'] for x in first['items'][:3]], [1, 2, 1])
+        window = detail(self.lib, None, 1, '/detail?kind=collections&id=mix&around=100')
+        self.assertEqual(window['items'][25]['id'], 100)
+        self.assertGreater(window['offset'], 50)
+        self.assertEqual(window['total'], 121)
+
+    def test_catalog_playback_expands_beyond_loaded_page_and_respects_sort(self):
+        result = expand_playback(self.lib, None, 1, {'action': 'play', 'track_id': 90,
+            'source': {'kind': 'catalog', 'id': json.dumps({'q': '', 'sort': 'recent', 'liked': False})}})
+        self.assertEqual(result['ids'], list(range(120, 0, -1)))
+        self.assertEqual(result['track_id'], 90)
+        self.assertEqual(page(self.lib, '/catalog?sort=recent')['items'][0]['id'], 120)
+
+    def test_liked_filter_is_account_scoped_and_revision_detects_changes(self):
+        import sqlite3
+        db = sqlite3.connect(':memory:'); self.addCleanup(db.close)
+        db.execute('CREATE TABLE favorites(user_id INTEGER,track_id INTEGER)')
+        db.executemany('INSERT INTO favorites VALUES(?,?)', [(1, 1), (1, 3), (2, 2)])
+        accounts = SimpleNamespace(db=db, lock=contextlib.nullcontext())
+        result = page(self.lib, '/catalog?liked=true&limit=1', accounts, 1)
+        self.assertEqual(result['items'][0]['id'], 1)
+        self.assertEqual(result['total'], 2)
+        db.execute('DELETE FROM favorites WHERE user_id=1 AND track_id=3')
+        with self.assertRaises(NativeError):
+            page(self.lib, '/catalog?liked=true&offset=1&revision=' + result['revision'], accounts, 1)
+        self.assertEqual(page(self.lib, '/catalog?liked=true', accounts, 2)['items'][0]['id'], 2)
+
+    def test_artist_album_filter_does_not_include_other_artist(self):
+        self.lib.search = Search(list(self.lib.tracks.values()), list(self.lib.albums.values()),
+            [{'id': 'pink', 'name': 'P!nk', 'track_ids': list(range(1, 121))}])
+        self.assertEqual(page(self.lib, '/catalog?kind=albums&artist=pink')['total'], 1)
+        self.assertEqual(page(self.lib, '/catalog?kind=albums&artist=missing')['total'], 0)
+
+class PopularityReadCostTests(unittest.TestCase):
+    def test_repeated_cached_reads_do_not_commit_per_artist(self):
+        import threading
+        from unittest.mock import Mock
+        from app.popularity import Popularity
+        service = Popularity.__new__(Popularity)
+        service.lock = threading.RLock(); service.cache = {}; service.refresh = {}; service.pending = set()
+        service.db = Mock(); service.enqueue = Mock(); service.signals = Mock()
+        service.signals.catalog_pending = set()
+        service.signals.score.return_value = {'doubloons': 0}
+        with patch('app.popularity.time.time', return_value=1000):
+            service.get('Artist', [{'id': 1, 'title': 'Song'}])
+            service.get('Artist', [{'id': 1, 'title': 'Song'}])
+        self.assertEqual(service.db.commit.call_count, 1)
+        self.assertEqual(service.enqueue.call_count, 2, 'Provider scheduling must still run')
+        with patch('app.popularity.time.time', return_value=1061):
+            service.get('Artist', [{'id': 1, 'title': 'Song'}])
+        self.assertEqual(service.db.commit.call_count, 2)
