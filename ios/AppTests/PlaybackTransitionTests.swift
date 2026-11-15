@@ -50,6 +50,21 @@ final class PlaybackTransitionTests: XCTestCase {
         return (coordinator, transport)
     }
 
+    @MainActor func testSelectionFeedbackAppearsBeforeSlowStateRequestAndClearsOnStop() async throws {
+        let (player, transport) = try await fixture()
+        await transport.delayPoll()
+        let selection = Task { await player.play(source: LibrarySource(kind: "albums", id: "fixture"), trackId: 2) }
+        for _ in 0..<500 { if await transport.pollWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(player.rowStatus(for: 2), .preparing)
+        XCTAssertEqual(player.state?.currentTrackId, 1, "Feedback must not pretend the server has changed songs")
+        player.stop()
+        XCTAssertNil(player.selectingTrackID)
+        await transport.releasePoll()
+        await selection.value
+        XCTAssertNil(player.selectingTrackID)
+        XCTAssertNil(player.state)
+    }
+
     @MainActor func testBackgroundProtectionPrecedesRemovalAndExpiresSynchronously() async throws {
         let assertions = RecordingBackgroundTasks()
         let (player, transport) = try await fixture(backgroundTasks: assertions)

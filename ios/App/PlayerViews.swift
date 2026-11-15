@@ -211,14 +211,20 @@ struct UpNextView: View {
     @State private var loading = false
     @State private var loadGeneration = UUID()
     @State private var error: String?
+    @State private var following = true
+    @State private var editMode: EditMode = .inactive
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             List {
                 if let track = playback.track {
                     Section {
                         trackRow(track, status: playback.rowStatus(for: track.id))
+                            .background { NativeListScrollObserver { following = false }.accessibilityHidden(true) }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityValue(playback.rowStatus(for: track.id)?.rawValue ?? "")
                             .listRowBackground(Color.green.opacity(0.12))
-                            .accessibilityIdentifier("queueCurrentTrack")
+                            .accessibilityIdentifier("queueCurrentTrack").id("current")
                     } header: { Text("Current track") } footer: { Text(playback.contextName) }
                 }
                 Section("Up Next · \(total)") {
@@ -245,10 +251,23 @@ struct UpNextView: View {
                     }.deleteDisabled(playback.state?.queueControlsAvailable != true)
                         .moveDisabled(playback.state?.queueControlsAvailable != true)
                     if loading { ProgressView() }
-                    else if let nextOffset { Button("Load more songs") { Task { await load(offset: nextOffset) } } }
+                    else if let nextOffset { ProgressView().task(id: nextOffset) { await load(offset: nextOffset) } }
                     else if entries.isEmpty { Text("Nothing queued.").foregroundStyle(.secondary) }
                 }
-            }.navigationTitle("Queue").navigationBarTitleDisplayMode(.inline)
+            }
+                .onScrollPhaseChange { _, phase in
+                    if phase == .interacting || phase == .tracking { following = false }
+                }
+                .onChange(of: editMode) { if editMode.isEditing { following = false } }
+                .onChange(of: playback.state?.currentTrackId) { if following { proxy.scrollTo("current", anchor: .top) } }
+                .safeAreaInset(edge: .bottom) {
+                    if !following && !editMode.isEditing {
+                        Button("Show playing song", systemImage: "speaker.wave.2.fill") { following = true; proxy.scrollTo("current", anchor: .top) }
+                            .buttonStyle(.borderedProminent).tint(.green).foregroundStyle(.black).padding(8)
+                    }
+                }
+                .environment(\.editMode, $editMode)
+                .navigationTitle("Queue").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { if playback.state?.queueControlsAvailable == true { EditButton() } }
                     ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
@@ -256,6 +275,7 @@ struct UpNextView: View {
                 .task(id: playback.state?.queueRevision) { await load() }
                 .refreshable { await load() }
                 .disabled(editing)
+            }
         }.presentationDetents([.large])
     }
     private func trackRow(_ track: Track, status: TrackPlaybackStatus? = nil) -> some View {

@@ -17,6 +17,7 @@ actor UITestStore: CredentialStore {
 actor UITestTransport: HTTPTransport {
     private var owner: String? = (ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1") ? "other-device" : nil
     private var playing = ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1"
+    private var currentTrack = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_LIST"] == "1" ? 75 : 1
     private var playbackContext = "null"
     private var repeatMode = "off"
     private var shuffle = false
@@ -31,6 +32,16 @@ actor UITestTransport: HTTPTransport {
         let path = request.url!.path
         let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func parameter(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
+        if ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_LIST"] == "1" {
+            if path.hasSuffix("/catalog") && parameter("kind").isEmpty {
+                let offset = Int(parameter("around")).map { max(0, $0 - 26) } ?? Int(parameter("offset")) ?? 0
+                let rows = ((offset + 1)...min(120, offset + 50)).map { ["id": $0, "title": "Song \($0)", "artist": "Fixture artist", "album": "Album"] as [String: Any] }
+                return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: ["items": rows, "total": 120, "revision": "long-list", "offset": offset, "previous_offset": offset > 0 ? max(0, offset - 50) as Any : NSNull(), "next_offset": offset + rows.count < 120 ? offset + rows.count as Any : NSNull()]))
+            }
+            if path.contains("/tracks/") {
+                return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: ["track": ["id": currentTrack, "title": "Song \(currentTrack)", "artist": "Fixture artist", "album": "Album"]]))
+            }
+        }
         let value: String
         if path.hasSuffix("/native/account/delete") {
             let input = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
@@ -110,6 +121,7 @@ actor UITestTransport: HTTPTransport {
         } else {
             if request.httpMethod == "POST", let data = request.httpBody,
                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_LIST"] == "1", body["action"] as? String == "next" { currentTrack = 110 }
                 if body["action"] as? String == "play" {
                     shuffle = body["shuffle"] as? Bool ?? false
                     if var source = body["source"] as? [String:String] {
@@ -122,7 +134,7 @@ actor UITestTransport: HTTPTransport {
                 if let mode = body["mode"] as? String { repeatMode = mode }
                 playing = body["action"] as? String != "pause"
             }
-            value = "{\"context\":\(playbackContext),\"shuffle\":\(shuffle),\"repeat_mode\":\"\(repeatMode)\",\"queue_controls_available\":true,\"partial\":false,\"current_track_id\":\(owner == nil ? "null" : "1"),\"position_seconds\":0,\"server_time\":1,\"queue_revision\":1,\"owner_device_id\":\(owner.map { "\"\($0)\"" } ?? "null"),\"owner_epoch\":1,\"intent\":1,\"playing\":\(playing),\"observed\":\"\(playing && ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" ? "playing" : "paused")\",\"seek_target_seconds\":0,\"seek_intent\":0,\"play_id\":1,\"upcoming_track_ids\":[2]}"
+            value = "{\"context\":\(playbackContext),\"shuffle\":\(shuffle),\"repeat_mode\":\"\(repeatMode)\",\"queue_controls_available\":true,\"partial\":false,\"current_track_id\":\(owner == nil ? "null" : String(currentTrack)),\"position_seconds\":0,\"server_time\":1,\"queue_revision\":1,\"owner_device_id\":\(owner.map { "\"\($0)\"" } ?? "null"),\"owner_epoch\":1,\"intent\":1,\"playing\":\(playing),\"observed\":\"\(playing && ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" ? "playing" : "paused")\",\"seek_target_seconds\":0,\"seek_intent\":0,\"play_id\":1,\"upcoming_track_ids\":[2]}"
         }
         let response = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_TITLE"] == "1"
             ? value.replacingOccurrences(of: "Just Like a Pill", with: "A Very Long Song Title That Wraps Onto Two Lines in the Expanded Player During Keyboard Restoration")

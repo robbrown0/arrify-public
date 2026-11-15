@@ -40,3 +40,66 @@ References reviewed:
 Build 30 is authorized for internal TestFlight only. Prior fixes remain included.
 A passing automated suite does not substitute for the device acceptance cases
 above. Record any unverified physical behavior explicitly in release reports.
+
+## Library navigation and responsiveness (next internal build)
+
+- Keep the visible Shuffle label constant; expose on/off through color and VoiceOver.
+- Open the active song list around its current song; follow changes only until the
+  user scrolls, searches, changes sorting/filtering, or edits. Show playing song
+  resumes following. Queue current entry remains at the top, with occurrence-based
+  upcoming entries; do not mark matching upcoming duplicates current.
+- Direct server windows are bounded to 50 rows. Test earlier/later paging, overlap,
+  duplicate playlist entries, missing songs, stale revisions, account-scoped liked
+  filters, and old search responses arriving after a new query.
+- Songs playback expands the full server selection, never just the downloaded page.
+- Preserve all existing regression suites and physical acceptance above.
+- New automated coverage: `NativeNavigationTests`, `PopularityReadCostTests`,
+  `testLibraryWindowPrependsWithoutDuplicatesAndKeepsRowIdentity`,
+  `testSlowPreviousSearchCannotReplaceNewSelection`, and
+  `testLongSongsListCentersCurrentAndManualBrowsingSuspendsFollowing`.
+
+Performance review: retain command-state ownership checks, exact nonzero resume
+seeks, pause/cancellation ordering, background leases, and progress confirmation.
+Avoid re-sorting each catalog page, repeated per-artist database commits when
+reopening a playlist within a minute, and seeking to zero when a newly installed
+ready item is already exactly at zero. Apple notes exact seeking can add decoding
+delay: https://developer.apple.com/documentation/avfoundation/avplayer/seek(to:tolerancebefore:toleranceafter:completionhandler:)
+Library-load diagnostics add duration and cancellation only, no song/account data.
+Recently added uses stable catalog insertion order (track IDs), not file modification
+times; a rescan that updates metadata must not make an old song appear newly added.
+- `testSelectionFeedbackAppearsBeforeSlowStateRequestAndClearsOnStop` holds a
+  state response and checks immediate row feedback, unchanged confirmed playback,
+  and sign-out cleanup before releasing the response.
+
+Synthetic benchmark (Linux, 50,000 songs, 100 first-page calls): previous per-call
+sorting averaged 14.19 ms; indexed response averaged 0.02 ms. This isolates server
+catalog work and does not measure network latency, SwiftUI rendering or audio start.
+Popularity page enrichment batches newly viewed artists in one transaction
+(`test_new_playlist_batches_view_records_in_one_commit` verifies 50 artists,
+unchanged row order, refresh scheduling and no extra commit on immediate reopen).
+
+PR Apple qualification runs iPhone and iPad as parallel jobs on separate macOS
+runners, with fail-fast disabled so a failure does not hide the other device's
+results. `apple-build` aggregates both results and fails if either fails or is
+cancelled. The generic physical-device build runs once. All app/UI tests and
+screenshots remain included. TestFlight qualification already uses the same
+parallel device matrix and distribution still depends on both passing.
+
+Qualification caught a user-scroll regression in the initial navigation change:
+the long Songs list moved, but the phase callback did not suspend following on
+iPad. Lists now also observe the native scroll view pan recognizer from the current
+row, without adding a competing gesture or replacing its delegate. A first
+simultaneous-gesture attempt interfered with a song menu; retain menu tests as
+well as scroll tests. The same safeguard applies to the queue. Keep
+the long-list test's actual drag, return-button assertion and recenter assertion;
+initial positioning alone is insufficient evidence that manual browsing works.
+The native scroll observer must remain hidden from accessibility. The queue's
+current row explicitly retains its combined accessibility element and playback
+value after the observer background is applied; `testCurrentTrackIsMarkedInListAndQueue`
+checks the paused value as well as visible highlighting.
+
+Account deletion dismisses password focus before presenting confirmation, so
+keyboard restoration does not compete with the alert or error state. Keep cancel,
+wrong-password, successful deletion and sign-out assertions. UI cases stop after
+the first failed assertion to avoid cascading missing-element waits; the suite
+still executes the remaining cases.

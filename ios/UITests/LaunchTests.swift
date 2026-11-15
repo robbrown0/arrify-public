@@ -1,5 +1,35 @@
 import XCTest
 final class LaunchTests: XCTestCase {
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+    }
+    @MainActor func testLongSongsListCentersCurrentAndManualBrowsingSuspendsFollowing() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_ROW_PLAYBACK"] = "1"
+        app.launchEnvironment["ARRIFY_UI_LONG_LIST"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Songs"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Songs"].firstMatch.tap()
+        let current = app.buttons["songRow-75"]
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: current)
+        waitForExpectations(timeout: 10)
+        XCTAssertLessThan(abs(current.frame.midY - app.frame.midY), app.frame.height * 0.25)
+        // Target the song list, not the iPad sidebar or the mini player.
+        let start = current.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -220)))
+        let show = app.buttons["Show playing song"]
+        XCTAssertTrue(show.waitForExistence(timeout: 5))
+        show.tap()
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: current)
+        waitForExpectations(timeout: 10)
+        XCTAssertLessThan(abs(current.frame.midY - app.frame.midY), app.frame.height * 0.25)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Long list current song centered"; shot.lifetime = .keepAlways; add(shot)
+    }
     @MainActor func testCollectionShuffleStartsPlaybackAndReflectsState() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
@@ -17,10 +47,12 @@ final class LaunchTests: XCTestCase {
         let play = app.buttons["playCollection"]
         XCTAssertTrue(shuffle.waitForExistence(timeout: 10))
         XCTAssertEqual(shuffle.value as? String, "off")
+        XCTAssertEqual(shuffle.label, "Shuffle")
         shuffle.tap()
         expectation(for: NSPredicate(format: "value == 'on' AND enabled == true"), evaluatedWith: shuffle)
         waitForExpectations(timeout: 10)
         XCTAssertEqual(play.label, "Pause")
+        XCTAssertEqual(shuffle.label, "Shuffle", "The label stays stable when enabled")
         XCTAssertTrue(app.navigationBars["M!ssundaztood"].exists)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Collection shuffle active"; shot.lifetime = .keepAlways; add(shot)
         play.tap()

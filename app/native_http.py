@@ -101,7 +101,7 @@ def dispatch(handler, path, data=None):
                 except ValueError:
                     headers['Retry-After'] = '60'
                     raise NativeError(429, 'rate_limited', 'Retry shortly.') from None
-                result = catalog_page(handler.server.library, handler.path)
+                result = catalog_page(handler.server.library, handler.path, a, user['id'])
             elif path in (PREFIX + 'library', PREFIX + 'library/detail') and data is None:
                 try:a.rate_limit(('native-library', user['id']), 120, 60)
                 except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None

@@ -21,13 +21,41 @@ class Popularity:
         threading.Thread(target=self.worker,daemon=True,name='arrify-song-popularity').start()
         threading.Thread(target=self.schedule,daemon=True,name='arrify-popularity-scheduler').start()
 
+    def get_many(self, tracks):
+        """Record a page's viewed artists in one transaction, then read ratings."""
+        groups = {}
+        for row in tracks:
+            if row.get('artist'): groups.setdefault(row['artist'], []).append(row)
+        now = int(time.time())
+        with self.lock:
+            changed = {}
+            for name in groups:
+                key = identity(name)
+                attempt, viewed, status = self.refresh.get(key, (0, 0, ''))
+                if now - viewed >= 60: changed[key] = (attempt, now, status)
+            if changed:
+                self.db.executemany('INSERT OR REPLACE INTO refresh_state VALUES(?,?,?,?)',
+                                    [(key, *value) for key, value in changed.items()])
+                self.db.commit()
+                self.refresh.update(changed)
+        rated = {}; pending = False
+        for name, rows in groups.items():
+            values, waiting = self.get(name, rows)
+            rated.update((row['id'], row) for row in values)
+            pending = pending or waiting
+        return [rated.get(row['id'], row) for row in tracks], pending
+
     def get(self,name,tracks):
         key=identity(name)
         with self.lock:
             checked,counts=self.cache.get(key,(0,{}))
             attempt,viewed,status=self.refresh.get(key,(0,0,''))
-            self.refresh[key]=(attempt,int(time.time()),status)
-            self.db.execute('INSERT OR REPLACE INTO refresh_state VALUES(?,?,?,?)',(key,attempt,int(time.time()),status));self.db.commit()
+            now = int(time.time())
+            # Reopening a playlist should read cached evidence, not fsync once
+            # per artist on every request. One minute is ample for scheduling.
+            if now - viewed >= 60:
+                self.refresh[key]=(attempt,now,status)
+                self.db.execute('INSERT OR REPLACE INTO refresh_state VALUES(?,?,?,?)',(key,attempt,now,status));self.db.commit()
             self.enqueue(key,name,0)
             pending=key in self.pending
             values=[counts.get(identity(t['title'])) for t in tracks]

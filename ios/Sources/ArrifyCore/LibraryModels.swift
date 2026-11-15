@@ -37,12 +37,16 @@ public struct LibraryOverview: Codable, Sendable {
     public let artists: Int
 }
 public struct EntityPage: Codable, Sendable {
+    public var offset: Int?
+    public var previousOffset: Int?
     public let items: [LibraryEntry]
     public let revision: String
     public let total: Int
     public let nextOffset: Int?
 }
 public struct LibraryDetail: Codable, Sendable {
+    public var offset: Int?
+    public var previousOffset: Int?
     public var popularityPending: Bool?
     public let item: LibraryEntry
     public let items: [Track]

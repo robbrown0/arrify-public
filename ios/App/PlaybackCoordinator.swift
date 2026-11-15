@@ -435,6 +435,7 @@ import Network
         networkMonitor?.cancel(); networkMonitor = nil; serverConnection = ServerConnection()
         localPeer.stop()
         outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
+        selectionToken = UUID(); selectingTrackID = nil
         sessionGeneration = UUID(); permission = PlaybackPermission(); connectionInterrupted = false; connectionFailures = 0; message = nil
         aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil; cache.reset(); finishBackgroundTransition()
         eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false; reportPending = false; liveConnected = false
@@ -520,11 +521,22 @@ import Network
             serverConnection = await api.connection()
         }
     }
+    private(set) var selectingTrackID: Int?
+    private var selectionToken = UUID()
     func play(_ track: Track, in tracks: [Track]) async {
+        let token = UUID(); selectionToken = token; selectingTrackID = track.id
+        defer { if selectionToken == token { selectingTrackID = nil } }
         let ids = Array(tracks.drop(while: { $0.id != track.id }).prefix(1000).map(\.id))
         await send("play", ids: ids.isEmpty ? [track.id] : ids)
     }
     func play(source: LibrarySource, trackId: Int? = nil, shuffle: Bool = false) async {
+        let token = UUID(); selectionToken = token; selectingTrackID = trackId
+        let started = ProcessInfo.processInfo.systemUptime
+        PlaybackDiagnostics.event("selection-start")
+        defer {
+            if selectionToken == token { selectingTrackID = nil }
+            PlaybackDiagnostics.event("selection-command-finish ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+        }
         await send("play", source: source, trackId: trackId, shuffle: shuffle)
     }
     func isCurrentSource(_ source: LibrarySource) -> Bool {
@@ -970,6 +982,13 @@ import Network
         guard item.status == .readyToPlay else {
             PlaybackDiagnostics.record("item-not-ready code=\((item.error as NSError?)?.code ?? 0)")
             throw PlaybackFailure()
+        }
+        // A newly installed item already at zero needs no frame-accurate seek.
+        // Keep exact seeking for resume/recovery and any nonzero position.
+        let currentTime = item.currentTime().seconds
+        if position == 0, currentTime.isFinite, currentTime == 0 {
+            PlaybackDiagnostics.event("preparation-seek-skipped-at-start")
+            return
         }
         let completion = PlaybackSeekCompletion()
         player.seek(to: CMTime(seconds: max(0, position), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { finished in

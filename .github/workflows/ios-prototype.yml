@@ -21,7 +21,11 @@ concurrency:
   group: ios-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  apple-build:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ${{ fromJSON((inputs.ipad_only || inputs.volume_alignment_only) && '["iPad"]' || '["iPhone","iPad"]') }}
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -36,52 +40,46 @@ jobs:
         working-directory: ios
         run: swift test
       - name: Build for physical devices without signing
-        id: device_build
+        if: matrix.device == 'iPhone' || inputs.ipad_only || inputs.volume_alignment_only
         run: xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build/device CODE_SIGNING_ALLOWED=NO build
       - name: Verify archive capability preservation
+        if: matrix.device == 'iPhone' || inputs.ipad_only || inputs.volume_alignment_only
         run: bash ios/tools/prepare_entitlements.sh build/device/Build/Products/Release-iphoneos/Arrify.app ios/App/Arrify.entitlements
-      - name: Simulator playback tests
-        if: ${{ inputs.ipad_only != true && inputs.volume_alignment_only != true }}
+      - name: Qualify app and UI regressions
+        env:
+          DEVICE_FAMILY: ${{ matrix.device }}
+          VOLUME_ONLY: ${{ inputs.volume_alignment_only }}
         run: |
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith("iPhone")))')
-          xcrun simctl shutdown all || true
-          xcrun simctl boot "$DEVICE"
-          xcrun simctl bootstatus "$DEVICE" -b
-          echo "ARRIFY_SIMULATOR=$DEVICE" >> "$GITHUB_ENV"
-          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/PlaybackTests.xcresult -only-testing:ArrifyAppTests CODE_SIGNING_ALLOWED=NO test
-      - name: Simulator UI test
-        if: ${{ inputs.ipad_only != true && inputs.volume_alignment_only != true }}
-        run: xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$ARRIFY_SIMULATOR" -derivedDataPath build/simulator -resultBundlePath build/UITests.xcresult -only-testing:ArrifyUITests CODE_SIGNING_ALLOWED=NO test
-      - name: iPad launch and accessibility smoke test
-        if: ${{ !cancelled() && steps.device_build.outcome == 'success' }}
-        run: |
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith("iPad")))')
-          xcrun simctl shutdown all || true
-          xcrun simctl boot "$DEVICE"
-          xcrun simctl bootstatus "$DEVICE" -b
-          if [ "${{ inputs.volume_alignment_only }}" = "true" ]; then
-            xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/iPadTests.xcresult -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testTabletVolumeUsesNativeHeightCenteredInControlRow -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible CODE_SIGNING_ALLOWED=NO test
-          else
-          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath build/iPadTests.xcresult CODE_SIGNING_ALLOWED=NO test
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
+          ONLY_TESTS=()
+          if [ "$VOLUME_ONLY" = "true" ]; then
+            ONLY_TESTS=(-only-testing:ArrifyAppTests/NowPlayingArtworkTests/testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testTabletVolumeUsesNativeHeightCenteredInControlRow -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible)
           fi
+          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath "build/${DEVICE_FAMILY}Tests.xcresult" "${ONLY_TESTS[@]}" CODE_SIGNING_ALLOWED=NO test
       - name: Export test screenshots
         if: always()
+        env:
+          DEVICE_FAMILY: ${{ matrix.device }}
         run: |
-          if [ -d build/UITests.xcresult ]; then
-            xcrun xcresulttool export attachments --path build/UITests.xcresult --output-path build/screenshots/iphone
-          fi
-          if [ -d build/iPadTests.xcresult ]; then
-            xcrun xcresulttool export attachments --path build/iPadTests.xcresult --output-path build/screenshots/ipad
+          if [ -d "build/${DEVICE_FAMILY}Tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "build/${DEVICE_FAMILY}Tests.xcresult" --output-path "build/screenshots/${DEVICE_FAMILY}"
           fi
       - name: Preserve simulator build and test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: arrify-prototype-${{ github.sha }}
+          name: arrify-prototype-${{ github.sha }}-${{ matrix.device }}
           path: |
             build/screenshots
-            build/PlaybackTests.xcresult
-            build/UITests.xcresult
-            build/iPadTests.xcresult
+            build/*Tests.xcresult
             build/simulator/Build/Products/Debug-iphonesimulator/Arrify.app
           retention-days: 7
+  apple-build:
+    needs: qualify
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every selected device to pass
+        env:
+          QUALIFICATION_RESULT: ${{ needs.qualify.result }}
+        run: test "$QUALIFICATION_RESULT" = success

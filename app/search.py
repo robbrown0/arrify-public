@@ -42,6 +42,14 @@ class RankedIndex:
     def __init__(self,items,fields):
         self.items={x['id']:x for x in items}
         self.fields=fields
+        # Immutable snapshot orders are built once, not sorted again for every
+        # native page. Store IDs only; rows remain owned by this snapshot.
+        title = lambda x: ((x.get('title') or x.get('name') or '').casefold(), str(x['id']))
+        self.browse_orders = {
+            'title': tuple(x['id'] for x in sorted(self.items.values(), key=title)),
+            'artist': tuple(x['id'] for x in sorted(self.items.values(), key=lambda x: (x.get('artist', '').casefold(), title(x)))),
+            'recent': tuple(x['id'] for x in sorted(self.items.values(), key=lambda x: max(x.get('track_ids') or [x['id'] if isinstance(x['id'], int) else 0]), reverse=True)),
+        }
         self.docs={};self.postings=collections.defaultdict(set)
         self.compact=collections.defaultdict(set)
         # Construction-local memo: share repeated artist/album strings and avoid

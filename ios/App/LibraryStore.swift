@@ -42,6 +42,18 @@ import CryptoKit
     var popularityPending = false
     var total = 0
     var nextOffset: Int?
+    var previousOffset: Int?
+    var startOffset = 0
+    var sort = "title"
+    var likedOnly = false
+    var artist: String?
+    var navigationRevision = 0
+    var resumeFollowingRequest = 0
+    struct TrackRow: Identifiable {
+        let id: Int
+        let track: Track
+    }
+    var trackRows: [TrackRow] { tracks.enumerated().map { TrackRow(id: startOffset + $0.offset, track: $0.element) } }
     var loading = false
     var error: String?
     var updated: Date?
@@ -59,10 +71,10 @@ import CryptoKit
                 let values: [Track]
                 let pending: Bool
                 if let source {
-                    let page = try await api.detail(source)
+                    let page = try await api.detail(source, offset: startOffset, revision: revision)
                     values = page.items; pending = page.popularityPending ?? false
                 } else {
-                    let page = try await api.catalog(query: query)
+                    let page = try await api.catalog(query: query, offset: startOffset, revision: revision, sort: sort, liked: likedOnly)
                     values = page.items; pending = page.popularityPending ?? false
                 }
                 guard token == generation, !Task.isCancelled else { return }
@@ -73,38 +85,51 @@ import CryptoKit
         }
     }
     func resetSearch() {
-        generation = UUID(); tracks = []; entries = []; nextOffset = nil
+        generation = UUID(); tracks = []; entries = []; nextOffset = nil; previousOffset = nil; startOffset = 0
         revision = nil; error = nil; loading = true
     }
-    func load(query: String = "", more: Bool = false) async {
+    func load(query: String = "", more: Bool = false, previous: Bool = false, around: Int? = nil, letter: String? = nil) async {
+        if letter != nil { navigationRevision += 1 }
         if more && (loading || nextOffset == nil) { return }
+        if previous && (loading || previousOffset == nil) { return }
         let token: UUID
-        if more { token = generation } else { token = UUID(); generation = token }
+        if more || previous { token = generation } else { token = UUID(); generation = token }
         loading = true
-        defer { if generation == token { loading = false } }
+        let started = ProcessInfo.processInfo.systemUptime
+        PlaybackDiagnostics.event("library-load-start more=\(more)")
+        defer {
+            if generation == token { loading = false }
+            PlaybackDiagnostics.event("library-load-finish ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000)) cancelled=\(Task.isCancelled)")
+        }
         do {
-            let offset = more ? nextOffset ?? 0 : 0
-            let rev = more ? revision : nil
+            let offset = more ? nextOffset ?? 0 : previous ? previousOffset ?? 0 : 0
+            let rev = more || previous ? revision : nil
             if let source {
-                let page = try await api.detail(source, offset: offset, revision: rev)
+                let page = try await api.detail(source, offset: offset, revision: rev, around: around)
                 guard token == generation, !Task.isCancelled else { return }
-                tracks = more ? tracks + page.items : page.items
+                tracks = more ? tracks + page.items : previous ? Array(page.items.prefix(max(0, startOffset - (page.offset ?? offset)))) + tracks : page.items
+                if !more { startOffset = page.offset ?? offset; previousOffset = page.previousOffset }
                 popularityPending = page.popularityPending ?? false
-                item = page.item; total = page.total; nextOffset = page.nextOffset; revision = page.revision
+                item = page.item; total = page.total; revision = page.revision
+                if !previous { nextOffset = page.nextOffset }
             } else if kind == "tracks" {
-                let page = try await api.catalog(query: query, offset: offset, revision: rev)
+                let page = try await api.catalog(query: query, offset: offset, revision: rev, sort: sort, liked: likedOnly, around: around, letter: letter)
                 guard token == generation, !Task.isCancelled else { return }
-                tracks = more ? tracks + page.items : page.items
+                tracks = more ? tracks + page.items : previous ? Array(page.items.prefix(max(0, startOffset - (page.offset ?? offset)))) + tracks : page.items
+                if !more { startOffset = page.offset ?? offset; previousOffset = page.previousOffset }
                 popularityPending = page.popularityPending ?? false
-                total = page.total ?? tracks.count; nextOffset = page.nextOffset; revision = page.revision
+                total = page.total ?? tracks.count; revision = page.revision
+                if !previous { nextOffset = page.nextOffset }
             } else {
-                let page = try await api.entities(kind: kind, query: query, offset: offset, revision: rev)
+                let page = try await api.entities(kind: kind, query: query, offset: offset, revision: rev, sort: sort, artist: artist, letter: letter)
                 guard token == generation, !Task.isCancelled else { return }
-                entries = more ? entries + page.items : page.items
-                total = page.total; nextOffset = page.nextOffset; revision = page.revision
+                entries = more ? entries + page.items : previous ? Array(page.items.prefix(max(0, startOffset - (page.offset ?? offset)))) + entries : page.items
+                if !more { startOffset = page.offset ?? offset; previousOffset = page.previousOffset }
+                total = page.total; revision = page.revision
+                if !previous { nextOffset = page.nextOffset }
             }
             error = nil; updated = Date()
-        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch APIError.rejected(_, let code, _) where code == "catalog_changed" && more {
+        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch APIError.rejected(_, let code, _) where code == "catalog_changed" && (more || previous) {
             guard generation == token else { return }
             await load(query: query)
         } catch { if generation == token { self.error = error.localizedDescription } }

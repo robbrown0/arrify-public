@@ -6,6 +6,7 @@ struct DeleteAccountView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var username = ""
     @State private var password = ""
+    @FocusState private var passwordFocused: Bool
     @State private var confirming = false
     @State private var busy = false
     @State private var error: String?
@@ -25,11 +26,11 @@ struct DeleteAccountView: View {
                     Text("You can delete an account even while it is awaiting approval or frozen.").font(.footnote)
                     TextField("Username", text: $username).textContentType(.username).textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("deletionUsername")
                 }
-                SecureField("Current password", text: $password).textContentType(.password).accessibilityIdentifier("deletionPassword")
+                SecureField("Current password", text: $password).focused($passwordFocused).textContentType(.password).accessibilityIdentifier("deletionPassword")
             }
             if let error { Section { Text(error).foregroundStyle(.orange).accessibilityIdentifier("deletionError") } }
             Section {
-                Button(busy ? "Deleting…" : "Delete account", role: .destructive) { confirming = true }
+                Button(busy ? "Deleting…" : "Delete account", role: .destructive) { passwordFocused = false; confirming = true }
                     .disabled(busy || password.isEmpty || (!signedIn && username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                     .accessibilityIdentifier("requestAccountDeletion")
             }

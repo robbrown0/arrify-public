@@ -649,3 +649,52 @@ extension NowPlayingArtworkTests {
         await store.clearPersistentCache()
     }
 }
+
+extension NowPlayingArtworkTests {
+    @MainActor func testLibraryWindowPrependsWithoutDuplicatesAndKeepsRowIdentity() async throws {
+        let api = APIClient(transport: WindowCatalogTransport(), store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let browser = LibraryBrowser(api: api)
+        await browser.load(around: 90)
+        XCTAssertEqual(browser.tracks[25].id, 90)
+        XCTAssertEqual(browser.startOffset, 64)
+        let identity = browser.trackRows.first { $0.track.id == 90 }?.id
+        await browser.load(previous: true)
+        XCTAssertEqual(browser.tracks.count, 100)
+        XCTAssertEqual(Set(browser.tracks.map(\.id)).count, 100)
+        XCTAssertEqual(browser.trackRows.first { $0.track.id == 90 }?.id, identity)
+        await browser.load(more: true)
+        XCTAssertEqual(browser.tracks.last?.id, 120)
+        await browser.load(previous: true)
+        XCTAssertEqual(browser.tracks.map(\.id), Array(1...120))
+        XCTAssertNil(browser.previousOffset)
+    }
+    @MainActor func testSlowPreviousSearchCannotReplaceNewSelection() async throws {
+        let api = APIClient(transport: WindowCatalogTransport(), store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let browser = LibraryBrowser(api: api)
+        let old = Task { await browser.load(query: "slow") }
+        try await Task.sleep(for: .milliseconds(30))
+        browser.resetSearch()
+        await browser.load(query: "new")
+        await old.value
+        XCTAssertEqual(browser.tracks.map(\.id), [120])
+        XCTAssertFalse(browser.loading)
+    }
+}
+private actor WindowCatalogTransport: HTTPTransport {
+    private let fallback = UITestTransport()
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        guard request.url!.path.hasSuffix("/catalog") else { return try await fallback.send(request) }
+        let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems ?? []
+        func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
+        if value("q") == "slow" { try await Task.sleep(for: .milliseconds(200)) }
+        let offset = value("around").flatMap(Int.init).map { max(0, $0 - 26) } ?? Int(value("offset") ?? "0") ?? 0
+        let ids = value("q") == "new" ? [120] : Array((offset + 1)...min(120, offset + 50))
+        let items = ids.map { ["id": $0, "title": "Song \($0)", "artist": "Artist", "album": "Album"] as [String: Any] }
+        let result: [String: Any] = ["items": items, "total": 120, "offset": offset,
+            "previous_offset": offset > 0 ? max(0, offset - 50) as Any : NSNull(),
+            "next_offset": offset + items.count < 120 ? offset + items.count as Any : NSNull(), "revision": "fixture"]
+        return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: result))
+    }
+}
