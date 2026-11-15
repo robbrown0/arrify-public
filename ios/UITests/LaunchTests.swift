@@ -16,7 +16,9 @@ final class LaunchTests: XCTestCase {
         expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: current)
         waitForExpectations(timeout: 10)
         XCTAssertLessThan(abs(current.frame.midY - app.frame.midY), app.frame.height * 0.25)
-        app.swipeUp()
+        // Target the song list, not the iPad sidebar or the mini player.
+        let start = current.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -220)))
         let show = app.buttons["Show playing song"]
         XCTAssertTrue(show.waitForExistence(timeout: 5))
         show.tap()

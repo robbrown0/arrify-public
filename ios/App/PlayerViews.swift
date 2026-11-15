@@ -255,6 +255,12 @@ struct UpNextView: View {
                 .onScrollPhaseChange { _, phase in
                     if phase == .interacting || phase == .tracking { following = false }
                 }
+                // List can omit phase callbacks during a touch-driven scroll.
+                // Observe the drag simultaneously so native scrolling and row
+                // controls keep their own gestures and browsing always wins.
+                .simultaneousGesture(DragGesture(minimumDistance: 10).onChanged { value in
+                    if abs(value.translation.height) > abs(value.translation.width) { following = false }
+                })
                 .onChange(of: editMode) { if editMode.isEditing { following = false } }
                 .onChange(of: playback.state?.currentTrackId) { if following { proxy.scrollTo("current", anchor: .top) } }
                 .safeAreaInset(edge: .bottom) {

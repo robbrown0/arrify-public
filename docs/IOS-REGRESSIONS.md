@@ -84,3 +84,10 @@ results. `apple-build` aggregates both results and fails if either fails or is
 cancelled. The generic physical-device build runs once. All app/UI tests and
 screenshots remain included. TestFlight qualification already uses the same
 parallel device matrix and distribution still depends on both passing.
+
+Qualification caught a user-scroll regression in the initial navigation change:
+the long Songs list moved, but the phase callback did not suspend following on
+iPad. Lists now also observe vertical drags with a simultaneous gesture, preserving
+native scrolling and row controls. The same safeguard applies to the queue. Keep
+the long-list test's actual drag, return-button assertion and recenter assertion;
+initial positioning alone is insufficient evidence that manual browsing works.
