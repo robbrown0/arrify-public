@@ -435,6 +435,7 @@ import Network
         networkMonitor?.cancel(); networkMonitor = nil; serverConnection = ServerConnection()
         localPeer.stop()
         outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
+        selectionToken = UUID(); selectingTrackID = nil
         sessionGeneration = UUID(); permission = PlaybackPermission(); connectionInterrupted = false; connectionFailures = 0; message = nil
         aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil; cache.reset(); finishBackgroundTransition()
         eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false; reportPending = false; liveConnected = false
@@ -520,11 +521,17 @@ import Network
             serverConnection = await api.connection()
         }
     }
+    private(set) var selectingTrackID: Int?
+    private var selectionToken = UUID()
     func play(_ track: Track, in tracks: [Track]) async {
+        let token = UUID(); selectionToken = token; selectingTrackID = track.id
+        defer { if selectionToken == token { selectingTrackID = nil } }
         let ids = Array(tracks.drop(while: { $0.id != track.id }).prefix(1000).map(\.id))
         await send("play", ids: ids.isEmpty ? [track.id] : ids)
     }
     func play(source: LibrarySource, trackId: Int? = nil, shuffle: Bool = false) async {
+        let token = UUID(); selectionToken = token; selectingTrackID = trackId
+        defer { if selectionToken == token { selectingTrackID = nil } }
         await send("play", source: source, trackId: trackId, shuffle: shuffle)
     }
     func isCurrentSource(_ source: LibrarySource) -> Bool {

@@ -230,6 +230,7 @@ struct BrowserScreen: View {
     @AppStorage private var sortOrder: String
     @AppStorage("albumGrid") private var albumGrid = true
     @State private var likedOnly = false
+    @State private var loadedRequestKey: String?
     let externalQuery: String?
     let artist: String?
     private var activeQuery: String { externalQuery ?? query }
@@ -255,7 +256,7 @@ struct BrowserScreen: View {
         }
     }
     private var results: some View {
-        FollowingSongList(model: model, browser: browser, query: activeQuery, follows: browser.kind == "tracks" && activeQuery.isEmpty) {
+        FollowingSongList(model: model, browser: browser, query: activeQuery, follows: browser.kind == "tracks" && activeQuery.isEmpty && !likedOnly) {
             Section {
                 if let artist {
                     NavigationLink("All songs") {
@@ -329,6 +330,8 @@ struct BrowserScreen: View {
             }
         }
         .task(id: requestKey) {
+            guard loadedRequestKey != requestKey || browser.updated == nil else { return }
+            loadedRequestKey = requestKey
             browser.sort = sortOrder; browser.likedOnly = likedOnly; browser.artist = artist
             browser.resetSearch()
             do { try await Task.sleep(for: .milliseconds(activeQuery.isEmpty ? 0 : 300)) } catch { return }
@@ -416,7 +419,8 @@ enum TrackPlaybackStatus: String {
 
 extension PlaybackCoordinator {
     func rowStatus(for trackID: Int) -> TrackPlaybackStatus? {
-        TrackPlaybackStatus.resolve(trackID: trackID, currentTrackID: state?.currentTrackId,
+        if selectingTrackID == trackID { return .preparing }
+        return TrackPlaybackStatus.resolve(trackID: trackID, currentTrackID: state?.currentTrackId,
             playing: hasOtherOutput ? state?.observed == "playing" && state?.playing == true : rowOutputIsPlaying,
             wantsPlayback: showsPauseControl)
     }
@@ -564,7 +568,7 @@ struct DetailScreen: View {
             }
         }.scrollContentBackground(.hidden).background(Color.black)
         .navigationTitle(item.name).navigationBarTitleDisplayMode(.inline)
-        .task { await browser.load(around: model.playback.isCurrentSource(item.source) ? model.playback.state?.currentTrackId : nil); await browser.refreshPopularity() }.refreshable { await browser.load() }
+        .task { if browser.updated == nil { await browser.load(around: model.playback.isCurrentSource(item.source) ? model.playback.state?.currentTrackId : nil) }; await browser.refreshPopularity() }.refreshable { await browser.load() }
     }
 }
 

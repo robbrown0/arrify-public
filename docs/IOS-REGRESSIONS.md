@@ -40,3 +40,30 @@ References reviewed:
 Build 30 is authorized for internal TestFlight only. Prior fixes remain included.
 A passing automated suite does not substitute for the device acceptance cases
 above. Record any unverified physical behavior explicitly in release reports.
+
+## Library navigation and responsiveness (next internal build)
+
+- Keep the visible Shuffle label constant; expose on/off through color and VoiceOver.
+- Open the active song list around its current song; follow changes only until the
+  user scrolls, searches, changes sorting/filtering, or edits. Show playing song
+  resumes following. Queue current entry remains at the top, with occurrence-based
+  upcoming entries; do not mark matching upcoming duplicates current.
+- Direct server windows are bounded to 50 rows. Test earlier/later paging, overlap,
+  duplicate playlist entries, missing songs, stale revisions, account-scoped liked
+  filters, and old search responses arriving after a new query.
+- Songs playback expands the full server selection, never just the downloaded page.
+- Preserve all existing regression suites and physical acceptance above.
+- New automated coverage: `NativeNavigationTests`, `PopularityReadCostTests`,
+  `testLibraryWindowPrependsWithoutDuplicatesAndKeepsRowIdentity`,
+  `testSlowPreviousSearchCannotReplaceNewSelection`, and
+  `testLongSongsListCentersCurrentAndManualBrowsingSuspendsFollowing`.
+
+Performance review: retain command-state ownership checks, exact nonzero resume
+seeks, pause/cancellation ordering, background leases, and progress confirmation.
+Avoid re-sorting each catalog page, repeated per-artist database commits when
+reopening a playlist within a minute, and seeking to zero when a newly installed
+ready item is already exactly at zero. Apple notes exact seeking can add decoding
+delay: https://developer.apple.com/documentation/avfoundation/avplayer/seek(to:tolerancebefore:toleranceafter:completionhandler:)
+Library-load diagnostics add duration and cancellation only, no song/account data.
+Recently added uses stable catalog insertion order (track IDs), not file modification
+times; a rescan that updates metadata must not make an old song appear newly added.

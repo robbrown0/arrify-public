@@ -70,10 +70,10 @@ import CryptoKit
                 let values: [Track]
                 let pending: Bool
                 if let source {
-                    let page = try await api.detail(source)
+                    let page = try await api.detail(source, offset: startOffset, revision: revision)
                     values = page.items; pending = page.popularityPending ?? false
                 } else {
-                    let page = try await api.catalog(query: query)
+                    let page = try await api.catalog(query: query, offset: startOffset, revision: revision, sort: sort, liked: likedOnly)
                     values = page.items; pending = page.popularityPending ?? false
                 }
                 guard token == generation, !Task.isCancelled else { return }

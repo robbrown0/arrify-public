@@ -1,5 +1,30 @@
 import XCTest
 final class LaunchTests: XCTestCase {
+    @MainActor func testLongSongsListCentersCurrentAndManualBrowsingSuspendsFollowing() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_ROW_PLAYBACK"] = "1"
+        app.launchEnvironment["ARRIFY_UI_LONG_LIST"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Songs"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Songs"].firstMatch.tap()
+        let current = app.buttons["songRow-75"]
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: current)
+        waitForExpectations(timeout: 10)
+        XCTAssertLessThan(abs(current.frame.midY - app.frame.midY), app.frame.height * 0.25)
+        app.swipeUp()
+        let show = app.buttons["Show playing song"]
+        XCTAssertTrue(show.waitForExistence(timeout: 5))
+        show.tap()
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: current)
+        waitForExpectations(timeout: 10)
+        XCTAssertLessThan(abs(current.frame.midY - app.frame.midY), app.frame.height * 0.25)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Long list current song centered"; shot.lifetime = .keepAlways; add(shot)
+    }
     @MainActor func testCollectionShuffleStartsPlaybackAndReflectsState() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
