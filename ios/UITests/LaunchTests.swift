@@ -632,6 +632,14 @@ extension LaunchTests {
         }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Remote playback takeover available"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
+        XCTAssertTrue(app.buttons["takeOverPlayback"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["takeOverPlayback"].isHittable)
+        let route = app.descendants(matching: .any)["playerAirPlay"].firstMatch
+        XCTAssertTrue(route.exists); XCTAssertFalse(route.isEnabled)
+        XCTAssertFalse(app.staticTexts["Adjust volume on the playing device"].exists)
+        let fullShot = XCTAttachment(screenshot: app.screenshot()); fullShot.name = "Full-screen remote playback banner"; fullShot.lifetime = .keepAlways; add(fullShot)
+        app.buttons["Close player"].tap()
         app.buttons["Settings"].firstMatch.tap()
         let version = app.staticTexts["settingsBuildVersion"]
         for _ in 0..<8 {
