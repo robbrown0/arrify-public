@@ -246,15 +246,20 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Arrify library"; attachment.lifetime = .keepAlways; add(attachment)
-        let search = app.searchFields.firstMatch
+        let tabletSearch = app.textFields["tabletSearch"]
+        let search = tabletSearch.exists ? tabletSearch : app.searchFields.firstMatch
         if !search.waitForExistence(timeout: 5) {
             app.buttons["Search"].firstMatch.tap()
         }
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap(); search.typeText("missing")
         XCTAssertTrue(app.staticTexts["No matching songs"].waitForExistence(timeout: 10))
-        let closeSearch = app.buttons["Close"].exists ? app.buttons["Close"] : app.buttons["Cancel"]
-        closeSearch.tap()
+        if tabletSearch.exists {
+            search.typeText("\n")
+        } else {
+            let closeSearch = app.buttons["Close"].exists ? app.buttons["Close"] : app.buttons["Cancel"]
+            closeSearch.tap()
+        }
         app.buttons["Settings"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["privacyPolicy"].firstMatch.exists)
@@ -376,7 +381,7 @@ extension LaunchTests {
         XCTAssertTrue(addSong.waitForExistence(timeout: 10)); addSong.tap()
         XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
         app.buttons["Library"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["Liked songs"].waitForExistence(timeout: 5)); app.buttons["Liked songs"].tap()
+        XCTAssertTrue(app.buttons["Liked songs"].firstMatch.waitForExistence(timeout: 5)); app.buttons["Liked songs"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Liked songs"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["Remove from Liked songs: Just Like a Pill"].tap()
