@@ -102,10 +102,10 @@ def catalog(query,get,offset=0):
     return {'items':items[:6],'next_offset':position if position<len(found) and (position>offset or incomplete) else None,'incomplete':incomplete}
 
 
-def recording_selection(recording_id,get):
+def recording_selection(recording_id,get,verified_record=None):
     """Prepare one known recording through the same official-release rules as search."""
     if not ID.fullmatch(recording_id or ''):raise ValueError('Invalid recording.')
-    record=get('recording/'+recording_id,inc='artist-credits+isrcs')
+    record=dict(verified_record) if verified_record is not None else get('recording/'+recording_id,inc='artist-credits+isrcs')
     if record.get('id')!=recording_id or not record.get('title') or not credits(record):raise ValueError('Recording could not be verified.')
     record['releases']=get('release/',recording=recording_id,inc='release-groups+artist-credits',status='official',limit=100).get('releases',[])
     resolved=choose_release(record)
@@ -198,7 +198,9 @@ def album_for_song(artist,title,get):
     choices=[]
     candidates=records[:4]
     for index,record in enumerate(candidates):
-        result=recording_selection(record['id'],get)['items'][0]
+        # The search already verified the exact title/version and artist identity.
+        # Reuse that recording; official releases and full album still get verified.
+        result=recording_selection(record['id'],get,verified_record=record)['items'][0]
         if result.get('requestable') and result['resolved']['artist_mbid']==owner['id']:
             choices.append(result)
             # A verified Album outranks EPs/singles. Remaining recordings cannot

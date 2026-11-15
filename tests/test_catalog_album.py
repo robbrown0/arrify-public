@@ -70,4 +70,5 @@ class AlbumLookupCostTests(AlbumTests):
    raise AssertionError('Unnecessary metadata lookup: '+path)
   result=album_for_song('Test Artist','Test Song',get)
   self.assertEqual(result['album']['release_id'],REL)
-  self.assertEqual(len(calls),5)
+  self.assertEqual(len(calls),4)
+  self.assertNotIn("recording/"+RID,calls)
