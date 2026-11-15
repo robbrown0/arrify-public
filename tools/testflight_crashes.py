@@ -3,7 +3,10 @@
 import json
 import re
 import urllib.parse
-from testflight_beta_review import API, request, signing_token
+if __package__:
+    from .testflight_beta_review import API, request, signing_token
+else:
+    from testflight_beta_review import API, request, signing_token
 
 
 def summarize(text):
@@ -68,8 +71,14 @@ def main():
         attrs = entry.get('attributes', {})
         ref = entry.get('relationships', {}).get('build', {}).get('data') or {}
         print('Submission:', {k: attrs.get(k) for k in ('createdDate', 'deviceModel', 'osVersion', 'appUptimeInMilliseconds')}, 'build:', builds.get(ref.get('id')))
-        crash = get('/v1/betaFeedbackCrashSubmissions/' + entry['id'] + '/crashLog')
-        summarize(crash.get('data', {}).get('attributes', {}).get('logText', ''))
+        try:
+            crash = get('/v1/betaFeedbackCrashSubmissions/' + entry['id'] + '/crashLog')
+        except RuntimeError as error:
+            if ': HTTP 404 ' not in str(error):
+                raise
+            print('Crash log unavailable (404); continuing with other submissions.')
+            continue
+        summarize((crash.get('data') or {}).get('attributes', {}).get('logText', ''))
     if response.get('links', {}).get('next'):
         print('Additional submissions are available beyond this page.')
 
