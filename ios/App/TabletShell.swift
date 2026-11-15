@@ -56,7 +56,7 @@ struct TabletShell: View {
                     content.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            if model.playback.hasOtherOutput {
+            if model.playback.needsTakeover {
                 PlaybackTakeoverBanner(playback: model.playback)
                     .padding(.horizontal, 16).padding(.top, 8)
             }
@@ -72,7 +72,12 @@ struct TabletShell: View {
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal, 16).padding(.bottom, 8)
             }
-            TabletPlayerBar(playback: model.playback, expand: expandPlayer)
+            if model.playback.track != nil {
+                TabletPlayerBar(playback: model.playback, expand: expandPlayer)
+            } else {
+                EmptyPlayerView { searching = false; libraryRoot = UUID(); destination = "Library" }
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+            }
         }.background(Color.black)
             .onChange(of: query) { destination = "Search" }
             .onChange(of: searching) { PlaybackDiagnostics.record("search-focused=\(searching)"); if searching { destination = "Search" } }
@@ -83,6 +88,7 @@ struct TabletShell: View {
         return Button { searching = false; if value == "Library" { libraryRoot = UUID() }; destination = value } label: {
             Label(title, systemImage: icon).font(.subheadline.weight(.medium)).lineLimit(2)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 10)
+                .contentShape(Rectangle())
                 .foregroundStyle(destination == value ? Color.green : Color.secondary)
                 .background(destination == value ? Color.green.opacity(0.1) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         }.buttonStyle(.plain)

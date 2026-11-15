@@ -546,7 +546,7 @@ struct SongRow: View {
             }.buttonStyle(.plain).accessibilityLabel("Popularity: \(popularity.doubloons) of 3. View sources")
         }
         FavoriteButton(favorites: favorites, track: track)
-        SongActionsMenu(track: track, model: model)
+        SongActionsMenu(track: track, model: model).equatable()
         }
         .background {
             if track.id == model.playback.state?.currentTrackId, let onScroll {
@@ -569,18 +569,24 @@ struct SongRow: View {
     }
 }
 
-struct SongActionsMenu: View {
+struct SongActionsMenu: View, Equatable {
+    // Playback ticks must not rebuild an open menu. Local presentation state
+    // and observed favorites still invalidate this view normally.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.track == rhs.track && lhs.model === rhs.model
+    }
     let track: Track
     let model: AppModel
     private var favorites: FavoritesStore { model.favorites }
     @State private var addingToPlaylist = false
     @State private var showQueue = false
     @State private var destination: LibraryEntry?
-    @State private var showOriginalAlbum = false
+    @State private var originalAlbumTrack: Track?
     var body: some View {
         Menu {
             Button(favorites.ids.contains(track.id) ? "Remove from Liked songs" : "Add to Liked songs", systemImage: favorites.ids.contains(track.id) ? "checkmark.circle.fill" : "plus.circle") { Task { await favorites.toggle(track.id) } }
                 .disabled(favorites.pending.contains(track.id))
+                .accessibilityIdentifier("songActionLike")
             Button("Add to playlist", systemImage: "music.note.list") { addingToPlaylist = true }
             Button("Add to queue", systemImage: "text.badge.plus") { Task { await model.playback.send("queue", ids: [track.id]) } }
             Button("Go to song radio", systemImage: "dot.radiowaves.left.and.right") {
@@ -594,7 +600,7 @@ struct SongActionsMenu: View {
             if let id = track.albumId {
                 Button("Go to album", systemImage: "square.stack") { destination = LibraryEntry(id: id, kind: "albums", name: track.album) }
             }
-            Button("Browse original album", systemImage: "square.stack") { showOriginalAlbum = true }
+            Button("Browse original album", systemImage: "square.stack") { originalAlbumTrack = track }
         } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44).foregroundStyle(.secondary) }
             .accessibilityLabel("More options for \(track.title)")
         .sheet(isPresented: $addingToPlaylist) { AddToPlaylistView(model: model, track: track) }
@@ -602,7 +608,7 @@ struct SongActionsMenu: View {
         .sheet(item: $destination) { entry in
             NavigationStack { DetailScreen(model: model, entry: entry).toolbar { Button("Done") { destination = nil } } }
         }
-        .sheet(isPresented: $showOriginalAlbum) { OriginalAlbumView(model: model, track: track) }
+        .sheet(item: $originalAlbumTrack) { selected in OriginalAlbumView(model: model, track: selected) }
     }
 }
 
@@ -756,11 +762,12 @@ struct OriginalAlbumView: View {
     @State private var result: OriginalAlbum?
     @State private var error: String?
     @State private var loading = false
+    @State private var attempt = 0
     var body: some View {
         NavigationStack {
             List {
                 if loading { ProgressView("Finding original album…") }
-                if let error { Text(error); Button("Retry") { Task { await load() } } }
+                if let error { Text(error); Button("Retry") { attempt += 1 }.disabled(loading) }
                 if let result {
                     Section(result.album.title ?? result.album.name ?? "Original album") {
                         ForEach(Array(result.items.enumerated()), id: \.offset) { _, song in
@@ -777,13 +784,16 @@ struct OriginalAlbumView: View {
                     }
                 }
             }.navigationTitle("Original album").toolbar { Button("Done") { dismiss() } }
-            .task { await load() }
+            .task(id: attempt) { await load() }
         }
     }
     private func load() async {
         loading = true; error = nil
         defer { loading = false }
         do { result = try await model.api.originalAlbum(trackId: track.id) }
-        catch { self.error = "Couldn’t load the original album. Please try again." }
+        catch {
+            guard !Task.isCancelled else { return }
+            self.error = "The album lookup couldn’t finish. Please try again; your music can keep playing."
+        }
     }
 }

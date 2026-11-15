@@ -125,6 +125,7 @@ final class LaunchTests: XCTestCase {
         app.buttons["signIn"].tap()
         XCTAssertTrue(app.buttons["Settings"].firstMatch.waitForExistence(timeout: 10))
         app.buttons["Settings"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
         let entry = app.descendants(matching: .any)["deleteAccountSettings"].firstMatch
         // SwiftUI can report off-screen Form rows as hittable on iPad.
         // Require the entire row to be visible before tapping it.
@@ -193,12 +194,45 @@ final class LaunchTests: XCTestCase {
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
         }
-        let likeAction = app.buttons["Add to Liked songs"]
+        let likeAction = app.buttons["songActionLike"]
         XCTAssertTrue(likeAction.isHittable)
         likeAction.press(forDuration: 0.15)
         XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
         XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
     }
+    @MainActor func testEmptyPlayerAndSingleTapAlbumActions() {
+        let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Browse music"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Choose something to play"].exists)
+        let emptyShot = XCTAttachment(screenshot: app.screenshot()); emptyShot.name = "Empty player footer"; emptyShot.lifetime = .keepAlways; add(emptyShot)
+        XCTAssertFalse(app.buttons["expandPlayer"].exists)
+        app.buttons["Browse music"].tap()
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
+        app.buttons["Home"].firstMatch.tap()
+        let recent = app.buttons["Play recently played song Just Like a Pill by P!nk"]
+        XCTAssertTrue(recent.waitForExistence(timeout: 10)); recent.tap()
+        XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
+        for _ in 0..<2 {
+            app.buttons["More options for Just Like a Pill"].tap()
+            let album = app.buttons["Go to album"]
+            XCTAssertTrue(album.waitForExistence(timeout: 5)); album.tap()
+            XCTAssertTrue(app.navigationBars["M!ssundaztood"].waitForExistence(timeout: 10))
+            app.buttons["Done"].tap()
+        }
+        app.buttons["More options for Just Like a Pill"].tap()
+        let original = app.buttons["Browse original album"]
+        XCTAssertTrue(original.waitForExistence(timeout: 5))
+        if !original.isHittable { app.swipeUp() }
+        XCTAssertTrue(original.isHittable); original.tap()
+        XCTAssertTrue(app.navigationBars["Original album"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Original album from one tap"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     @MainActor func testSearchPopularityAndSongOptions() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
@@ -218,7 +252,7 @@ final class LaunchTests: XCTestCase {
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
         }
-        let likeAction = app.buttons["Add to Liked songs"]
+        let likeAction = app.buttons["songActionLike"]
         XCTAssertTrue(likeAction.isHittable)
         likeAction.press(forDuration: 0.15)
         XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
@@ -598,6 +632,16 @@ extension LaunchTests {
         }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Remote playback takeover available"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
+        let fullTakeover = app.buttons["fullScreenTakeOverPlayback"]
+        XCTAssertTrue(fullTakeover.waitForExistence(timeout: 10))
+        let visible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: fullTakeover)
+        XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 10), .completed)
+        let route = app.descendants(matching: .any)["playerAirPlay"].firstMatch
+        XCTAssertTrue(route.exists); XCTAssertFalse(route.isEnabled)
+        XCTAssertFalse(app.staticTexts["Adjust volume on the playing device"].exists)
+        let fullShot = XCTAttachment(screenshot: app.screenshot()); fullShot.name = "Full-screen remote playback banner"; fullShot.lifetime = .keepAlways; add(fullShot)
+        app.buttons["Close player"].tap()
         app.buttons["Settings"].firstMatch.tap()
         let version = app.staticTexts["settingsBuildVersion"]
         for _ in 0..<8 {
@@ -729,13 +773,22 @@ extension LaunchTests {
         XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout: 10))
         app.buttons["Library"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Browse"].firstMatch.waitForExistence(timeout: 10)); app.buttons["Browse"].firstMatch.tap()
+        for _ in 0..<5 {
+            if app.staticTexts["Pop"].exists && app.staticTexts["Pop"].firstMatch.isHittable { break }
+            app.swipeUp()
+        }
         XCTAssertTrue(app.buttons["Pop, 2 songs"].waitForExistence(timeout: 5) || app.staticTexts["Pop"].exists)
         app.staticTexts["Pop"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
         app.segmentedControls.buttons["Albums"].tap()
         XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
         app.navigationBars.buttons.firstMatch.tap()
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "What’s Hot,")).firstMatch.tap()
+        let hot = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "What’s Hot,")).firstMatch
+        for _ in 0..<5 {
+            if hot.exists && hot.isHittable { break }
+            app.swipeDown()
+        }
+        XCTAssertTrue(hot.isHittable); hot.tap()
         XCTAssertTrue(app.staticTexts["Unavailable fixture song"].waitForExistence(timeout: 10))
         app.buttons["Request"].tap()
         XCTAssertTrue(app.buttons["Requested"].waitForExistence(timeout: 10))

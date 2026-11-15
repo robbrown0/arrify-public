@@ -87,8 +87,9 @@ import Network
     private(set) var rowOutputIsPlaying = false
     var ownsOutput: Bool { state?.ownerDeviceId == deviceId }
     var hasOtherOutput: Bool { state?.ownerDeviceId != nil && !ownsOutput }
+    var needsTakeover: Bool { hasOtherOutput && (state?.ownerActive ?? (state?.playing == true)) }
     var showsPauseControl: Bool {
-        if hasOtherOutput { return state?.playing == true && state?.observed != "failed" }
+        if hasOtherOutput { return needsTakeover && state?.playing == true && state?.observed != "failed" }
         if playbackFailed || (loadedKey != nil && completedKey == loadedKey) { return false }
         return permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true)
     }
@@ -620,26 +621,6 @@ import Network
             if liveUpdatePending { Task { [weak self] in await self?.reconcile(report: false) } }
         }
         let generation = sessionGeneration
-        if explicitPlayback && (!hasOtherOutput || action == "takeover") {
-            // A quick stop/restart must not let the previous session deactivate
-            // audio after the new session has already activated it.
-            await deactivationTask?.value
-            guard requestGeneration == sessionGeneration else { finishNavigation(); return }
-            do { try await audioSession.activate(); guard requestGeneration == sessionGeneration else { finishNavigation(); return }; outputSelectionChanged(trigger: "session-activated") }
-            catch {
-                guard requestGeneration == sessionGeneration else { return }
-                if RequestCancellation.matches(error) { finishNavigation(); return }
-                player.pause(); permission.userPause()
-                message = "Audio output is unavailable. Tap Play to try again."
-                finishNavigation(); return
-            }
-            if !pendingPause { permission.userPlayAfterSessionActivation() }; recoveryUsed = false; resetProgressClock()
-            // AVPlayer cannot recover a failed item by calling play() on it again.
-            if !busy && desiredKey != nil && loadedKey == nil {
-                cancelPreparation(); prepareTask = nil
-                desiredKey = nil; loadedKey = nil; retryPreparation = true
-            }
-        }
         do {
             PlaybackDiagnostics.event("command-state-start")
             let fresh = try await api.state()
@@ -650,7 +631,28 @@ import Network
                 finishNavigation(); await apply(fresh); return
             }
             if automatic && (state?.currentTrackId != endedTrack || state?.playId != endedPlay || !ownsOutput) { await apply(fresh); return }
+            if explicitPlayback && (!needsTakeover || action == "takeover") {
+                // A quick stop/restart must not let the previous session deactivate
+                // audio after the new session has already activated it.
+                await deactivationTask?.value
+                guard requestGeneration == sessionGeneration else { finishNavigation(); return }
+                do { try await audioSession.activate(); guard requestGeneration == sessionGeneration else { finishNavigation(); return }; outputSelectionChanged(trigger: "session-activated") }
+                catch {
+                    guard requestGeneration == sessionGeneration else { return }
+                    if RequestCancellation.matches(error) { finishNavigation(); return }
+                    player.pause(); permission.userPause()
+                    message = "Audio output is unavailable. Tap Play to try again."
+                    finishNavigation(); return
+                }
+                if !pendingPause { permission.userPlayAfterSessionActivation() }; recoveryUsed = false; resetProgressClock()
+                // AVPlayer cannot recover a failed item by calling play() on it again.
+                if !busy && desiredKey != nil && loadedKey == nil {
+                    cancelPreparation(); prepareTask = nil
+                    desiredKey = nil; loadedKey = nil; retryPreparation = true
+                }
+            }
             var command = PlaybackCommand(action: action, deviceId: deviceId)
+            command.takeoverIfInactive = !automatic && ["play", "resume"].contains(action)
             command.deviceName = UIDevice.current.model
             command.expectedRevision = revision ?? state?.queueRevision; command.ownerEpoch = state?.ownerEpoch
             command.mode = mode; command.index = index; command.from = from; command.to = to

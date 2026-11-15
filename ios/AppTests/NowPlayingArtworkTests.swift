@@ -6,6 +6,58 @@ import ArrifyCore
 @testable import Arrify
 
 final class NowPlayingArtworkTests: XCTestCase {
+    func testSavedAddressesSurviveCredentialRemovalAndCanBeClearedExplicitly() throws {
+        let name = "SavedServerAddressesTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let data = Data(#"{"endpoint":"https://public.invalid","homeEndpoint":"https://home.invalid","serverId":"test","tokens":{"accessToken":"a","refreshToken":"r","expiresIn":60,"refreshExpiresIn":600,"sessionId":"s"},"accessExpires":0}"#.utf8)
+        var credential = try JSONDecoder().decode(Credential.self, from: data)
+        SavedServerAddresses.remember(credential, defaults: defaults)
+        // A new defaults instance simulates a subsequent launch after reauthentication.
+        let restored = try XCTUnwrap(UserDefaults(suiteName: name)?.dictionary(forKey: "savedServerAddresses"))
+        XCTAssertEqual(restored["home"] as? String, "https://home.invalid")
+        XCTAssertNil(restored["tokens"])
+        credential.homeEndpoint = nil
+        SavedServerAddresses.remember(credential, defaults: defaults)
+        XCTAssertEqual(defaults.dictionary(forKey: "savedServerAddresses")?["home"] as? String, "")
+    }
+
+    @MainActor func testExplicitResumeClaimsInactiveOutputAfterFreshState() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let audio = TestAudioSession()
+        let coordinator = PlaybackCoordinator(api: api, audioSession: audio)
+        await transport.setOwner("other-device")
+        await transport.setOwnerActive(false)
+        await coordinator.reconcile()
+        XCTAssertFalse(coordinator.needsTakeover)
+        XCTAssertFalse(coordinator.showsPauseControl)
+        XCTAssertEqual(audio.activationAttempts, 0)
+        await coordinator.send("resume")
+        XCTAssertTrue(coordinator.ownsOutput)
+        XCTAssertEqual(audio.activationAttempts, 1)
+        coordinator.stop()
+    }
+
+    @MainActor func testFreshActiveOwnerBlocksImplicitResumeWithoutActivatingAudio() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let audio = TestAudioSession()
+        let coordinator = PlaybackCoordinator(api: api, audioSession: audio)
+        await transport.setOwner("other-device")
+        await transport.setOwnerActive(false)
+        await coordinator.reconcile()
+        await transport.setOwnerActive(true)
+        await coordinator.send("resume")
+        XCTAssertFalse(coordinator.ownsOutput)
+        XCTAssertTrue(coordinator.needsTakeover)
+        XCTAssertEqual(audio.activationAttempts, 0)
+        XCTAssertNotNil(coordinator.message)
+        coordinator.stop()
+    }
+
     @MainActor func testRestoredOwnerDoesNotPublishSystemPlaybackOrAutoplay() async throws {
         let transport = RestoredOwnerTransport()
         let api = APIClient(transport: transport, store: UITestStore())
@@ -100,6 +152,8 @@ private actor RestoredOwnerTransport: HTTPTransport {
     private(set) var lockScreenRequests = 0
     private(set) var artworkRequests = 0
     private var owner = ""
+    private var ownerActive: Bool?
+    func setOwnerActive(_ value: Bool) { ownerActive = value }
     private var networkFailure = false
     func setNetworkFailure(_ value: Bool) { networkFailure = value }
     private var current = 1
@@ -117,12 +171,19 @@ private actor RestoredOwnerTransport: HTTPTransport {
             if networkFailure { throw URLError(.networkConnectionLost) }
             if request.httpMethod == "POST", let body = request.httpBody,
                let value = try JSONSerialization.jsonObject(with: body) as? [String: Any],
-               let action = value["action"] as? String { commands.append(action) }
-            let value: [String: Any] = ["partial": false, "current_track_id": current,
+               let action = value["action"] as? String {
+                if value["takeover_if_inactive"] as? Bool == true, owner != value["device_id"] as? String {
+                    if ownerActive == true { throw APIError.rejected(status: 409, code: "playback_changed", message: "Choose Play here") }
+                    if ownerActive == false { owner = value["device_id"] as? String ?? owner }
+                }
+                commands.append(action)
+            }
+            var value: [String: Any] = ["partial": false, "current_track_id": current,
                 "position_seconds": 30, "server_time": 1, "queue_revision": 1,
                 "owner_device_id": owner, "owner_epoch": 1, "intent": 1,
                 "playing": commands.last != "pause", "observed": "playing", "seek_target_seconds": 30,
                 "seek_intent": 0, "play_id": 1, "upcoming_track_ids": [2]]
+            if let ownerActive { value["owner_active"] = ownerActive }
             return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: value))
         }
         if path.hasSuffix("/manifest") {
@@ -275,7 +336,7 @@ private actor TransitionTransport: HTTPTransport {
             }
             value = ["partial": false, "current_track_id": current,
                 "position_seconds": 0, "server_time": 1, "queue_revision": current,
-                "owner_device_id": owner, "owner_epoch": 1, "intent": current,
+                "owner_device_id": owner.isEmpty ? NSNull() : owner as Any, "owner_active": !owner.isEmpty, "owner_epoch": 1, "intent": current,
                 "playing": true, "observed": "playing", "seek_target_seconds": 0,
                 "seek_intent": 0, "play_id": current, "upcoming_track_ids": current == 1 ? [2] : []]
         } else if path.hasSuffix("/manifest") {

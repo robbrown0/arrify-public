@@ -33,7 +33,7 @@ def choose_release(recording):
     if not choices:return None
     _,release,group=min(choices,key=lambda x:x[0])
     return {'resolution_status':'resolved','recording_id':recording['id'],'title':recording['title'],'artist':artists[0]['name'],
-            'artist_mbid':aid,'album':group['title'],'album_year':(group.get('first-release-date') or release.get('date',''))[:4],'album_type':group['primary-type'],'release_group_id':group['id'],
+            'artist_mbid':aid,'album':group['title'],'album_year':(group.get('first-release-date') or release.get('date',''))[:4],'album_type':group['primary-type'],'album_secondary_types':group.get('secondary-types',[]),'release_group_id':group['id'],
             'release_id':release['id'],'release_date':recording.get('first-release-date') or release.get('date',''),
             'isrcs':recording.get('isrcs',[]),'metadata_url':'https://musicbrainz.org/recording/'+recording['id']}
 
@@ -196,9 +196,20 @@ def album_for_song(artist,title,get):
     aid,records=next(iter(linked.items()));owner=owners[aid]
     records.sort(key=lambda r:(r.get('first-release-date','9999'),r['id']))
     choices=[]
-    for record in records[:4]:
+    candidates=records[:4]
+    for index,record in enumerate(candidates):
         result=recording_selection(record['id'],get)['items'][0]
-        if result.get('requestable') and result['resolved']['artist_mbid']==owner['id']:choices.append(result)
+        if result.get('requestable') and result['resolved']['artist_mbid']==owner['id']:
+            choices.append(result)
+            # A verified Album outranks EPs/singles. Remaining recordings cannot
+            # improve its year when their first-release dates are already later.
+            # Missing dates keep the full verification path; never guess an album.
+            year=result.get('year','')
+            remaining=candidates[index+1:]
+            if (result.get('album_type')=='Album' and not result['resolved'].get('album_secondary_types') and re.fullmatch(r'\d{4}',year or '')
+                    and all(re.match(r'^\d{4}',r.get('first-release-date',''))
+                            and r['first-release-date'][:4]>=year for r in remaining)):
+                break
     if not choices:raise ValueError('No original album could be verified for this song.')
     selected=min(choices,key=lambda x:(('Album','EP','Single').index(x['album_type']),x.get('year') or '9999'))
     result=album_tracks(selected,get);result['requested_artist']=artist

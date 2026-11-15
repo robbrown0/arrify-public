@@ -10,6 +10,29 @@ class ListeningTests(unittest.TestCase):
         self.clock=1000
         return Listening(self.p,now=lambda:self.clock)
     def call(self,l,action,device='a'*32,uid=1,**data):return l.command(uid,{'expected_revision':l.state(uid)['listening']['revision'],'action':action,'device_id':device,'device_name':'iPhone' if device[0]=='a' else 'iPad',**data})
+    def test_explicit_play_claims_paused_or_expired_owner_but_not_live_owner(self):
+        l=self.session(); self.call(l,'play',ids=[1,2])
+        with self.assertRaises(PlaybackConflict):
+            self.call(l,'play','b'*32,ids=[2],takeover_if_inactive=True)
+        self.assertEqual(l.state(1)['current'],1)
+        self.call(l,'pause')
+        resumed=self.call(l,'resume','b'*32,takeover_if_inactive=True)
+        self.assertEqual(resumed['listening']['owner'],'b'*32)
+        self.assertTrue(resumed['listening']['playing'])
+        self.clock+=21
+        claimed=self.call(l,'play',ids=[2],takeover_if_inactive=True)
+        self.assertEqual(claimed['listening']['owner'],'a'*32)
+        self.assertEqual(claimed['current'],2)
+
+    def test_late_owner_heartbeat_prevents_implicit_transfer(self):
+        l=self.session(); first=self.call(l,'play',ids=[1,2]); d=first['listening']
+        self.clock+=21
+        self.call(l,'heartbeat',owner_epoch=d['epoch'],intent=d['intent'],
+                  expected_current=1,position=10,duration=180,observed='playing')
+        with self.assertRaises(PlaybackConflict):
+            self.call(l,'resume','b'*32,takeover_if_inactive=True)
+        self.assertEqual(l.state(1)['listening']['owner'],'a'*32)
+
     def test_ten_minute_interruption_freezes_cursor_without_rewriting_play_intent(self):
         l=self.session(); first=self.call(l,'play',ids=[1,2]); d=first['listening']
         args=dict(owner_epoch=d['epoch'],intent=d['intent'],expected_current=1,position=81,duration=180)
