@@ -273,9 +273,9 @@ enum TrackPlaybackStatus: String {
     case paused = "Paused"
     case preparing = "Starting playback"
 
-    static func resolve(trackID: Int, currentTrackID: Int?, upcoming: Bool = false,
+    static func resolve(trackID: Int, currentTrackID: Int?,
                         playing: Bool, wantsPlayback: Bool) -> Self? {
-        guard !upcoming, currentTrackID == trackID else { return nil }
+        guard currentTrackID == trackID else { return nil }
         return playing ? .playing : (wantsPlayback ? .preparing : .paused)
     }
     var symbol: String {

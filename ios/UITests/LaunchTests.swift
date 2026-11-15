@@ -29,6 +29,7 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(queueCurrent.waitForExistence(timeout: 10))
         XCTAssertEqual(queueCurrent.value as? String, "Paused")
         XCTAssertTrue(app.buttons["Play queued Family Portrait"].exists)
+        XCTAssertEqual(app.buttons["Play queued Just Like a Pill"].value as? String ?? "", "", "An upcoming duplicate must not be marked current")
         let queueShot = XCTAttachment(screenshot: app.screenshot()); queueShot.name = "Queue current track and context"; queueShot.lifetime = .keepAlways; add(queueShot)
     }
     @MainActor func testAccountDeletionRequiresConfirmationAndPassword() {

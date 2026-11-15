@@ -100,7 +100,11 @@ actor UITestTransport: HTTPTransport {
         } else if path.hasSuffix("/tracks/2") {
             value = #"{"track":{"id":2,"title":"Family Portrait","artist":"P!nk","album":"M!ssundaztood"}}"#
         } else if path.hasSuffix("/playback/queue") {
+            if ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" {
+                value = #"{"revision":1,"total":2,"items":[{"index":0,"track":{"id":1,"title":"Just Like a Pill","artist":"P!nk","album":"M!ssundaztood"}},{"index":1,"track":{"id":2,"title":"Family Portrait","artist":"P!nk","album":"M!ssundaztood"}}],"next_offset":null}"#
+            } else {
             value = #"{"revision":1,"total":1,"items":[{"index":0,"track":{"id":2,"title":"Family Portrait","artist":"P!nk","album":"M!ssundaztood"}}],"next_offset":null}"#
+            }
         } else if path.hasSuffix("/manifest") {
             value = #"{"owner_epoch":1,"queue_revision":1,"retry_after_seconds":5,"items":[{"track_id":1,"profile":"original","state":"queued"}]}"#
         } else {
