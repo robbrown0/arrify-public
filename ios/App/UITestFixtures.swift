@@ -111,12 +111,13 @@ actor UITestTransport: HTTPTransport {
             if request.httpMethod == "POST", let data = request.httpBody,
                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 if body["action"] as? String == "play" {
+                    shuffle = body["shuffle"] as? Bool ?? false
                     if var source = body["source"] as? [String:String] {
                         source["name"] = "Fixture collection"
                         playbackContext = String(data: try JSONSerialization.data(withJSONObject: source), encoding: .utf8)!
                     } else { playbackContext = "null" }
                 }
-                owner = body["device_id"] as? String
+                owner = ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" ? "other-device" : body["device_id"] as? String
                 if body["action"] as? String == "shuffle" { shuffle.toggle() }
                 if let mode = body["mode"] as? String { repeatMode = mode }
                 playing = body["action"] as? String != "pause"

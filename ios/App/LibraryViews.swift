@@ -410,9 +410,18 @@ struct DetailScreen: View {
                     HStack(spacing: 16) {
                         Button { Task { await model.playback.toggleSource(item.source) } } label: { Label(model.playback.sourceShowsPause(item.source) ? "Pause" : "Play", systemImage: model.playback.sourceShowsPause(item.source) ? "pause.fill" : "play.fill").frame(maxWidth: .infinity, minHeight: 36) }.buttonStyle(.borderedProminent).tint(.green).foregroundStyle(.black).accessibilityIdentifier("playCollection")
                         if item.kind != "channels" {
-                            Button { Task { await model.playback.shuffleSource(item.source) } } label: { Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity, minHeight: 36) }.buttonStyle(.bordered).accessibilityIdentifier("shuffleCollection")
+                            let shuffled = model.playback.sourceShowsShuffle(item.source)
+                            Button { Task { await model.playback.shuffleSource(item.source) } } label: {
+                                Label(shuffled ? "Shuffle on" : "Shuffle", systemImage: "shuffle")
+                                    .frame(maxWidth: .infinity, minHeight: 36)
+                            }.buttonStyle(.borderedProminent)
+                                .tint(shuffled ? .green : .green.opacity(0.16))
+                                .foregroundStyle(shuffled ? Color.black : Color.green)
+                                .accessibilityValue(shuffled ? "on" : "off")
+                                .accessibilityHint(shuffled ? (model.playback.sourceShowsPause(item.source) ? "Turn shuffle off" : "Resume shuffled playback") : "Start this collection in shuffle mode")
+                                .accessibilityIdentifier("shuffleCollection")
                         }
-                    }.disabled(item.trackCount == 0)
+                    }.disabled(item.trackCount == 0 || model.playback.sourceActionPending)
                 }.frame(maxWidth: .infinity).padding(.vertical)
             }.listRowBackground(Color.clear)
             Section {

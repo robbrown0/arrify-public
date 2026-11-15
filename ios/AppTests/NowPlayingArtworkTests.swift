@@ -375,6 +375,18 @@ extension NowPlayingArtworkTests {
 }
 
 extension NowPlayingArtworkTests {
+    @MainActor func testShuffleHighlightBelongsOnlyToTheCurrentCollection() throws {
+        let coordinator = PlaybackCoordinator(api: APIClient(transport: UITestTransport(), store: UITestStore()), audioSession: UITestAudioSession())
+        defer { coordinator.stop() }
+        let data = Data(#"{"partial":false,"current_track_id":1,"position_seconds":0,"server_time":1,"queue_revision":1,"owner_device_id":"other","owner_epoch":1,"intent":1,"playing":false,"observed":"paused","seek_target_seconds":0,"seek_intent":0,"play_id":1,"shuffle":true,"context":{"kind":"albums","id":"one","name":"Album"}}"#.utf8)
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        coordinator.state = try decoder.decode(PlaybackState.self, from: data)
+        XCTAssertTrue(coordinator.sourceShowsShuffle(LibrarySource(kind: "albums", id: "one")), "Paused shuffle stays visible")
+        XCTAssertFalse(coordinator.sourceShowsShuffle(LibrarySource(kind: "albums", id: "two")))
+        XCTAssertFalse(coordinator.sourceShowsShuffle(LibrarySource(kind: "playlists", id: "one")))
+        coordinator.state = nil
+        XCTAssertFalse(coordinator.sourceShowsShuffle(LibrarySource(kind: "albums", id: "one")))
+    }
     func testTrackRowStatusFollowsIdentityAndPlayback() {
         XCTAssertNil(TrackPlaybackStatus.resolve(trackID: 1, currentTrackID: nil, playing: true, wantsPlayback: true))
         XCTAssertNil(TrackPlaybackStatus.resolve(trackID: 2, currentTrackID: 1, playing: true, wantsPlayback: true))

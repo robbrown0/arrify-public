@@ -530,14 +530,29 @@ import Network
     func isCurrentSource(_ source: LibrarySource) -> Bool {
         state?.currentTrackId != nil && state?.context?.matches(source) == true
     }
+    private(set) var sourceActionPending = false
     func sourceShowsPause(_ source: LibrarySource) -> Bool { isCurrentSource(source) && showsPauseControl }
+    func sourceShowsShuffle(_ source: LibrarySource) -> Bool { isCurrentSource(source) && state?.shuffle == true }
     func toggleSource(_ source: LibrarySource) async {
+        guard !sourceActionPending else { return }
+        sourceActionPending = true
+        defer { sourceActionPending = false }
         if isCurrentSource(source) { await send(showsPauseControl ? "pause" : "resume") }
         else { await play(source: source) }
     }
     func shuffleSource(_ source: LibrarySource) async {
-        if isCurrentSource(source) { await send("shuffle") }
-        else { await play(source: source, shuffle: true) }
+        guard !sourceActionPending else { return }
+        sourceActionPending = true
+        defer { sourceActionPending = false }
+        if sourceShowsShuffle(source) {
+            // Resume a paused shuffled collection without losing its place.
+            // While playing, a second tap restores the remaining queue order.
+            await send(showsPauseControl ? "shuffle" : "resume")
+        } else {
+            // A collection-level Shuffle starts the complete source, including
+            // when that collection was already selected but paused or unshuffled.
+            await play(source: source, shuffle: true)
+        }
     }
     func cycleRepeat() async {
         let next = state?.repeatMode == "off" ? "all" : state?.repeatMode == "all" ? "one" : "off"
