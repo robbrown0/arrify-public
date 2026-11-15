@@ -220,7 +220,9 @@ struct UpNextView: View {
                 if let track = playback.track {
                     Section {
                         trackRow(track, status: playback.rowStatus(for: track.id))
-                            .background { NativeListScrollObserver { following = false } }
+                            .background { NativeListScrollObserver { following = false }.accessibilityHidden(true) }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityValue(playback.rowStatus(for: track.id)?.rawValue ?? "")
                             .listRowBackground(Color.green.opacity(0.12))
                             .accessibilityIdentifier("queueCurrentTrack").id("current")
                     } header: { Text("Current track") } footer: { Text(playback.contextName) }

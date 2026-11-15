@@ -550,7 +550,7 @@ struct SongRow: View {
         }
         .background {
             if track.id == model.playback.state?.currentTrackId, let onScroll {
-                NativeListScrollObserver(onScroll: onScroll)
+                NativeListScrollObserver(onScroll: onScroll).accessibilityHidden(true)
             }
         }
         .listRowBackground(playbackStatus == nil ? nil : Color.green.opacity(0.12))

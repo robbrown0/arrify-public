@@ -1,5 +1,8 @@
 import XCTest
 final class LaunchTests: XCTestCase {
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+    }
     @MainActor func testLongSongsListCentersCurrentAndManualBrowsingSuspendsFollowing() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"

@@ -93,3 +93,13 @@ simultaneous-gesture attempt interfered with a song menu; retain menu tests as
 well as scroll tests. The same safeguard applies to the queue. Keep
 the long-list test's actual drag, return-button assertion and recenter assertion;
 initial positioning alone is insufficient evidence that manual browsing works.
+The native scroll observer must remain hidden from accessibility. The queue's
+current row explicitly retains its combined accessibility element and playback
+value after the observer background is applied; `testCurrentTrackIsMarkedInListAndQueue`
+checks the paused value as well as visible highlighting.
+
+Account deletion dismisses password focus before presenting confirmation, so
+keyboard restoration does not compete with the alert or error state. Keep cancel,
+wrong-password, successful deletion and sign-out assertions. UI cases stop after
+the first failed assertion to avoid cascading missing-element waits; the suite
+still executes the remaining cases.
