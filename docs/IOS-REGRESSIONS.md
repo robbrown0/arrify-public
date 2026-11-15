@@ -77,3 +77,10 @@ catalog work and does not measure network latency, SwiftUI rendering or audio st
 Popularity page enrichment batches newly viewed artists in one transaction
 (`test_new_playlist_batches_view_records_in_one_commit` verifies 50 artists,
 unchanged row order, refresh scheduling and no extra commit on immediate reopen).
+
+PR Apple qualification runs iPhone and iPad as parallel jobs on separate macOS
+runners, with fail-fast disabled so a failure does not hide the other device's
+results. `apple-build` aggregates both results and fails if either fails or is
+cancelled. The generic physical-device build runs once. All app/UI tests and
+screenshots remain included. TestFlight qualification already uses the same
+parallel device matrix and distribution still depends on both passing.
