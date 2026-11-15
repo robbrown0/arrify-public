@@ -106,6 +106,8 @@ actor UITestTransport: HTTPTransport {
             value = "{\"revision\":\"fixture\",\"items\":\(items),\"total\":\(matches ? 2 : 0),\"next_offset\":null}"
         } else if path.contains("/artwork/") || path.contains("/artist-artwork/") {
             return HTTPResult(status: 404, data: Data())
+        } else if path == "/api/v1/discover/album" {
+            value = #"{"album":{"name":"M!ssundaztood"},"items":[{"title":"Just Like a Pill","artist":"P!nk","local_track_id":1}]}"#
         } else if path.hasSuffix("/tracks/1") {
             value = #"{"track":{"id":1,"title":"Just Like a Pill","artist":"P!nk","album":"M!ssundaztood","artist_id":"bbbbbbbbbbbbbbbbbbbbbbbb","album_id":"aaaaaaaaaaaaaaaaaaaaaaaa"}}"#
         } else if path.hasSuffix("/tracks/2") {

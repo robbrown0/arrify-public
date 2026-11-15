@@ -199,6 +199,38 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
         XCTAssertTrue(app.buttons["Remove from Liked songs: Just Like a Pill"].waitForExistence(timeout: 5))
     }
+    @MainActor func testEmptyPlayerAndSingleTapAlbumActions() {
+        let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Browse music"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Choose something to play"].exists)
+        XCTAssertFalse(app.buttons["expandPlayer"].exists)
+        app.buttons["Browse music"].tap()
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
+        app.buttons["Home"].firstMatch.tap()
+        let recent = app.buttons["Play recently played song Just Like a Pill by P!nk"]
+        XCTAssertTrue(recent.waitForExistence(timeout: 10)); recent.tap()
+        XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
+        for _ in 0..<2 {
+            app.buttons["More options for Just Like a Pill"].tap()
+            let album = app.buttons["Go to album"]
+            XCTAssertTrue(album.waitForExistence(timeout: 5)); album.tap()
+            XCTAssertTrue(app.navigationBars["M!ssundaztood"].waitForExistence(timeout: 10))
+            app.buttons["Done"].tap()
+        }
+        app.buttons["More options for Just Like a Pill"].tap()
+        let original = app.buttons["Browse original album"]
+        XCTAssertTrue(original.waitForExistence(timeout: 5))
+        if !original.isHittable { app.swipeUp() }
+        XCTAssertTrue(original.isHittable); original.tap()
+        XCTAssertTrue(app.navigationBars["Original album"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Original album from one tap"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     @MainActor func testSearchPopularityAndSongOptions() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"

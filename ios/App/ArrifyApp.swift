@@ -39,7 +39,14 @@ import AVKit
         RemoteControlRuntime.api = api
     }
     func restore() async {
-        defer { restoring = false }
+        defer {
+            if !signedIn, ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] != "1",
+               let addresses = SavedServerAddresses.value {
+                endpoint = addresses["public"] ?? endpoint
+                homeEndpoint = addresses["home"] ?? ""
+            }
+            restoring = false
+        }
         do {
             if let saved = try await api.restore() { endpoint = saved; homeEndpoint = await api.connectionAddresses()?.homeAddress ?? ""; signedIn = true; await playback.remoteActivity.restoreForSession(); playback.start() }
         } catch { self.error = error.localizedDescription }
@@ -192,7 +199,7 @@ struct MainView: View {
     private var playbackFooter: some View {
         VStack(spacing: 8) {
             // Keep status beside playback controls and out of search fields.
-            if model.playback.hasOtherOutput {
+            if model.playback.needsTakeover {
                 PlaybackTakeoverBanner(playback: model.playback)
             }
             if model.playback.connectionInterrupted {
@@ -204,8 +211,12 @@ struct MainView: View {
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
                     .accessibilityIdentifier("playbackStatusMessage")
             }
-            if UIDevice.current.userInterfaceIdiom != .pad, model.playback.track != nil {
-                miniPlayer.background(.regularMaterial, in: Capsule())
+            if UIDevice.current.userInterfaceIdiom != .pad {
+                if model.playback.track != nil {
+                    miniPlayer.background(.regularMaterial, in: Capsule())
+                } else {
+                    EmptyPlayerView { libraryRoot = UUID(); selectedTab = "Library" }
+                }
             }
         }.padding(.horizontal, 16).padding(.bottom, 8)
     }

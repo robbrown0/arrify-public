@@ -52,6 +52,7 @@ public struct PlaybackState: Codable, Sendable {
     public let serverTime: Double
     public let queueRevision: Int
     public let ownerDeviceId: String?
+    public var ownerActive: Bool?
     public let ownerEpoch: Int
     public let intent: Int
     public let playing: Bool
@@ -98,6 +99,7 @@ public struct PlaybackCommand: Encodable, Sendable {
     public var expectedNext: Int?
     public var transitionId: String?
     public var automatic: Bool?
+    public var takeoverIfInactive: Bool?
     public var position: Double?
     public var duration: Double?
     public var intent: Int?

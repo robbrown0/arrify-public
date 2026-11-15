@@ -95,7 +95,14 @@ class Listening:
             # transaction. Recheck its heartbeat here so a live device keeps control.
             recover_offline=(action=='play' and not data.get('automatic') and data.get('takeover_if_offline') is True
                              and d['owner']!=device and self.now()-d['seen']>=20)
-            if action=='takeover' or recover_offline or (not d['owner'] and action in ('play','resume')):
+            recover_inactive=(action in ('play','resume') and not data.get('automatic')
+                              and data.get('takeover_if_inactive') is True and d['owner']!=device
+                              and (not d['playing'] or self.now()-d['seen']>=20
+                                   or d['observed'] in ('failed','needs-gesture')))
+            if (action in ('play','resume') and data.get('takeover_if_inactive') is True
+                    and d['owner'] and d['owner']!=device and not recover_inactive):
+                raise PlaybackConflict('Another device is playing. Choose Play here to transfer playback.')
+            if action=='takeover' or recover_offline or recover_inactive or (not d['owner'] and action in ('play','resume')):
                 pos=self.position(s)
                 if d['owner']!=device:d['epoch']+=1
                 d.update(owner=device,device_name=str(data.get('device_name','Browser'))[:60],seen=self.now(),observed='paused',duration=0,quality='',output='')

@@ -6,6 +6,32 @@ import ArrifyCore
 @testable import Arrify
 
 final class NowPlayingArtworkTests: XCTestCase {
+    func testSavedAddressesSurviveCredentialRemovalAndCanBeClearedExplicitly() throws {
+        let name = "SavedServerAddressesTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let data = Data(#"{"endpoint":"https://public.invalid","homeEndpoint":"https://home.invalid","serverId":"test","tokens":{"accessToken":"a","refreshToken":"r","expiresIn":60,"refreshExpiresIn":600,"sessionId":"s"},"accessExpires":0}"#.utf8)
+        var credential = try JSONDecoder().decode(Credential.self, from: data)
+        SavedServerAddresses.remember(credential, defaults: defaults)
+        // A new defaults instance simulates a subsequent launch after reauthentication.
+        let restored = try XCTUnwrap(UserDefaults(suiteName: name)?.dictionary(forKey: "savedServerAddresses"))
+        XCTAssertEqual(restored["home"] as? String, "https://home.invalid")
+        XCTAssertNil(restored["tokens"])
+        credential.homeEndpoint = nil
+        SavedServerAddresses.remember(credential, defaults: defaults)
+        XCTAssertEqual(defaults.dictionary(forKey: "savedServerAddresses")?["home"] as? String, "")
+    }
+
+    @MainActor func testActionsMenuIdentityIgnoresPlaybackProgress() throws {
+        let model = AppModel()
+        let track = try JSONDecoder().decode(Track.self, from: Data(#"{"id":1,"title":"Song","artist":"Artist","album":"Album"}"#.utf8))
+        let before = SongActionsMenu(track: track, model: model)
+        model.playback.position = 40
+        XCTAssertEqual(before, SongActionsMenu(track: track, model: model))
+        let other = try JSONDecoder().decode(Track.self, from: Data(#"{"id":2,"title":"Other","artist":"Artist","album":"Album"}"#.utf8))
+        XCTAssertNotEqual(before, SongActionsMenu(track: other, model: model))
+    }
+
     @MainActor func testRestoredOwnerDoesNotPublishSystemPlaybackOrAutoplay() async throws {
         let transport = RestoredOwnerTransport()
         let api = APIClient(transport: transport, store: UITestStore())

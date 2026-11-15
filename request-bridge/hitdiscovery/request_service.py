@@ -115,7 +115,7 @@ def search(config,query,offset=0,recording_id=None,song=None,album_selection=Non
         cache_key=('arrify-explore-v6:' if explore else 'arrify-discography-v1:' if discography else 'arrify-group-album-v2:' if album_group else 'arrify-local-album-v1:' if album_song else 'arrify-album-tracks-v1:' if album_selection else 'arrify-song-selection-v2:' if song else 'arrify-recording-selection-v2:' if recording_id else 'arrify-album-search-v1:')+hashlib.sha256((query.casefold()+':'+str(offset)).encode()).hexdigest()
         cached=s.cached(cache_key,86400)
         if cached is not None:return cached
-        deadline=time.monotonic()+45
+        deadline=time.monotonic()+(12 if album_song else 45)
         def get(endpoint,**params):
             url='https://musicbrainz.org/ws/2/'+endpoint+'?'+urlencode({'fmt':'json',**params})
             saved=s.cached(url,86400)
@@ -126,7 +126,9 @@ def search(config,query,offset=0,recording_id=None,song=None,album_selection=Non
                 last=ROOT/'search-clock.json'
                 stamp=json.loads(last.read_text()).get('at',0) if last.exists() else 0
                 delay=max(0,1.2-(time.time()-stamp))
-                if delay:time.sleep(delay)
+                if delay:
+                    if time.monotonic()+delay>=deadline:raise TimeoutError('Metadata lookup timed out. Please retry.')
+                    time.sleep(delay)
                 atomic(last,{'at':time.time()})
                 request=Request(url,headers={'User-Agent':f'Arrify/0.2 ({config.contact})','Accept':'application/json','Content-Type':'application/json'})
                 for attempt in range(2):

@@ -15,6 +15,7 @@ def snapshot(result: dict) -> dict:
             'repeat_mode': None if partial else result.get('repeat', 'off'),
             'queue_controls_available': None if partial else not (result.get('channel') or result.get('party_id') or (result.get('station') and result['station'].get('mode') != 'mix')),
             'playing': state['playing'], 'observed': state['observed'],
+            'owner_active': bool(state.get('online') and state['playing'] and state['observed'] not in ('failed','needs-gesture')),
             'duration_seconds': state.get('duration', 0), 'output': state.get('output', ''),
             'seek_target_seconds': state['seek_target'], 'seek_intent': state['seek_intent'],
             'play_id': state['play_id'],

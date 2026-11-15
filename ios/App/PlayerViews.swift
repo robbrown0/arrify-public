@@ -3,6 +3,22 @@ import ArrifyCore
 import AVKit
 import MediaPlayer
 
+struct EmptyPlayerView: View {
+    let browse: () -> Void
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "music.note").font(.title2).foregroundStyle(.secondary)
+                .frame(width: 40, height: 40).accessibilityHidden(true)
+            Text("Choose something to play").font(.subheadline)
+            Spacer(minLength: 8)
+            Button("Browse music", action: browse).font(.subheadline.weight(.semibold))
+                .frame(minHeight: 44).tint(.green)
+        }.padding(.horizontal, 16).padding(.vertical, 8)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .accessibilityIdentifier("emptyPlayer")
+    }
+}
+
 struct MiniPlayerView: View {
     @Bindable var playback: PlaybackCoordinator
     let expand: () -> Void
@@ -22,7 +38,7 @@ struct MiniPlayerView: View {
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityLabel("Now playing, \(track.title), \(track.artist)").accessibilityIdentifier("expandPlayer")
                     if !playback.serverConnection.connected || playback.serverConnection.degraded { ServerConnectionBadge(connection: playback.serverConnection) }
-                    AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44).accessibilityIdentifier("miniAirPlay")
+                    AirPlayPicker(enabled: playback.ownsOutput, onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44).accessibilityIdentifier("miniAirPlay")
                     Button { Task { await playback.send(playback.showsPauseControl ? "pause" : "resume") } } label: {
                         Image(systemName: playback.showsPauseControl ? "pause.fill" : "play.fill")
                             .font(.system(size: 21, weight: .semibold)).frame(width: 44, height: 44).overlay { PlaybackProgressRing(progress: playback.progress).padding(3) }
@@ -58,7 +74,7 @@ struct NowPlayingView: View {
                                 .labelStyle(.iconOnly).frame(width: 44, height: 44)
                             Text(playback.contextName).font(.subheadline.weight(.semibold)).lineLimit(1).frame(maxWidth: .infinity)
                             if let track = playback.track {
-                                SongActionsMenu(track: track, model: model)
+                                SongActionsMenu(track: track, model: model).equatable()
                             }
                         }
                         if landscape {
@@ -108,12 +124,6 @@ struct NowPlayingView: View {
                 HStack { Text(message).font(.caption); Button("Retry") { playback.retry() } }
             }
             if let transition = playback.transitionMessage { Text(transition).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("playbackTransition") }
-            if playback.hasOtherOutput {
-                HStack {
-                    Button("Play here") { Task { await playback.send("takeover") } }
-                    Spacer()
-                }.font(.footnote)
-            }
             VStack(spacing: 4) {
                 Slider(value: Binding(get: { seeking ? seekPosition : min(playback.position, max(1, playback.duration)) }, set: { seekPosition = $0 }), in: 0...max(1, playback.duration)) { editing in
                     if editing { seekPosition = playback.position }
@@ -154,8 +164,7 @@ struct NowPlayingView: View {
                     .disabled(playback.state?.queueControlsAvailable != true)
             }.buttonStyle(.plain)
             if playback.hasOtherOutput {
-                Text("Adjust volume on the playing device")
-                    .font(.footnote).foregroundStyle(.secondary).frame(height: 44)
+                if playback.needsTakeover { PlaybackTakeoverBanner(playback: playback).tint(.green) }
             } else {
                 SystemVolumeSlider(onCreate: { playback.expandedVolumeView = $0 })
                     .frame(height: 44).padding(.top, 6)
@@ -166,7 +175,7 @@ struct NowPlayingView: View {
                     ServerConnectionBadge(connection: playback.serverConnection)
                 }.frame(width: 92, alignment: .leading)
                 VStack(spacing: 0) {
-                    AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")
+                    AirPlayPicker(enabled: playback.ownsOutput, onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 54, height: 44).accessibilityIdentifier("playerAirPlay")
                     Text(playback.routeDescription).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         .accessibilityIdentifier("playerOutputDescription")
                 }.frame(maxWidth: .infinity)
@@ -326,6 +335,7 @@ struct ArtworkPresentationView: View {
 }
 
 struct AirPlayPicker: UIViewRepresentable {
+    var enabled = true
     var onDismiss: () -> Void = {}
     var onPresent: () -> Void = {}
     func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss, onPresent: onPresent) }
@@ -343,6 +353,11 @@ struct AirPlayPicker: UIViewRepresentable {
     }
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
         context.coordinator.onDismiss = onDismiss; context.coordinator.onPresent = onPresent
+        uiView.isUserInteractionEnabled = enabled
+        uiView.alpha = enabled ? 1 : 0.35
+        uiView.accessibilityHint = enabled ? nil : "Play on this device to choose an AirPlay speaker"
+        if enabled { uiView.accessibilityTraits.remove(.notEnabled) }
+        else { uiView.accessibilityTraits.insert(.notEnabled) }
     }
 }
 // Keep the native control's identity stable during route-name and playback updates.
@@ -469,7 +484,7 @@ struct TabletPlayerBar: View {
                         .accessibilityIdentifier("localVolumeControl")
                 }
                 if !playback.serverConnection.connected || playback.serverConnection.degraded { ServerConnectionBadge(connection: playback.serverConnection) }
-                AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44)
+                AirPlayPicker(enabled: playback.ownsOutput, onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(width: 44, height: 44)
                 Button { showQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44) }.accessibilityLabel("Up next")
             }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
                 .padding(.horizontal, 16).padding(.vertical, 8).foregroundStyle(.white)

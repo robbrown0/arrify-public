@@ -196,9 +196,20 @@ def album_for_song(artist,title,get):
     aid,records=next(iter(linked.items()));owner=owners[aid]
     records.sort(key=lambda r:(r.get('first-release-date','9999'),r['id']))
     choices=[]
-    for record in records[:4]:
+    candidates=records[:4]
+    for index,record in enumerate(candidates):
         result=recording_selection(record['id'],get)['items'][0]
-        if result.get('requestable') and result['resolved']['artist_mbid']==owner['id']:choices.append(result)
+        if result.get('requestable') and result['resolved']['artist_mbid']==owner['id']:
+            choices.append(result)
+            # A verified Album outranks EPs/singles. Remaining recordings cannot
+            # improve its year when their first-release dates are already later.
+            # Missing dates keep the full verification path; never guess an album.
+            year=result.get('year','')
+            remaining=candidates[index+1:]
+            if (result.get('album_type')=='Album' and re.fullmatch(r'\d{4}',year or '')
+                    and all(re.match(r'^\d{4}',r.get('first-release-date',''))
+                            and r['first-release-date'][:4]>=year for r in remaining)):
+                break
     if not choices:raise ValueError('No original album could be verified for this song.')
     selected=min(choices,key=lambda x:(('Album','EP','Single').index(x['album_type']),x.get('year') or '9999'))
     result=album_tracks(selected,get);result['requested_artist']=artist

@@ -103,3 +103,28 @@ keyboard restoration does not compete with the alert or error state. Keep cancel
 wrong-password, successful deletion and sign-out assertions. UI cases stop after
 the first failed assertion to avoid cascading missing-element waits; the suite
 still executes the remaining cases.
+
+## Player actions and handoff sprint (internal only)
+
+- Menus must stay open and retain scroll position through playback ticks; album
+  navigation must work with one tap. `testEmptyPlayerAndSingleTapAlbumActions`
+  covers both device families, including original album navigation. Test manually
+  with large Dynamic Type and sustained physical playback; `testActionsMenuIdentityIgnoresPlaybackProgress`
+  checks the view equality boundary used to exclude unrelated position updates.
+- Empty player: meaningful Browse music action, no transport controls until a
+  selection exists; reserve footer height on every tab, tablet and keyboard layout.
+- Saved addresses are separate from tokens. Test normal TestFlight upgrade followed
+  by expired-session sign-in; retain the private address and allow explicit removal.
+  `testSavedAddressesSurviveCredentialRemovalAndCanBeClearedExplicitly` covers preferences.
+- One active output per account remains authoritative. Native explicit Play/Resume
+  can claim paused, failed or expired owners, never a newly refreshed live owner.
+  Server tests cover atomic claims, late heartbeats and existing epoch fences.
+- Native AirPlay routing is unavailable on non-owner devices. Full-screen takeover
+  uses the same banner as compact playback. Verify phone/tablet and VoiceOver.
+- Original album: preserve identity/version/official-release verification, skip
+  later candidates only when they cannot improve the verified album year, retain
+  metadata cache/rate limiting, bound cold album lookup budget to 12 seconds, and
+  cancel client retry tasks with their presentation. External service availability
+  remains outside Arrify's control; an error must allow retry without stopping audio.
+- Keep every prior regression and native volume geometry test. Do not publish an
+  external build; internal device acceptance is still required after qualification.

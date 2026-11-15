@@ -546,7 +546,7 @@ struct SongRow: View {
             }.buttonStyle(.plain).accessibilityLabel("Popularity: \(popularity.doubloons) of 3. View sources")
         }
         FavoriteButton(favorites: favorites, track: track)
-        SongActionsMenu(track: track, model: model)
+        SongActionsMenu(track: track, model: model).equatable()
         }
         .background {
             if track.id == model.playback.state?.currentTrackId, let onScroll {
@@ -569,7 +569,12 @@ struct SongRow: View {
     }
 }
 
-struct SongActionsMenu: View {
+struct SongActionsMenu: View, Equatable {
+    // Playback ticks must not rebuild an open menu. Local presentation state
+    // and observed favorites still invalidate this view normally.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.track == rhs.track && lhs.model === rhs.model
+    }
     let track: Track
     let model: AppModel
     private var favorites: FavoritesStore { model.favorites }
@@ -756,11 +761,12 @@ struct OriginalAlbumView: View {
     @State private var result: OriginalAlbum?
     @State private var error: String?
     @State private var loading = false
+    @State private var attempt = 0
     var body: some View {
         NavigationStack {
             List {
                 if loading { ProgressView("Finding original album…") }
-                if let error { Text(error); Button("Retry") { Task { await load() } } }
+                if let error { Text(error); Button("Retry") { attempt += 1 }.disabled(loading) }
                 if let result {
                     Section(result.album.title ?? result.album.name ?? "Original album") {
                         ForEach(Array(result.items.enumerated()), id: \.offset) { _, song in
@@ -777,13 +783,16 @@ struct OriginalAlbumView: View {
                     }
                 }
             }.navigationTitle("Original album").toolbar { Button("Done") { dismiss() } }
-            .task { await load() }
+            .task(id: attempt) { await load() }
         }
     }
     private func load() async {
         loading = true; error = nil
         defer { loading = false }
         do { result = try await model.api.originalAlbum(trackId: track.id) }
-        catch { self.error = "Couldn’t load the original album. Please try again." }
+        catch {
+            guard !Task.isCancelled else { return }
+            self.error = "The album lookup couldn’t finish. Please try again; your music can keep playing."
+        }
     }
 }

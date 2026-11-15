@@ -53,3 +53,21 @@ class AlbumRouteTests(unittest.TestCase):
   with patch('app.server.acquisition.call',return_value=copy.deepcopy(result)):
    self.assertEqual(Handler.get(request)['items'][0]['local_track_id'],2)
   db.close()
+
+class AlbumLookupCostTests(AlbumTests):
+ def test_verified_earliest_album_skips_later_recording_round_trips(self):
+  from hitdiscovery.request_catalog import album_for_song
+  record=recording();record['first-release-date']='1980'
+  later=copy.deepcopy(record);later['id']='66666666-6666-6666-6666-666666666666';later['first-release-date']='2020'
+  calls=[]
+  def get(path,**kw):
+   calls.append(path)
+   if path=='artist/':return {'artists':[{'id':AID,'name':'Test Artist'}]}
+   if path=='recording/':return {'recordings':[record,later]}
+   if path=='recording/'+RID:return record
+   if path=='release/':return {'releases':record['releases']}
+   if path=='release/'+REL:return self.release
+   raise AssertionError('Unnecessary metadata lookup: '+path)
+  result=album_for_song('Test Artist','Test Song',get)
+  self.assertEqual(result['album']['release_id'],REL)
+  self.assertEqual(len(calls),5)
