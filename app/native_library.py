@@ -20,6 +20,8 @@ def enrich_popularity(library, items):
     """Read cached evidence and enqueue refreshes; never wait on providers."""
     service = getattr(library, 'popularity', None)
     if service is None: return items, False
+    batch = getattr(service, "get_many", None)
+    if batch is not None: return batch(items)
     groups = {}
     for item in items: groups.setdefault(item['artist'], []).append(item)
     rated = {}; pending = False

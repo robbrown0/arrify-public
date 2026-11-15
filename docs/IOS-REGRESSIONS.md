@@ -74,3 +74,6 @@ times; a rescan that updates metadata must not make an old song appear newly add
 Synthetic benchmark (Linux, 50,000 songs, 100 first-page calls): previous per-call
 sorting averaged 14.19 ms; indexed response averaged 0.02 ms. This isolates server
 catalog work and does not measure network latency, SwiftUI rendering or audio start.
+Popularity page enrichment batches newly viewed artists in one transaction
+(`test_new_playlist_batches_view_records_in_one_commit` verifies 50 artists,
+unchanged row order, refresh scheduling and no extra commit on immediate reopen).

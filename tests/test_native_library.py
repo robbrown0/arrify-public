@@ -37,7 +37,7 @@ class NativeLibraryTests(unittest.TestCase):
 
     def test_search_popularity_preserves_navigation_and_page_order(self):
         from unittest.mock import Mock
-        self.lib.popularity = Mock()
+        self.lib.popularity = Mock(spec=["get"])
         self.lib.popularity.get.side_effect = lambda artist, rows: ([dict(row, popularity={'doubloons': 2, 'evidence': []}) for row in rows], True)
         result = page(self.lib, '/api/v1/native/catalog?q=Pink&limit=3')
         self.assertEqual(len(result['items']), 3)
@@ -54,7 +54,7 @@ class NativeLibraryTests(unittest.TestCase):
         self.assertEqual(track(row)['album_id'], 'album')
         self.assertEqual(track(row)['artist_id'], 'artist')
         from unittest.mock import Mock
-        self.lib.popularity = Mock()
+        self.lib.popularity = Mock(spec=["get"])
         self.lib.popularity.get.side_effect = lambda artist, rows: ([dict(row, popularity={'doubloons': 1}) for row in rows], False)
         result = detail(self.lib, None, 1, '/api/v1/native/library/detail?kind=albums&id='+'a'*24)
         self.assertEqual(result['items'][0]['popularity']['doubloons'], 1)
@@ -215,3 +215,21 @@ class PopularityReadCostTests(unittest.TestCase):
         with patch('app.popularity.time.time', return_value=1061):
             service.get('Artist', [{'id': 1, 'title': 'Song'}])
         self.assertEqual(service.db.commit.call_count, 2)
+
+    def test_new_playlist_batches_view_records_in_one_commit(self):
+        import threading
+        from unittest.mock import Mock
+        from app.popularity import Popularity
+        service = Popularity.__new__(Popularity)
+        service.lock = threading.RLock(); service.cache = {}; service.refresh = {}; service.pending = set()
+        service.db = Mock(); service.enqueue = Mock(); service.signals = Mock()
+        service.signals.catalog_pending = set(); service.signals.score.return_value = {'doubloons': 0}
+        rows = [{'id': i, 'title': 'Song', 'artist': f'Artist {i}'} for i in range(50)]
+        with patch('app.popularity.time.time', return_value=1000):
+            enriched, pending = service.get_many(rows)
+            self.assertEqual(service.db.commit.call_count, 1)
+            self.assertEqual(len(service.db.executemany.call_args.args[1]), 50)
+            self.assertEqual([x['id'] for x in enriched], list(range(50)))
+            self.assertEqual(service.enqueue.call_count, 50)
+            service.get_many(rows)
+            self.assertEqual(service.db.commit.call_count, 1)
