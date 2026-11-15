@@ -135,3 +135,16 @@ because the compact banner remains in the underlying view hierarchy. Its button
 must be hittable after presentation and AirPlay must be unavailable. The slow-state
 feedback test holds all state reads during its assertion so a concurrent background
 refresh cannot consume a single-use delay intended for the selection.
+
+## Open: intermittent Show playing song crash (2026-11-15)
+
+Reported sequence: open Songs, tap Show playing song, app terminates. After relaunch,
+a temporary unavailable/retry message appears on repeated visits; the earlier item
+then returns and Show playing song works repeatedly. Device, build and timestamp
+awaiting confirmation. Recovery does not close this regression.
+
+Investigate initial/around-track loading, list identity changes and centering during
+layout updates, overlapping refreshes, and restoration after termination. Extend
+coverage beyond the existing already-loaded-list centering test to cold/off-page
+loads and failed-load retry. Do not identify a root cause or claim a fix without
+crash evidence or reproduction. Track the post-launch error separately until linked.
