@@ -194,7 +194,7 @@ final class LaunchTests: XCTestCase {
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
         }
-        let likeAction = app.buttons["Add to Liked songs"]
+        let likeAction = app.buttons["songActionLike"]
         XCTAssertTrue(likeAction.isHittable)
         likeAction.press(forDuration: 0.15)
         XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
@@ -252,7 +252,7 @@ final class LaunchTests: XCTestCase {
         for title in ["Add to Liked songs", "Add to playlist", "Add to queue", "Go to song radio", "Go to artist radio", "Go to artist", "Go to album", "Go to queue", "Browse original album"] {
             XCTAssertTrue(app.buttons[title].exists, title)
         }
-        let likeAction = app.buttons["Add to Liked songs"]
+        let likeAction = app.buttons["songActionLike"]
         XCTAssertTrue(likeAction.isHittable)
         likeAction.press(forDuration: 0.15)
         XCTAssertTrue(likeAction.waitForNonExistence(timeout: 5), "The song action must dismiss its menu")
@@ -633,9 +633,12 @@ extension LaunchTests {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "Remote playback takeover available"; shot.lifetime = .keepAlways; add(shot)
         XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 10)); app.buttons["expandPlayer"].tap()
-        XCTAssertTrue(app.buttons["takeOverPlayback"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["takeOverPlayback"].isHittable)
-        let route = app.descendants(matching: .any)["playerAirPlay"].firstMatch
+        let fullPlayer = app.otherElements["fullScreenPlayer"]
+        let fullTakeover = fullPlayer.buttons["takeOverPlayback"]
+        XCTAssertTrue(fullTakeover.waitForExistence(timeout: 10))
+        let visible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: fullTakeover)
+        XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 10), .completed)
+        let route = fullPlayer.descendants(matching: .any)["playerAirPlay"].firstMatch
         XCTAssertTrue(route.exists); XCTAssertFalse(route.isEnabled)
         XCTAssertFalse(app.staticTexts["Adjust volume on the playing device"].exists)
         let fullShot = XCTAttachment(screenshot: app.screenshot()); fullShot.name = "Full-screen remote playback banner"; fullShot.lifetime = .keepAlways; add(fullShot)

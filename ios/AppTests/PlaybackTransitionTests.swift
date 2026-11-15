@@ -52,14 +52,19 @@ final class PlaybackTransitionTests: XCTestCase {
 
     @MainActor func testSelectionFeedbackAppearsBeforeSlowStateRequestAndClearsOnStop() async throws {
         let (player, transport) = try await fixture()
-        await transport.delayPoll()
+        await transport.holdStateRequests()
         let selection = Task { await player.play(source: LibrarySource(kind: "albums", id: "fixture"), trackId: 2) }
-        for _ in 0..<500 { if await transport.pollWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<500 {
+            if player.selectingTrackID == 2, await transport.stateRequestWaiting { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let waiting = await transport.stateRequestWaiting
+        XCTAssertTrue(waiting, "The selection must remain blocked on state, not finish before the assertion")
         XCTAssertEqual(player.rowStatus(for: 2), .preparing)
         XCTAssertEqual(player.state?.currentTrackId, 1, "Feedback must not pretend the server has changed songs")
         player.stop()
         XCTAssertNil(player.selectingTrackID)
-        await transport.releasePoll()
+        await transport.releaseStateRequests()
         await selection.value
         XCTAssertNil(player.selectingTrackID)
         XCTAssertNil(player.state)
@@ -620,6 +625,15 @@ actor CallResumeTransitionTransport: HTTPTransport {
     private var revision = 1
     private var playing = true
     private var delayOnePoll = false
+    private var holdAllStateRequests = false
+    private var heldStateRequests: [CheckedContinuation<Void, Never>] = []
+    var stateRequestWaiting: Bool { !heldStateRequests.isEmpty }
+    func holdStateRequests() { holdAllStateRequests = true }
+    func releaseStateRequests() {
+        holdAllStateRequests = false
+        let requests = heldStateRequests; heldStateRequests.removeAll()
+        for request in requests { request.resume() }
+    }
     private var delayOneMedia = false
     private var pendingMedia: CheckedContinuation<Void, Never>?
     private(set) var mediaWaiting = false
@@ -666,6 +680,10 @@ actor CallResumeTransitionTransport: HTTPTransport {
                     observations.append(Observation(current: value["expected_current"] as? Int ?? 0,
                         observed: value["observed"] as? String ?? "", afterNext: current == 2))
                 }
+            } else if holdAllStateRequests {
+                let old = try state()
+                await withCheckedContinuation { heldStateRequests.append($0) }
+                return old
             } else if delayOnePoll {
                 delayOnePoll = false
                 let old = try state()

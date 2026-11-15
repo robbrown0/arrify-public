@@ -586,6 +586,7 @@ struct SongActionsMenu: View, Equatable {
         Menu {
             Button(favorites.ids.contains(track.id) ? "Remove from Liked songs" : "Add to Liked songs", systemImage: favorites.ids.contains(track.id) ? "checkmark.circle.fill" : "plus.circle") { Task { await favorites.toggle(track.id) } }
                 .disabled(favorites.pending.contains(track.id))
+                .accessibilityIdentifier("songActionLike")
             Button("Add to playlist", systemImage: "music.note.list") { addingToPlaylist = true }
             Button("Add to queue", systemImage: "text.badge.plus") { Task { await model.playback.send("queue", ids: [track.id]) } }
             Button("Go to song radio", systemImage: "dot.radiowaves.left.and.right") {

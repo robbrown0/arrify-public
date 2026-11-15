@@ -446,6 +446,7 @@ struct PlaybackTakeoverBanner: View {
             Text("Playing on another device").font(.subheadline.weight(.medium))
             Spacer(minLength: 8)
             Button("Play here") { Task { await playback.send("takeover") } }
+                .foregroundStyle(.green)
                 .font(.subheadline.weight(.semibold))
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("takeOverPlayback")

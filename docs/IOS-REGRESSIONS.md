@@ -129,3 +129,9 @@ still executes the remaining cases.
   remains outside Arrify's control; an error must allow retry without stopping audio.
 - Keep every prior regression and native volume geometry test. Do not publish an
   external build; internal device acceptance is still required after qualification.
+
+Qualification notes: scope full-screen takeover assertions to `fullScreenPlayer`
+because the compact banner remains in the underlying view hierarchy. Its button
+must be hittable after presentation and AirPlay must be unavailable. The slow-state
+feedback test holds all state reads during its assertion so a concurrent background
+refresh cannot consume a single-use delay intended for the selection.
