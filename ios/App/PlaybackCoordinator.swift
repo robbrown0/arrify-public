@@ -531,7 +531,12 @@ import Network
     }
     func play(source: LibrarySource, trackId: Int? = nil, shuffle: Bool = false) async {
         let token = UUID(); selectionToken = token; selectingTrackID = trackId
-        defer { if selectionToken == token { selectingTrackID = nil } }
+        let started = ProcessInfo.processInfo.systemUptime
+        PlaybackDiagnostics.event("selection-start")
+        defer {
+            if selectionToken == token { selectingTrackID = nil }
+            PlaybackDiagnostics.event("selection-command-finish ms=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))")
+        }
         await send("play", source: source, trackId: trackId, shuffle: shuffle)
     }
     func isCurrentSource(_ source: LibrarySource) -> Bool {

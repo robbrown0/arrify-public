@@ -269,11 +269,14 @@ struct BrowserScreen: View {
                 Button("Earlier items") { Task { await browser.load(query: activeQuery, previous: true) } }.disabled(browser.loading)
             }
             if browser.kind == "tracks" {
-                ForEach(browser.trackRows) { row in
-                    let track = row.track
-                    SongRow(track: track, model: model) {
-                        Task { await model.playback.play(source: catalogSource, trackId: track.id) }
-                    }.id(row.id)
+                ForEach(Array(trackSections.enumerated()), id: \.offset) { _, section in
+                    Section(section.name) {
+                        ForEach(section.rows) { row in
+                            SongRow(track: row.track, model: model) {
+                                Task { await model.playback.play(source: catalogSource, trackId: row.track.id) }
+                            }.id(row.id)
+                        }
+                    }
                 }
             } else if browser.kind == "albums" && albumGrid {
                 Section {
@@ -291,12 +294,16 @@ struct BrowserScreen: View {
                     }
                 }.listRowBackground(Color.clear)
             } else {
-                ForEach(browser.entries, id: \.identity) { item in
-                    NavigationLink {
-                        if item.kind == "artists" {
-                            BrowserScreen(model: model, title: item.name, kind: "albums", artist: item.id)
-                        } else { DetailScreen(model: model, entry: item) }
-                    } label: { EntryRow(item: item, artwork: model.artwork) }
+                ForEach(Array(entrySections.enumerated()), id: \.offset) { _, section in
+                    Section(section.name) {
+                        ForEach(section.rows, id: \.identity) { item in
+                            NavigationLink {
+                                if item.kind == "artists" {
+                                    BrowserScreen(model: model, title: item.name, kind: "albums", artist: item.id)
+                                } else { DetailScreen(model: model, entry: item) }
+                            } label: { EntryRow(item: item, artwork: model.artwork) }
+                        }
+                    }
                 }
             }
             if !browser.loading && browser.tracks.isEmpty && browser.entries.isEmpty && browser.error == nil {
@@ -304,7 +311,7 @@ struct BrowserScreen: View {
             }
             if let offset = browser.nextOffset {
                 ProgressView().frame(maxWidth: .infinity)
-                    .task(id: "\(offset)-\(browser.loading)") { await browser.load(query: activeQuery, more: true) }
+                    .task(id: offset) { await browser.load(query: activeQuery, more: true) }
             }
             if browser.error != nil { Button("Retry") { Task { await browser.load(query: activeQuery) } } }
         }
@@ -338,6 +345,32 @@ struct BrowserScreen: View {
             await browser.load(query: activeQuery, around: activeQuery.isEmpty && browser.kind == "tracks" ? model.playback.state?.currentTrackId : nil)
         }
         .refreshable { await browser.load(query: activeQuery) }
+    }
+    private func initial(_ title: String) -> String {
+        let first = String(title.prefix(1)).uppercased()
+        return first.range(of: "^[A-Z]$", options: .regularExpression) == nil ? "#" : first
+    }
+    private var trackSections: [(name: String, rows: [LibraryBrowser.TrackRow])] {
+        guard sortOrder == "title" else { return [("Songs", browser.trackRows)] }
+        // Keep server order, including punctuation and non-Latin titles. Use a
+        // unique section identity even if several nonalphabetic runs exist.
+        var groups: [(name: String, rows: [LibraryBrowser.TrackRow])] = []
+        for row in browser.trackRows {
+            let name = initial(row.track.title)
+            if groups.last?.name == name { groups[groups.count - 1].rows.append(row) }
+            else { groups.append((name, [row])) }
+        }
+        return groups
+    }
+    private var entrySections: [(name: String, rows: [LibraryEntry])] {
+        guard sortOrder == "title" else { return [("Albums", browser.entries)] }
+        var groups: [(name: String, rows: [LibraryEntry])] = []
+        for row in browser.entries {
+            let name = initial(row.name)
+            if groups.last?.name == name { groups[groups.count - 1].rows.append(row) }
+            else { groups.append((name, [row])) }
+        }
+        return groups
     }
     private var catalogSource: LibrarySource {
         let options: [String: Any] = ["q": activeQuery, "sort": sortOrder, "liked": likedOnly]
@@ -562,7 +595,7 @@ struct DetailScreen: View {
                     let track = row.track
                     SongRow(track: track, model: model) { Task { await model.playback.play(source: item.source, trackId: track.id) } }.id(row.id)
                 }
-                if let offset = browser.nextOffset { ProgressView().frame(maxWidth: .infinity).task(id: "\(offset)-\(browser.loading)") { await browser.load(more: true) } }
+                if let offset = browser.nextOffset { ProgressView().frame(maxWidth: .infinity).task(id: offset) { await browser.load(more: true) } }
                 if browser.error != nil { Button("Retry") { Task { await browser.load() } } }
                 if !browser.loading && browser.total == 0 && browser.error == nil { Text("No local songs yet.").foregroundStyle(.secondary) }
             }

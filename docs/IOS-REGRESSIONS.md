@@ -67,3 +67,10 @@ delay: https://developer.apple.com/documentation/avfoundation/avplayer/seek(to:t
 Library-load diagnostics add duration and cancellation only, no song/account data.
 Recently added uses stable catalog insertion order (track IDs), not file modification
 times; a rescan that updates metadata must not make an old song appear newly added.
+- `testSelectionFeedbackAppearsBeforeSlowStateRequestAndClearsOnStop` holds a
+  state response and checks immediate row feedback, unchanged confirmed playback,
+  and sign-out cleanup before releasing the response.
+
+Synthetic benchmark (Linux, 50,000 songs, 100 first-page calls): previous per-call
+sorting averaged 14.19 ms; indexed response averaged 0.02 ms. This isolates server
+catalog work and does not measure network latency, SwiftUI rendering or audio start.

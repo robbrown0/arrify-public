@@ -7,13 +7,17 @@ from .native_library import track, enrich_popularity
 
 
 def ordered_ids(index, kind, query='', sort='title', artist='', liked=None):
-    if kind not in ('tracks', 'albums', 'artists') or sort not in ('title', 'artist', 'recent'):
+    if kind not in ('tracks', 'albums', 'artists') or sort not in (None, 'title', 'artist', 'recent'):
         raise NativeError(400, 'invalid_request', 'Invalid library ordering.')
     catalog = getattr(index, kind)
-    ids = catalog.browse_orders[sort]
+    ids = catalog.browse_orders[sort or 'title']
     if query.strip():
-        matches = {x['id'] for x in catalog.search(query, 0, len(catalog.items))['items']}
-        ids = tuple(i for i in ids if i in matches)
+        found = catalog.search(query, 0, len(catalog.items))['items']
+        if sort is None:
+            ids = tuple(x['id'] for x in found)  # Preserve legacy relevance order.
+        else:
+            matches = {x['id'] for x in found}
+            ids = tuple(i for i in ids if i in matches)
     if artist:
         row = index.artists.items.get(artist)
         members = set(row.get('track_ids', ())) if row else set()
@@ -43,7 +47,7 @@ def page(library, request_path: str, accounts=None, uid=None) -> dict:
         raise NativeError(400, 'invalid_request', 'Invalid catalog query.')
     with library.index_lock:
         index = library.search
-    sort = q.get('sort', ['title'])[0]
+    sort = q.get('sort', [None])[0]
     artist = q.get('artist', [''])[0]
     liked = q.get('liked', ['false'])[0]
     if liked not in ('true', 'false') or (liked == 'true' and kind != 'tracks') or len(artist) > 100:
@@ -63,7 +67,7 @@ def page(library, request_path: str, accounts=None, uid=None) -> dict:
         except ValueError: raise NativeError(400, 'invalid_request', 'Invalid song.') from None
         if target in ids: offset = max(0, ids.index(target) - limit // 2)
     if letter is not None:
-        if len(letter) != 1 or letter not in '#ABCDEFGHIJKLMNOPQRSTUVWXYZ' or sort != 'title':
+        if len(letter) != 1 or letter not in '#ABCDEFGHIJKLMNOPQRSTUVWXYZ' or sort not in (None, 'title'):
             raise NativeError(400, 'invalid_request', 'Choose an alphabetical section.')
         names = [(catalog.items[i].get('title') or catalog.items[i].get('name') or '').casefold() for i in ids]
         offset = 0 if letter == '#' else min(bisect.bisect_left(names, letter.lower()), max(0, len(ids) - 1))
