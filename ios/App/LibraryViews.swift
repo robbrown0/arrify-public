@@ -572,7 +572,7 @@ struct SongRow: View {
 struct SongActionsMenu: View, Equatable {
     // Playback ticks must not rebuild an open menu. Local presentation state
     // and observed favorites still invalidate this view normally.
-    static func == (lhs: Self, rhs: Self) -> Bool {
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.track == rhs.track && lhs.model === rhs.model
     }
     let track: Track
