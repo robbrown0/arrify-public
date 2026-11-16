@@ -7,6 +7,7 @@ struct TabletShell: View {
     @State private var destination = "Home"
     @State private var searchRoot = UUID()
     @State private var libraryRoot = UUID()
+    @State private var homeRoot = UUID()
     @State private var songsRoot = UUID()
     @State private var query = ""
     @State private var searchKind = "all"
@@ -95,6 +96,7 @@ struct TabletShell: View {
         return Button {
             searching = false
             if value == "Library" { libraryRoot = UUID() }
+            if value == "Home" { homeRoot = UUID() }
             if value == "Songs" { songsRoot = UUID() }
             searchKind = ["Songs": "tracks", "Albums": "albums", "Artists": "artists"][value] ?? "all"
             query = ""
@@ -109,7 +111,7 @@ struct TabletShell: View {
     }
     @ViewBuilder private var content: some View {
         switch destination {
-        case "Home": HomeScreen(model: model)
+        case "Home": HomeScreen(model: model).id(homeRoot)
         case "Browse": BrowseScreen(model: model)
         case "Library": LibraryHome(model: model).id(libraryRoot)
         case "Moods": MoodScreen(model: model)

@@ -192,3 +192,16 @@ Build 34 is authorized for internal testers and external beta users. Run both co
   test search and saved sort/filter choices, and reopen Songs during local/remote
   playback and while paused/stopped. The unresolved crash report above remains open;
   removing its former button does not establish a root cause or crash fix.
+
+
+## Home selection returns to the top
+
+- Selecting Home starts at the top of Home, including tapping Home again while
+  already there. Returning from another section must also reset its scroll position
+  and dismiss any nested Home navigation; keep the shared player uninterrupted.
+- `testHomeSelectionReturnsToTopIncludingReselection` scrolls Home until its heading
+  is offscreen, verifies the original heading position after reselecting Home, and
+  repeats after visiting Library. Both iPhone and iPad run this regression with a
+  personal playlist and remote-playback footer to ensure scrollable content.
+- Physical acceptance: repeat on phone/tablet with long Home content, nested album
+  or playlist detail, and active local/remote playback. Confirm no playback restart.
