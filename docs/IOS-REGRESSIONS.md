@@ -173,7 +173,10 @@ Build 34 is authorized for internal testers and external beta users. Run both co
 
 - Songs loads preceding rows automatically when scrolling upward; no Earlier items
   button. Preserve the visible song position when prepending, stable row identities,
-  and existing cancellation/revision guards. Do not fetch the entire library at entry.
+  and existing cancellation/revision guards. A later drag must win over a slow
+  previous-page response. Section initials follow server casefold ordering, including
+  ß and Kelvin-sign titles (`testCatalogSectionTitlesFollowUnicodeCasefoldOrder`).
+  Do not fetch the entire library at entry.
 - Remove the Show playing song bar from Songs. Opening Songs while playback is
   active starts around the playing track; paused/stopped playback starts at the
   normal sorted/filtered view. Searches and explicit sorting/filtering remain in

@@ -6,6 +6,24 @@ import ArrifyCore
 @testable import Arrify
 
 final class NowPlayingArtworkTests: XCTestCase {
+    func testCatalogSectionTitlesFollowUnicodeCasefoldOrder() {
+        let expected: [(String, String)] = [
+            ("Sail", "S"), ("ßeta", "S"), ("Sun", "S"),
+            ("Kale", "K"), ("Kite", "K"), ("Knot", "K"),
+            ("ﬂower", "F"), ("ſong", "S"), ("İdea", "I"),
+            ("I\u{0307}dea", "I"), ("ıdea", "#"), ("Élan", "#"),
+            ("東京", "#"), ("1 Song", "#"), ("", "#")
+        ]
+        for (title, section) in expected {
+            XCTAssertEqual(CatalogSectionTitle.initial(title), section, title)
+        }
+        // Server casefold ordering must not create S/#/S or K/#/K runs,
+        // which previously gave separate sections the same SwiftUI identity.
+        for ordered in [["Sail", "ßeta", "Sun"], ["Kale", "Kite", "Knot"]] {
+            XCTAssertEqual(Set(ordered.map(CatalogSectionTitle.initial)).count, 1)
+        }
+    }
+
     func testSavedAddressesSurviveCredentialRemovalAndCanBeClearedExplicitly() throws {
         let name = "SavedServerAddressesTests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))

@@ -223,6 +223,20 @@ struct MoodCover: View {
     }
 }
 
+// Match the server's casefold-based title order. Inspect the first scalar
+// after folding: a grapheme such as i + combining dot still sorts with I.
+enum CatalogSectionTitle {
+    static func initial(_ title: String) -> String {
+        let folded = title.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
+        guard let first = folded.unicodeScalars.first else { return "#" }
+        switch first.value {
+        case 65...90: return String(first)
+        case 97...122: return String(first).uppercased()
+        default: return "#"
+        }
+    }
+}
+
 struct BrowserScreen: View {
     let model: AppModel
     let title: String
@@ -361,10 +375,7 @@ struct BrowserScreen: View {
         }
         .refreshable { await browser.load(query: activeQuery) }
     }
-    private func initial(_ title: String) -> String {
-        let first = String(title.prefix(1)).uppercased()
-        return first.range(of: "^[A-Z]$", options: .regularExpression) == nil ? "#" : first
-    }
+    private func initial(_ title: String) -> String { CatalogSectionTitle.initial(title) }
     private var trackSections: [(id: String, name: String, rows: [LibraryBrowser.TrackRow])] {
         guard effectiveSort == "title" else { return [("Songs", "Songs", browser.trackRows)] }
         // Keep server order, including punctuation and non-Latin titles. Use a
@@ -449,72 +460,89 @@ struct FollowingSongList<Content: View>: View {
     @State private var previousVisible = false
     @State private var previousRequest = 0
     @State private var pagingPrevious = false
+    @State private var userScrollGeneration = 0
     private var currentID: Int? { model.playback.state?.currentTrackId }
     var body: some View {
         ScrollViewReader { proxy in
-            List {
-                if pagesBackward, browser.previousOffset != nil {
-                    ProgressView().frame(maxWidth: .infinity)
-                        .accessibilityLabel(browser.kind == "tracks" ? "Loading previous songs" : "Loading previous items")
-                        .onAppear { previousVisible = true; requestPrevious() }
-                        .onDisappear { previousVisible = false }
-                }
-                content { suspendFollowing() }
-            }
-                .onAppear { following = true; manuallyScrolled = false }
-                .task(id: previousRequest) {
-                    guard previousRequest > 0, manuallyScrolled, previousVisible,
-                          !browser.loading, browser.previousOffset != nil else { return }
-                    pagingPrevious = true
-                    previousVisible = false
-                    defer { pagingPrevious = false }
-                    let anchor = browser.trackRows.first.map { "song-\($0.id)" }
-                        ?? browser.entries.first.map { "entry-\($0.identity)" }
-                    await browser.load(query: query, previous: true)
-                    guard !Task.isCancelled, browser.error == nil, let anchor else { return }
-                    // This task belongs to the list, not the disappearing paging
-                    // sentinel. Prepending must not cancel scroll restoration.
-                    proxy.scrollTo(anchor, anchor: .top)
-                    await Task.yield()
-                }
-                .onChange(of: browser.loading) { if !browser.loading { requestPrevious() } }
-                .scrollContentBackground(.hidden).background(Color.black)
-                .onScrollPhaseChange { _, phase in
-                    if phase == .interacting || phase == .tracking { suspendFollowing() }
-                }
-                .onChange(of: query) { following = false; cancelPrevious() }
-                .onChange(of: browser.navigationRevision) { following = false; cancelPrevious() }
-                .onChange(of: browser.sort) { if !pagesBackward { following = false } }
-                .onChange(of: browser.likedOnly) { if !pagesBackward { following = false } }
-                .onChange(of: follows) { if follows && following { jump += 1 } }
-                .onChange(of: browser.resumeFollowingRequest) { following = true }
-                .onChange(of: model.playback.state?.playId) { if following && follows { jump += 1 } }
-                .onChange(of: currentID) { if following && follows { jump += 1 } }
-                .onChange(of: browser.updated) {
-                    if following && follows { center(proxy) }
-                }
-                .task(id: jump) {
-                    guard jump > 0, following, follows, let currentID else { return }
-                    if !browser.tracks.contains(where: { $0.id == currentID }) {
-                        await browser.load(query: query, around: currentID)
-                    }
-                    guard !Task.isCancelled, following, self.currentID == currentID else { return }
-                    center(proxy)
-                }
-                .safeAreaInset(edge: .bottom) {
-                    if showsReturnControl && !following && follows && currentID != nil {
-                        Button("Show playing song", systemImage: "speaker.wave.2.fill") { following = true; jump += 1 }
-                            .buttonStyle(.borderedProminent).tint(.green).foregroundStyle(.black)
-                            .padding(8).frame(maxWidth: .infinity).background(.bar)
-                    }
-                }
+            positionedList(observedList(pagedList(proxy)), proxy: proxy)
         }
     }
+    private var songList: some View {
+        List {
+            if pagesBackward, browser.previousOffset != nil {
+                ProgressView().frame(maxWidth: .infinity)
+                    .accessibilityLabel(browser.kind == "tracks" ? "Loading previous songs" : "Loading previous items")
+                    .onAppear { previousVisible = true; requestPrevious() }
+                    .onDisappear { previousVisible = false }
+            }
+            content { suspendFollowing() }
+        }
+        .onAppear { following = true; manuallyScrolled = false }
+        .scrollContentBackground(.hidden).background(Color.black)
+        .onScrollPhaseChange { _, phase in
+            if phase == .interacting || phase == .tracking { suspendFollowing() }
+        }
+    }
+    private func pagedList(_ proxy: ScrollViewProxy) -> some View {
+        songList
+            .task(id: previousRequest) {
+                guard previousRequest > 0, manuallyScrolled, previousVisible,
+                      !browser.loading, browser.previousOffset != nil else { return }
+                pagingPrevious = true
+                previousVisible = false
+                defer { pagingPrevious = false }
+                let scrollGeneration = userScrollGeneration
+                let anchor = browser.trackRows.first.map { "song-\($0.id)" }
+                    ?? browser.entries.first.map { "entry-\($0.identity)" }
+                await browser.load(query: query, previous: true)
+                guard !Task.isCancelled, browser.error == nil,
+                      scrollGeneration == userScrollGeneration, let anchor else { return }
+                // The list owns this task: removing the paging sentinel cannot
+                // cancel restoration. A later user drag always wins.
+                proxy.scrollTo(anchor, anchor: .top)
+                await Task.yield()
+            }
+            .onChange(of: browser.loading) { if !browser.loading { requestPrevious() } }
+    }
+    private func observedList<Base: View>(_ base: Base) -> some View {
+        base
+            .onChange(of: query) { following = false; cancelPrevious() }
+            .onChange(of: browser.navigationRevision) { following = false; cancelPrevious() }
+            .onChange(of: browser.sort) { if !pagesBackward { following = false } }
+            .onChange(of: browser.likedOnly) { if !pagesBackward { following = false } }
+            .onChange(of: follows) { if follows && following { jump += 1 } }
+            .onChange(of: browser.resumeFollowingRequest) { following = true }
+            .onChange(of: model.playback.state?.playId) { if following && follows { jump += 1 } }
+            .onChange(of: currentID) { if following && follows { jump += 1 } }
+    }
+    private func positionedList<Base: View>(_ base: Base, proxy: ScrollViewProxy) -> some View {
+        base
+            .onChange(of: browser.updated) {
+                if following && follows { center(proxy) }
+            }
+            .task(id: jump) {
+                guard jump > 0, following, follows, let currentID else { return }
+                if !browser.tracks.contains(where: { $0.id == currentID }) {
+                    await browser.load(query: query, around: currentID)
+                }
+                guard !Task.isCancelled, following, self.currentID == currentID else { return }
+                center(proxy)
+            }
+            .safeAreaInset(edge: .bottom) {
+                if showsReturnControl && !following && follows && currentID != nil {
+                    Button("Show playing song", systemImage: "speaker.wave.2.fill") { following = true; jump += 1 }
+                        .buttonStyle(.borderedProminent).tint(.green).foregroundStyle(.black)
+                        .padding(8).frame(maxWidth: .infinity).background(.bar)
+                }
+            }
+    }
     private func cancelPrevious() {
+        userScrollGeneration += 1
         manuallyScrolled = false
         previousRequest += 1
     }
     private func suspendFollowing() {
+        userScrollGeneration += 1
         following = false
         manuallyScrolled = true
         requestPrevious()
