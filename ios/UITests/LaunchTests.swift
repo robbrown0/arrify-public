@@ -189,7 +189,7 @@ final class LaunchTests: XCTestCase {
         app.alerts["Account deleted"].buttons["OK"].tap()
         XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
     }
-    @MainActor func testHomeSelectionReturnsToTopIncludingReselection() {
+    @MainActor func testHomeScrollPositionSurvivesFullScreenPlayerDismissal() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
         app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
@@ -203,27 +203,30 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         let takeover = app.buttons["Play here"]
         XCTAssertTrue(takeover.waitForExistence(timeout: 10))
-        let initialY = title.frame.minY
-        for leaveHome in [false, true] {
-            // Scroll the main content, avoiding the sidebar, horizontal rails,
-            // and persistent player. Confirm displacement before testing reset.
-            for _ in 0..<6 {
-                if !title.isHittable { break }
-                let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0))
-                let start = origin.withOffset(CGVector(dx: 0, dy: takeover.frame.minY - 40))
-                let end = origin.withOffset(CGVector(dx: 0, dy: max(180, takeover.frame.minY - 340)))
-                start.press(forDuration: 0.05, thenDragTo: end)
-            }
-            XCTAssertFalse(title.isHittable, "Home must actually be scrolled before testing navigation")
-            if leaveHome {
-                app.buttons["Library"].firstMatch.tap()
-                XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 10))
-            }
-            app.buttons["Home"].firstMatch.tap()
-            expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: title)
+        let playlist = app.otherElements["collectionCard-playlists-1"]
+        // Move well away from the top and keep a visible card as a position
+        // anchor. Drag inside content, avoiding the sidebar and player footer.
+        for _ in 0..<12 {
+            if !title.isHittable && playlist.isHittable && playlist.frame.maxY < takeover.frame.minY { break }
+            let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0))
+            let start = origin.withOffset(CGVector(dx: 0, dy: takeover.frame.minY - 40))
+            let end = origin.withOffset(CGVector(dx: 0, dy: max(180, takeover.frame.minY - 340)))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTAssertFalse(title.isHittable, "Home must be scrolled before opening the player")
+        XCTAssertTrue(playlist.isHittable)
+        let scrolledY = playlist.frame.minY
+        for _ in 0..<2 {
+            app.buttons["expandPlayer"].tap()
+            let close = app.buttons["Close player"]
+            XCTAssertTrue(close.waitForExistence(timeout: 10))
+            close.tap()
+            XCTAssertTrue(close.waitForNonExistence(timeout: 10))
+            expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: playlist)
             waitForExpectations(timeout: 10)
-            XCTAssertEqual(title.frame.minY, initialY, accuracy: 3,
-                           leaveHome ? "Returning Home must restore the top" : "Reselecting Home must restore the top")
+            XCTAssertFalse(title.isHittable, "Minimizing the player must not reset Home to the top")
+            XCTAssertEqual(playlist.frame.minY, scrolledY, accuracy: 3,
+                           "Home must retain its exact browsing position after player dismissal")
         }
     }
     @MainActor func testHomeRecentSongsAndFullScreenSongActions() {

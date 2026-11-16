@@ -360,7 +360,6 @@ struct BrowserScreen: View {
                 .accessibilityLabel("Library options")
             }
         }
-        .onDisappear { opening = true }
         .task(id: requestKey) {
             let isOpening = opening
             opening = false
@@ -477,7 +476,6 @@ struct FollowingSongList<Content: View>: View {
             }
             content { suspendFollowing() }
         }
-        .onAppear { following = true; manuallyScrolled = false }
         .scrollContentBackground(.hidden).background(Color.black)
         .onScrollPhaseChange { _, phase in
             if phase == .interacting || phase == .tracking { suspendFollowing() }

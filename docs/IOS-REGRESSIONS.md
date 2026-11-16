@@ -197,14 +197,14 @@ Build 34 is authorized for internal testers and external beta users. Run both co
   removing its former button does not establish a root cause or crash fix.
 
 
-## Home selection returns to the top
+## Home position after minimizing the player
 
-- Selecting Home starts at the top of Home, including tapping Home again while
-  already there. Returning from another section must also reset its scroll position
-  and dismiss any nested Home navigation; keep the shared player uninterrupted.
-- `testHomeSelectionReturnsToTopIncludingReselection` scrolls Home until its heading
-  is offscreen, verifies the original heading position after reselecting Home, and
-  repeats after visiting Library. Both iPhone and iPad run this regression with a
-  personal playlist and remote-playback footer to ensure scrollable content.
-- Physical acceptance: repeat on phone/tablet with long Home content, nested album
-  or playlist detail, and active local/remote playback. Confirm no playback restart.
+- Preserve Home's scroll position when presenting and dismissing the full-screen
+  player. The clarified report concerns this overlay transition; it does not request
+  resetting Home when selecting or reselecting its navigation item.
+- `testHomeScrollPositionSurvivesFullScreenPlayerDismissal` scrolls Home until its
+  heading is offscreen, records a visible playlist card's position, and verifies the
+  same position after opening/minimizing the player twice. Both iPhone and iPad run
+  this regression with a personal playlist and remote-playback footer.
+- Physical acceptance: scroll down Home, expand the player, minimize it, and verify
+  the same content remains at the same position with uninterrupted playback.

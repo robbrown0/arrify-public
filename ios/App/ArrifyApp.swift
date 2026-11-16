@@ -164,7 +164,6 @@ struct MainView: View {
     @State private var selectedTab = "Home"
     @State private var keyboardVisible = false
     @State private var libraryRoot = UUID()
-    @State private var homeRoot = UUID()
     var body: some View {
         ZStack {
             if UIDevice.current.userInterfaceIdiom == .pad {
@@ -177,11 +176,9 @@ struct MainView: View {
     }
     private var tabs: some View {
         TabView(selection: Binding(get: { selectedTab }, set: { value in
-            if value == "Library" { libraryRoot = UUID() }
-            if value == "Home" { homeRoot = UUID() }
-            selectedTab = value
+            if value == "Library" { libraryRoot = UUID() }; selectedTab = value
         })) {
-            Tab("Home", systemImage: "house", value: "Home") { withPlayer(HomeScreen(model: model).id(homeRoot)) }
+            Tab("Home", systemImage: "house", value: "Home") { withPlayer(HomeScreen(model: model)) }
             Tab("Library", systemImage: "square.stack", value: "Library") { withPlayer(LibraryHome(model: model).id(libraryRoot)) }
             Tab("Channels", systemImage: "antenna.radiowaves.left.and.right", value: "Channels") { withPlayer(NavigationStack { CollectionScreen(model: model, section: "channels", title: "Channels") }) }
             Tab("Search", systemImage: "magnifyingglass", value: "Search", role: .search) { withPlayer(SearchScreen(model: model)) }
