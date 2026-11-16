@@ -55,9 +55,8 @@ struct TabletShell: View {
                         Button { creatingPlaylist = true } label: { Label("Create", systemImage: "plus").frame(minHeight: 44) }.accessibilityLabel("Create playlist")
                     }.padding(.horizontal, 16).padding(.vertical, 8).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12)).padding(16)
                     if ["Search", "Songs", "Albums", "Artists"].contains(destination) {
-                        SearchScopePicker(kind: Binding(get: { searchKind }, set: { searchKind = $0; destination = "Search" }))
+                        SearchScopePicker(kind: Binding(get: { searchKind }, set: { searchKind = $0; searchRoot = UUID(); destination = "Search" }))
                             .padding(.horizontal, 16).padding(.bottom, 8)
-
                     }
                     content.frame(maxWidth: .infinity, maxHeight: .infinity)
                         .simultaneousGesture(TapGesture().onEnded { searching = false })

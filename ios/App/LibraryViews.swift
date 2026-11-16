@@ -329,9 +329,11 @@ struct BrowserScreen: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     if !activeQuery.isEmpty { Text("Best match") }
-                    Picker("Sort", selection: $sortOrder) {
-                        Text(browser.kind == "tracks" ? "Title" : "Name").tag("title")
-                        if browser.kind != "artists" { Text("Artist").tag("artist"); Text("Recently added").tag("recent") }
+                    if activeQuery.isEmpty {
+                        Picker("Sort", selection: $sortOrder) {
+                            Text(browser.kind == "tracks" ? "Title" : "Name").tag("title")
+                            if browser.kind != "artists" { Text("Artist").tag("artist"); Text("Recently added").tag("recent") }
+                        }
                     }
                     if browser.kind == "tracks" { Toggle("Liked songs only", isOn: $likedOnly) }
                     if browser.kind == "albums" { Toggle("Album grid", isOn: $albumGrid) }
@@ -732,7 +734,7 @@ struct AllSearchResults: View {
                 Section("Songs") {
                     RefreshStatus(loading: songs.loading, updated: songs.updated, error: songs.error)
                     ForEach(songs.tracks.prefix(10)) { track in
-                        SongRow(track: track, model: model) { Task { await model.playback.play(track, in: songs.tracks) } }
+                        SongRow(track: track, model: model) { Task { await model.playback.play(source: songSource, trackId: track.id) } }
                     }
                     NavigationLink("All matching songs") { BrowserScreen(model: model, title: "Songs", kind: "tracks", externalQuery: query) }
                 }
@@ -754,6 +756,11 @@ struct AllSearchResults: View {
                 async let r: Void = artists.load(query: query)
                 _ = await (s, a, r)
             }
+    }
+    private var songSource: LibrarySource {
+        let options = ["q": query, "sort": "relevance"]
+        let data = (try? JSONSerialization.data(withJSONObject: options, options: .sortedKeys)) ?? Data()
+        return LibrarySource(kind: "catalog", id: String(decoding: data, as: UTF8.self))
     }
     private func entitySection(_ title: String, browser: LibraryBrowser) -> some View {
         Section(title) {
