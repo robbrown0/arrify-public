@@ -154,3 +154,14 @@ crash evidence or reproduction. Track the post-launch error separately until lin
 Confirmed on iPhone 0.3.0 (32): playlist and full-player action menus refresh roughly every ten seconds; the lower menu item is clipped and scrolling can reset. Original-album lookup for Hold Me Now / Thompson Twins failed after about thirty seconds. iPad not yet retested by user.
 
 Regression coverage must keep the menu open across background refresh cycles, retain its scroll position, reach the last item, and execute album navigation once. Menu contents are captured per opening so selection targets cannot change during playback refresh. Album browsing must retain artist/version/release verification, avoid redundant recording fetches, bound the interactive helper wait, and show provider failures without disrupting playback. Simulator success does not replace the reported real-device acceptance. Retain #35 separately; its crash remains unconfirmed.
+
+## Unified search and relevance
+
+- iPad Songs/Albums/Artists reuse the top search field with a persistent All/Songs/Albums/Artists scope selector. Scope changes preserve the query; sidebar navigation starts a fresh section search. Global search includes all three entity types.
+- Nonempty queries use relevance ordering, including catalog playback expansion; clearing restores the saved browsing sort. Exact normalized titles rank first.
+- Search debounce is 150 ms; the tablet navigation stack resets when starting a search session, not on every keystroke. Existing cancellation/generation guards remain.
+- Snapshot-local search caches retain at most 16 ranked ID lists per entity index (maximum 50,000 IDs per entry). They contain no account filters; liked filtering remains outside the cache. New snapshots invalidate cached results.
+- Regression coverage: native exact-match paging/playback order, repeated query paging/cache bounds/snapshot isolation, single iPad search field and query retention across scope changes, existing delayed-search cancellation tests, and `testReturningToPreviousQueryAfterCancellationReloadsClearedWindow`. Search resets invalidate the last successful timestamp before clearing rows.
+- Device acceptance: search “Take on me” on a large library; confirm A-ha ranks above “Take A Chance On Me,” change scopes, clear, open an album then start another search, and compare local/public network responsiveness.
+
+Build 34 is authorized for internal testers and external beta users. Run both complete device suites before upload; verify Apple processing and external review state before claiming beta availability.

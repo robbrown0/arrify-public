@@ -237,6 +237,7 @@ struct BrowserScreen: View {
     let artist: String?
     let isGlobalSearch: Bool
     private var activeQuery: String { externalQuery ?? query }
+    private var effectiveSort: String { activeQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? sortOrder : "relevance" }
     private var requestKey: String { activeQuery + "|" + sortOrder + "|" + String(likedOnly) }
     init(model: AppModel, title: String, kind: String, externalQuery: String? = nil, artist: String? = nil, isGlobalSearch: Bool = false) {
         self.model = model; self.title = title; self.externalQuery = externalQuery; self.artist = artist; self.isGlobalSearch = isGlobalSearch
@@ -247,14 +248,9 @@ struct BrowserScreen: View {
         Group {
             if externalQuery != nil { results }
             else if UIDevice.current.userInterfaceIdiom == .pad {
-                results.safeAreaInset(edge: .top) {
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search \(title.lowercased())", text: $query)
-                            .accessibilityIdentifier("librarySearch")
-                        if !query.isEmpty { Button("Clear", systemImage: "xmark.circle.fill") { query = "" }.labelStyle(.iconOnly) }
-                    }.padding(12).background(.bar)
-                }
+                // The tablet shell owns the persistent search field, including
+                // when this screen is reached through nested Library links.
+                results
             } else { results.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(title.lowercased())") }
         }
     }
@@ -323,17 +319,20 @@ struct BrowserScreen: View {
             }
         }
         .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $globalSearch) { SearchScreen(model: model).presentationDragIndicator(.visible) }
+        .sheet(isPresented: $globalSearch) { SearchScreen(model: model, initialQuery: activeQuery).presentationDragIndicator(.visible) }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Picker("Sort", selection: $sortOrder) {
-                        Text(browser.kind == "tracks" ? "Title" : "Name").tag("title")
-                        if browser.kind != "artists" { Text("Artist").tag("artist"); Text("Recently added").tag("recent") }
+                    if !activeQuery.isEmpty { Text("Best match") }
+                    if activeQuery.isEmpty {
+                        Picker("Sort", selection: $sortOrder) {
+                            Text(browser.kind == "tracks" ? "Title" : "Name").tag("title")
+                            if browser.kind != "artists" { Text("Artist").tag("artist"); Text("Recently added").tag("recent") }
+                        }
                     }
                     if browser.kind == "tracks" { Toggle("Liked songs only", isOn: $likedOnly) }
                     if browser.kind == "albums" { Toggle("Album grid", isOn: $albumGrid) }
-                    if sortOrder == "title" {
+                    if sortOrder == "title" && activeQuery.isEmpty {
                         Menu("Jump to letter") {
                             ForEach(Array("#ABCDEFGHIJKLMNOPQRSTUVWXYZ").map(String.init), id: \.self) { letter in
                                 Button(letter) { Task { await browser.load(query: activeQuery, letter: letter) } }
@@ -346,11 +345,12 @@ struct BrowserScreen: View {
         }
         .task(id: requestKey) {
             if loadedRequestKey == requestKey, let updated = browser.updated, Date().timeIntervalSince(updated) < 30 { return }
-            loadedRequestKey = requestKey
-            browser.sort = sortOrder; browser.likedOnly = likedOnly; browser.artist = artist
+            loadedRequestKey = nil
+            browser.sort = effectiveSort; browser.likedOnly = likedOnly; browser.artist = artist
             browser.resetSearch()
-            do { try await Task.sleep(for: .milliseconds(activeQuery.isEmpty ? 0 : 300)) } catch { return }
+            do { try await Task.sleep(for: .milliseconds(activeQuery.isEmpty ? 0 : 150)) } catch { return }
             await browser.load(query: activeQuery, around: activeQuery.isEmpty && browser.kind == "tracks" ? model.playback.state?.currentTrackId : nil)
+            if !Task.isCancelled && browser.error == nil { loadedRequestKey = requestKey }
         }
         .refreshable { await browser.load(query: activeQuery) }
     }
@@ -359,7 +359,7 @@ struct BrowserScreen: View {
         return first.range(of: "^[A-Z]$", options: .regularExpression) == nil ? "#" : first
     }
     private var trackSections: [(name: String, rows: [LibraryBrowser.TrackRow])] {
-        guard sortOrder == "title" else { return [("Songs", browser.trackRows)] }
+        guard effectiveSort == "title" else { return [("Songs", browser.trackRows)] }
         // Keep server order, including punctuation and non-Latin titles. Use a
         // unique section identity even if several nonalphabetic runs exist.
         var groups: [(name: String, rows: [LibraryBrowser.TrackRow])] = []
@@ -371,7 +371,7 @@ struct BrowserScreen: View {
         return groups
     }
     private var entrySections: [(name: String, rows: [LibraryEntry])] {
-        guard sortOrder == "title" else { return [("Albums", browser.entries)] }
+        guard effectiveSort == "title" else { return [("Albums", browser.entries)] }
         var groups: [(name: String, rows: [LibraryEntry])] = []
         for row in browser.entries {
             let name = initial(row.name)
@@ -381,7 +381,7 @@ struct BrowserScreen: View {
         return groups
     }
     private var catalogSource: LibrarySource {
-        let options: [String: Any] = ["q": activeQuery, "sort": sortOrder, "liked": likedOnly]
+        let options: [String: Any] = ["q": activeQuery, "sort": effectiveSort, "liked": likedOnly]
         let data = (try? JSONSerialization.data(withJSONObject: options, options: .sortedKeys)) ?? Data()
         return LibrarySource(kind: "catalog", id: String(decoding: data, as: UTF8.self))
     }
@@ -700,17 +700,88 @@ struct DetailScreen: View {
     }
 }
 
+struct SearchScopePicker: View {
+    @Binding var kind: String
+    var body: some View {
+        Picker("Search category", selection: $kind) {
+            Text("All").tag("all"); Text("Songs").tag("tracks")
+            Text("Albums").tag("albums"); Text("Artists").tag("artists")
+        }.pickerStyle(.segmented)
+    }
+}
+
+struct AllSearchResults: View {
+    let model: AppModel
+    let query: String
+    @State private var songs: LibraryBrowser
+    @State private var albums: LibraryBrowser
+    @State private var artists: LibraryBrowser
+    init(model: AppModel, query: String) {
+        self.model = model; self.query = query
+        _songs = State(initialValue: LibraryBrowser(api: model.api))
+        _albums = State(initialValue: LibraryBrowser(api: model.api, kind: "albums"))
+        _artists = State(initialValue: LibraryBrowser(api: model.api, kind: "artists"))
+    }
+    var body: some View {
+        List {
+            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                ContentUnavailableView("Search your music", systemImage: "magnifyingglass", description: Text("Find songs, albums, and artists."))
+            } else {
+                Section("Songs") {
+                    RefreshStatus(loading: songs.loading, updated: songs.updated, error: songs.error)
+                    ForEach(songs.tracks.prefix(10)) { track in
+                        SongRow(track: track, model: model) { Task { await model.playback.play(source: songSource, trackId: track.id) } }
+                    }
+                    NavigationLink("All matching songs") { BrowserScreen(model: model, title: "Songs", kind: "tracks", externalQuery: query) }
+                }
+                entitySection("Albums", browser: albums)
+                entitySection("Artists", browser: artists)
+                if !songs.loading && !albums.loading && !artists.loading && songs.total + albums.total + artists.total == 0 && songs.error == nil && albums.error == nil && artists.error == nil {
+                    ContentUnavailableView("No matches", systemImage: "magnifyingglass", description: Text("Try another name."))
+                }
+            }
+        }.scrollContentBackground(.hidden).background(Color.black)
+            .navigationTitle("Search").navigationBarTitleDisplayMode(.inline)
+            .task(id: query) {
+                songs.resetSearch(); albums.resetSearch(); artists.resetSearch()
+                guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+                songs.sort = "relevance"; albums.sort = "relevance"; artists.sort = "relevance"
+                async let s: Void = songs.load(query: query)
+                async let a: Void = albums.load(query: query)
+                async let r: Void = artists.load(query: query)
+                _ = await (s, a, r)
+            }
+    }
+    private var songSource: LibrarySource {
+        let options = ["q": query, "sort": "relevance"]
+        let data = (try? JSONSerialization.data(withJSONObject: options, options: .sortedKeys)) ?? Data()
+        return LibrarySource(kind: "catalog", id: String(decoding: data, as: UTF8.self))
+    }
+    private func entitySection(_ title: String, browser: LibraryBrowser) -> some View {
+        Section(title) {
+            RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
+            ForEach(browser.entries.prefix(5), id: \.identity) { item in
+                NavigationLink { DetailScreen(model: model, entry: item) } label: { EntryRow(item: item, artwork: model.artwork) }
+            }
+            NavigationLink("All matching \(title.lowercased())") { BrowserScreen(model: model, title: title, kind: browser.kind, externalQuery: query) }
+        }
+    }
+}
+
 struct SearchScreen: View {
     let model: AppModel
-    @State private var kind = "tracks"
+    @State private var kind = "all"
+    @State private var query: String
+    init(model: AppModel, initialQuery: String = "") { self.model = model; _query = State(initialValue: initialQuery) }
     var body: some View {
         NavigationStack {
-            BrowserScreen(model: model, title: kind == "tracks" ? "Songs" : kind.capitalized, kind: kind, isGlobalSearch: true).id(kind)
-                .safeAreaInset(edge: .top) {
-                    Picker("Search category", selection: $kind) {
-                        Text("Songs").tag("tracks"); Text("Albums").tag("albums"); Text("Artists").tag("artists")
-                    }.pickerStyle(.segmented).padding().background(.bar)
-                }
+            Group {
+                if kind == "all" { AllSearchResults(model: model, query: query) }
+                else { BrowserScreen(model: model, title: kind == "tracks" ? "Songs" : kind.capitalized, kind: kind, externalQuery: query, isGlobalSearch: true).id(kind) }
+            }
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search your music")
+            .safeAreaInset(edge: .top) { SearchScopePicker(kind: $kind).padding().background(.bar) }
         }
     }
 }

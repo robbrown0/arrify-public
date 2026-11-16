@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': '27a (build 28): iPad-only mini-player layout correction. Center the native volume control vertically with the adjacent playback and AirPlay controls. iPhone and full-screen player layouts are unchanged. Please verify alignment on iPad in portrait and landscape; volume remains controlled by Apple’s native slider.'}
+    attrs = {'whatsNew': 'Search songs, albums, and artists from one iPad search field with visible scopes. Exact title matches appear first, changing scope keeps your query, and repeated searches do less work. This update also includes the recent song-action menu, original-album lookup, saved server address, and playback handoff improvements. Please test search responsiveness, menus during playback, and iPad keyboard and player layouts.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:

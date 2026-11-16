@@ -86,7 +86,7 @@ import CryptoKit
     }
     func resetSearch() {
         generation = UUID(); tracks = []; entries = []; nextOffset = nil; previousOffset = nil; startOffset = 0
-        revision = nil; error = nil; loading = true
+        revision = nil; updated = nil; error = nil; loading = true
     }
     func load(query: String = "", more: Bool = false, previous: Bool = false, around: Int? = nil, letter: String? = nil) async {
         if letter != nil { navigationRevision += 1 }

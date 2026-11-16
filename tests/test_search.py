@@ -18,6 +18,19 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(s.search('elton tiny')['items'][0]['id'],1)
         self.assertEqual(s.search('water dancer')['items'][0]['id'],1)
         self.assertEqual(s.search('john elton')['total'],2)
+    def test_cached_pages_and_snapshot_isolation(self):
+        from unittest.mock import patch
+        index = self.index()
+        first = index.search('elton', limit=1)
+        with patch.object(index, 'matches', side_effect=AssertionError('Repeated ranking')):
+            second = index.search('ELTON', offset=1, limit=1)
+        self.assertEqual(first['total'], second['total'])
+        self.assertNotEqual(first['items'][0]['id'], second['items'][0]['id'])
+        fresh = RankedIndex([{'id': 9, 'title': 'Elton'}], ('title',))
+        self.assertEqual(fresh.search('elton')['items'][0]['id'], 9)
+        for n in range(30): index.search('missing' + str(n))
+        self.assertLessEqual(len(index._results), 16)
+
     def test_normalization(self):
         s=self.index()
         for q,key in [('beyonce',5),('BEYONCÉ',5),('dont stop',4),('acdc',6),('ac dc',6),('the razors',6)]:

@@ -5,9 +5,10 @@ struct TabletShell: View {
     let model: AppModel
     let expandPlayer: () -> Void
     @State private var destination = "Home"
+    @State private var searchRoot = UUID()
     @State private var libraryRoot = UUID()
     @State private var query = ""
-    @State private var searchKind = "tracks"
+    @State private var searchKind = "all"
     @State private var creatingPlaylist = false
     @FocusState private var searching: Bool
     var body: some View {
@@ -44,15 +45,20 @@ struct TabletShell: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 12) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Artist, album, or song", text: $query).focused($searching)
+                        TextField(searchKind == "all" ? "Search your music" : "Search \(searchKind == "tracks" ? "songs" : searchKind)", text: $query).focused($searching)
                             .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
                             .accessibilityIdentifier("tabletSearch")
+                            .simultaneousGesture(TapGesture().onEnded { searchRoot = UUID(); destination = "Search" })
                             .onSubmit { searching = false; destination = "Search" }
                         if !query.isEmpty {
                             Button { query = "" } label: { Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44) }.accessibilityLabel("Clear search")
                         }
                         Button { creatingPlaylist = true } label: { Label("Create", systemImage: "plus").frame(minHeight: 44) }.accessibilityLabel("Create playlist")
                     }.padding(.horizontal, 16).padding(.vertical, 8).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12)).padding(16)
+                    if ["Search", "Songs", "Albums", "Artists"].contains(destination) {
+                        SearchScopePicker(kind: Binding(get: { searchKind }, set: { searchKind = $0; searchRoot = UUID(); destination = "Search" }))
+                            .padding(.horizontal, 16).padding(.bottom, 8)
+                    }
                     content.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
@@ -79,13 +85,19 @@ struct TabletShell: View {
                     .padding(.horizontal, 16).padding(.vertical, 8)
             }
         }.background(Color.black)
-            .onChange(of: query) { destination = "Search" }
+            .onChange(of: query) { if searching { destination = "Search" } }
             .onChange(of: searching) { PlaybackDiagnostics.record("search-focused=\(searching)"); if searching { destination = "Search" } }
             .sheet(isPresented: $creatingPlaylist) { CreatePlaylistView(model: model) }
     }
     private func navigation(_ title: String, _ icon: String, key: String? = nil) -> some View {
         let value = key ?? title
-        return Button { searching = false; if value == "Library" { libraryRoot = UUID() }; destination = value } label: {
+        return Button {
+            searching = false
+            if value == "Library" { libraryRoot = UUID() }
+            searchKind = ["Songs": "tracks", "Albums": "albums", "Artists": "artists"][value] ?? "all"
+            query = ""
+            destination = value
+        } label: {
             Label(title, systemImage: icon).font(.subheadline.weight(.medium)).lineLimit(2)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 10)
                 .contentShape(Rectangle())
@@ -102,20 +114,19 @@ struct TabletShell: View {
         case "Settings": SettingsView(model: model)
         case "Search":
             NavigationStack {
-                VStack(spacing: 0) {
-                    Picker("Search category", selection: $searchKind) {
-                        Text("Songs").tag("tracks"); Text("Albums").tag("albums"); Text("Artists").tag("artists")
-                    }.pickerStyle(.segmented).padding(.horizontal, 16).padding(.bottom, 12)
+                if searchKind == "all" { AllSearchResults(model: model, query: query) }
+                else {
                     BrowserScreen(model: model, title: searchKind == "tracks" ? "Songs" : searchKind.capitalized, kind: searchKind, externalQuery: query).id(searchKind)
                 }
-            }.id(query)
+            }.id(searchRoot)
+
         default:
             NavigationStack {
                 switch destination {
                 case "Liked songs": LikedSongsView(model: model)
-                case "Songs": BrowserScreen(model: model, title: "Songs", kind: "tracks")
-                case "Albums": BrowserScreen(model: model, title: "Albums", kind: "albums")
-                case "Artists": BrowserScreen(model: model, title: "Artists", kind: "artists")
+                case "Songs": BrowserScreen(model: model, title: "Songs", kind: "tracks", externalQuery: query)
+                case "Albums": BrowserScreen(model: model, title: "Albums", kind: "albums", externalQuery: query)
+                case "Artists": BrowserScreen(model: model, title: "Artists", kind: "artists", externalQuery: query)
                 case "Channels": CollectionScreen(model: model, section: "channels", title: "Channels")
                 case "Playlists": PlaylistLibraryView(model: model)
                 default:
