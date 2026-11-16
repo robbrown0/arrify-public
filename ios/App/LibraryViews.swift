@@ -248,14 +248,9 @@ struct BrowserScreen: View {
         Group {
             if externalQuery != nil { results }
             else if UIDevice.current.userInterfaceIdiom == .pad {
-                results.safeAreaInset(edge: .top) {
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search \(title.lowercased())", text: $query)
-                            .accessibilityIdentifier("librarySearch")
-                        if !query.isEmpty { Button("Clear", systemImage: "xmark.circle.fill") { query = "" }.labelStyle(.iconOnly) }
-                    }.padding(12).background(.bar)
-                }
+                // The tablet shell owns the persistent search field, including
+                // when this screen is reached through nested Library links.
+                results
             } else { results.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(title.lowercased())") }
         }
     }
@@ -350,6 +345,7 @@ struct BrowserScreen: View {
         }
         .task(id: requestKey) {
             if loadedRequestKey == requestKey, let updated = browser.updated, Date().timeIntervalSince(updated) < 30 { return }
+            loadedRequestKey = nil
             browser.sort = effectiveSort; browser.likedOnly = likedOnly; browser.artist = artist
             browser.resetSearch()
             do { try await Task.sleep(for: .milliseconds(activeQuery.isEmpty ? 0 : 150)) } catch { return }

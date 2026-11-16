@@ -730,6 +730,37 @@ extension NowPlayingArtworkTests {
         XCTAssertEqual(browser.tracks.map(\.id), Array(1...120))
         XCTAssertNil(browser.previousOffset)
     }
+    @MainActor func testReturningToPreviousQueryAfterCancellationReloadsClearedWindow() async throws {
+        let transport = WindowCatalogTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let browser = LibraryBrowser(api: api)
+        await browser.load(query: "new")
+        XCTAssertEqual(browser.tracks.map(\.id), [120])
+        XCTAssertNotNil(browser.updated)
+
+        browser.resetSearch()
+        XCTAssertTrue(browser.tracks.isEmpty)
+        XCTAssertNil(browser.updated, "Cleared results must not satisfy the view's recent-success reuse guard")
+        let intermediate = Task { await browser.load(query: "slow") }
+        // Wait for B to enter its delayed transport, rather than relying on a
+        // scheduler-specific pause before returning to the completed query A.
+        for _ in 0..<100 {
+            if await transport.slowRequests > 0 { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let requests = await transport.slowRequests
+        XCTAssertEqual(requests, 1)
+        intermediate.cancel()
+        browser.resetSearch()
+        XCTAssertNil(browser.updated)
+        await browser.load(query: "new")
+        await intermediate.value
+        XCTAssertEqual(browser.tracks.map(\.id), [120])
+        XCTAssertNotNil(browser.updated)
+        XCTAssertNil(browser.error)
+        XCTAssertFalse(browser.loading)
+    }
     @MainActor func testSlowPreviousSearchCannotReplaceNewSelection() async throws {
         let api = APIClient(transport: WindowCatalogTransport(), store: UITestStore())
         try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
@@ -744,12 +775,13 @@ extension NowPlayingArtworkTests {
     }
 }
 private actor WindowCatalogTransport: HTTPTransport {
+    private(set) var slowRequests = 0
     private let fallback = UITestTransport()
     func send(_ request: URLRequest) async throws -> HTTPResult {
         guard request.url!.path.hasSuffix("/catalog") else { return try await fallback.send(request) }
         let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems ?? []
         func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
-        if value("q") == "slow" { try await Task.sleep(for: .milliseconds(200)) }
+        if value("q") == "slow" { slowRequests += 1; try await Task.sleep(for: .milliseconds(200)) }
         let offset = value("around").flatMap(Int.init).map { max(0, $0 - 26) } ?? Int(value("offset") ?? "0") ?? 0
         let ids = value("q") == "new" ? [120] : Array((offset + 1)...min(120, offset + 50))
         let items = ids.map { ["id": $0, "title": "Song \($0)", "artist": "Artist", "album": "Album"] as [String: Any] }

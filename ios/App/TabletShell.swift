@@ -48,6 +48,7 @@ struct TabletShell: View {
                         TextField(searchKind == "all" ? "Search your music" : "Search \(searchKind == "tracks" ? "songs" : searchKind)", text: $query).focused($searching)
                             .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
                             .accessibilityIdentifier("tabletSearch")
+                            .simultaneousGesture(TapGesture().onEnded { searchRoot = UUID(); destination = "Search" })
                             .onSubmit { searching = false; destination = "Search" }
                         if !query.isEmpty {
                             Button { query = "" } label: { Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44) }.accessibilityLabel("Clear search")
@@ -59,7 +60,6 @@ struct TabletShell: View {
                             .padding(.horizontal, 16).padding(.bottom, 8)
                     }
                     content.frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .simultaneousGesture(TapGesture().onEnded { searching = false })
                 }
             }
             if model.playback.needsTakeover {
@@ -86,7 +86,7 @@ struct TabletShell: View {
             }
         }.background(Color.black)
             .onChange(of: query) { if searching { destination = "Search" } }
-            .onChange(of: searching) { PlaybackDiagnostics.record("search-focused=\(searching)"); if searching { searchRoot = UUID(); destination = "Search" } }
+            .onChange(of: searching) { PlaybackDiagnostics.record("search-focused=\(searching)"); if searching { destination = "Search" } }
             .sheet(isPresented: $creatingPlaylist) { CreatePlaylistView(model: model) }
     }
     private func navigation(_ title: String, _ icon: String, key: String? = nil) -> some View {

@@ -161,5 +161,7 @@ Regression coverage must keep the menu open across background refresh cycles, re
 - Nonempty queries use relevance ordering, including catalog playback expansion; clearing restores the saved browsing sort. Exact normalized titles rank first.
 - Search debounce is 150 ms; the tablet navigation stack resets when starting a search session, not on every keystroke. Existing cancellation/generation guards remain.
 - Snapshot-local search caches retain at most 16 ranked ID lists per entity index (maximum 50,000 IDs per entry). They contain no account filters; liked filtering remains outside the cache. New snapshots invalidate cached results.
-- Regression coverage: native exact-match paging/playback order, repeated query paging/cache bounds/snapshot isolation, single iPad search field and query retention across scope changes, existing delayed-search cancellation tests.
+- Regression coverage: native exact-match paging/playback order, repeated query paging/cache bounds/snapshot isolation, single iPad search field and query retention across scope changes, existing delayed-search cancellation tests, and `testReturningToPreviousQueryAfterCancellationReloadsClearedWindow`. Search resets invalidate the last successful timestamp before clearing rows.
 - Device acceptance: search “Take on me” on a large library; confirm A-ha ranks above “Take A Chance On Me,” change scopes, clear, open an album then start another search, and compare local/public network responsiveness.
+
+Build 34 is authorized for internal testers and external beta users. Run both complete device suites before upload; verify Apple processing and external review state before claiming beta availability.
