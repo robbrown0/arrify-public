@@ -18,6 +18,20 @@ class NativeLibraryTests(unittest.TestCase):
         self.lib=SimpleNamespace(index_lock=contextlib.nullcontext(), tracks={t['id']:t for t in tracks}, albums={album['id']:album}, artists={}, search=Search(tracks,[album],[]))
         self.lib.collections=lambda:[{'slug':'station','name':'Station','section':'channels','tracks':120},{'slug':'mix','name':'Mix','section':'playlists','tracks':120}]
         self.lib.collection_ids=lambda slug:list(range(1,121))
+    def test_exact_search_ranks_first_and_playback_keeps_ranked_context(self):
+        rows = [dict(self.lib.tracks[i], title=title) for i, title in enumerate(
+            ['Take A Chance On Me', 'Take On Me', 'Take On Me (Live)'], 1)]
+        self.lib.tracks = {t['id']: t for t in rows}
+        self.lib.search = Search(rows, [], [])
+        first = page(self.lib, '/catalog?q=take+on+me&sort=relevance&limit=1')
+        self.assertEqual(first['items'][0]['id'], 2)
+        second = page(self.lib, '/catalog?q=take+on+me&sort=relevance&limit=1&offset=1&revision=' + first['revision'])
+        self.assertEqual(second['items'][0]['id'], 3)
+        command = expand_playback(self.lib, None, 1, {'action': 'play', 'track_id': 2,
+            'source': {'kind': 'catalog', 'id': json.dumps({'q': 'take on me', 'sort': 'relevance'})}})
+        self.assertEqual(command['ids'], [2, 3, 1])
+        self.assertEqual(page(self.lib, '/catalog?sort=title')['items'][0]['id'], 1)
+
     def test_browse_playback_expands_entire_filtered_selection(self):
         from unittest.mock import Mock
         self.lib.discovery = Mock()

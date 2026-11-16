@@ -3,6 +3,7 @@ import bisect
 import collections
 import hashlib
 import re
+import threading
 import unicodedata
 
 APOSTROPHES=str.maketrans({'’':'',"'":'','`':''})
@@ -40,6 +41,8 @@ def near(a,b):
 
 class RankedIndex:
     def __init__(self,items,fields):
+        self._results = collections.OrderedDict()
+        self._results_lock = threading.Lock()
         self.items={x['id']:x for x in items}
         self.fields=fields
         # Immutable snapshot orders are built once, not sorted again for every
@@ -74,7 +77,8 @@ class RankedIndex:
         ids=set(self.postings.get(word,()))
         at=bisect.bisect_left(self.words,word)
         # Prefix expansion is bounded by the finite index, never a regex or SQL expression.
-        for candidate in self.words[at:]:
+        for pos in range(at, len(self.words)):
+            candidate = self.words[pos]
             if not candidate.startswith(word):break
             ids.update(self.postings[candidate])
         if fuzzy and len(word)>=4:
@@ -89,7 +93,14 @@ class RankedIndex:
         return ids
 
     def search(self,query,offset=0,limit=60):
-        q=normalize(query[:200]);tokens=list(dict.fromkeys(q.split()))
+        q=normalize(query[:200])
+        with self._results_lock:
+            cached = self._results.get(q)
+            if cached is not None:
+                self._results.move_to_end(q)
+                ordered, fuzzy = cached
+                return {'items':[self.items[k] for k in ordered[offset:offset+limit]], 'total':len(ordered), 'fuzzy':fuzzy}
+        tokens=list(dict.fromkeys(q.split()))
         if len(tokens)>16:return {'items':[],'total':0,'fuzzy':False}
         filtered=[w for w in tokens if w not in ('the','and')]
         if filtered:tokens=filtered
@@ -100,7 +111,8 @@ class RankedIndex:
             result.update(self.compact.get(q.replace(' ',''),()))
             if ' ' not in q and len(q)>=4:
                 at=bisect.bisect_left(self.compact_words,q)
-                for word in self.compact_words[at:]:
+                for pos in range(at, len(self.compact_words)):
+                    word = self.compact_words[pos]
                     if not word.startswith(q):break
                     result.update(self.compact[word])
             return result
@@ -116,8 +128,15 @@ class RankedIndex:
                 elif q in value:points=max(points,5000-i*300)
                 words=value.split()
                 points+=weight*sum(30 if t in words else 15 if any(w.startswith(t) for w in words) else 0 for t in tokens)
-            return (-points,tuple(values),str(key))
-        ordered=sorted(ids,key=score)
+            return (values[0] != q, -points,tuple(values),str(key))
+        ordered=tuple(sorted(ids,key=score))
+        # Snapshot-local, bounded IDs only; a catalog refresh starts a fresh cache.
+        if len(ordered) <= 50000:
+            with self._results_lock:
+                self._results[q] = (ordered, fuzzy)
+                self._results.move_to_end(q)
+                while len(self._results) > 16:
+                    self._results.popitem(last=False)
         return {'items':[self.items[k] for k in ordered[offset:offset+limit]],'total':len(ordered),'fuzzy':fuzzy}
 
 class Search:

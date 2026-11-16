@@ -7,13 +7,13 @@ from .native_library import track, enrich_popularity
 
 
 def ordered_ids(index, kind, query='', sort='title', artist='', liked=None):
-    if kind not in ('tracks', 'albums', 'artists') or sort not in (None, 'title', 'artist', 'recent'):
+    if kind not in ('tracks', 'albums', 'artists') or sort not in (None, 'title', 'artist', 'recent', 'relevance'):
         raise NativeError(400, 'invalid_request', 'Invalid library ordering.')
     catalog = getattr(index, kind)
-    ids = catalog.browse_orders[sort or 'title']
+    ids = catalog.browse_orders['title' if sort in (None, 'relevance') else sort]
     if query.strip():
         found = catalog.search(query, 0, len(catalog.items))['items']
-        if sort is None:
+        if sort in (None, 'relevance'):
             ids = tuple(x['id'] for x in found)  # Preserve legacy relevance order.
         else:
             matches = {x['id'] for x in found}

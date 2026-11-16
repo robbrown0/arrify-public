@@ -277,6 +277,8 @@ final class LaunchTests: XCTestCase {
         guard search.waitForExistence(timeout: 5) else { throw XCTSkip("iPad search navigation regression") }
         search.tap(); search.typeText("pink")
         app.segmentedControls.buttons["Albums"].tap()
+        XCTAssertEqual(search.value as? String, "pink", "Changing scope preserves the query")
+        XCTAssertFalse(app.textFields["librarySearch"].exists)
         // EntryRow is exposed as a navigation link; use its album text.
         XCTAssertTrue(app.staticTexts["M!ssundaztood"].firstMatch.waitForExistence(timeout: 10))
         app.staticTexts["M!ssundaztood"].firstMatch.tap()
@@ -479,6 +481,8 @@ extension LaunchTests {
         let play = app.buttons["Play Just Like a Pill by P!nk"]
         XCTAssertTrue(play.waitForExistence(timeout: 10))
         XCTAssertEqual(app.searchFields.count, 0, "iPad uses one persistent header search, not a second navigation-bar field")
+        XCTAssertFalse(app.textFields["librarySearch"].exists, "Section search must reuse the header")
+        XCTAssertTrue(app.segmentedControls.buttons["Songs"].isSelected)
         play.tap()
         let player = app.otherElements["tabletPlayer"]
         XCTAssertTrue(player.waitForExistence(timeout: 5))
@@ -583,6 +587,7 @@ extension LaunchTests {
         if tabletSearch.exists { tabletSearch.typeText("\n") }
         else { app.searchFields.firstMatch.typeText("\n") }
         XCTAssertTrue(takeover.waitForExistence(timeout: 5))
+        app.segmentedControls.buttons["Songs"].tap()
         XCTAssertTrue(lastSong.waitForExistence(timeout: 10))
         checkBottom(lastSong, "Search final result")
         if !tabletSearch.exists {
