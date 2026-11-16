@@ -19,16 +19,39 @@ final class LaunchTests: XCTestCase {
         expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: current)
         waitForExpectations(timeout: 10)
         XCTAssertLessThan(abs(current.frame.midY - app.frame.midY), app.frame.height * 0.25)
-        // Target the song list, not the iPad sidebar or the mini player.
-        let start = current.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -220)))
-        let show = app.buttons["Show playing song"]
-        XCTAssertTrue(show.waitForExistence(timeout: 5))
-        show.tap()
-        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: current)
+        XCTAssertFalse(app.buttons["Earlier items"].exists)
+        XCTAssertFalse(app.buttons["Show playing song"].exists)
+        // Song 1 is outside the initial window around song 75. Reaching it
+        // requires automatic previous-page loading as well as actual scrolling.
+        let listX = current.frame.midX / app.frame.width
+        let first = app.buttons["songRow-1"]
+        for _ in 0..<24 {
+            if first.isHittable { break }
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: listX, dy: 0.34))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: listX, dy: 0.72))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTAssertTrue(first.isHittable, "Scrolling upward must load songs before the initial window")
+        XCTAssertFalse(current.isHittable, "Manual browsing must not recenter on the playing song")
+        XCTAssertFalse(app.buttons["Show playing song"].exists, "Songs must not reserve space for a return bar")
+        app.buttons["Next song"].firstMatch.tap()
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "Song 110"), evaluatedWith: app.buttons["expandPlayer"])
         waitForExpectations(timeout: 10)
-        XCTAssertLessThan(abs(current.frame.midY - app.frame.midY), app.frame.height * 0.25)
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Long list current song centered"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(first.isHittable, "Changing tracks after manual scrolling must preserve the browsing position")
+        app.buttons["Home"].firstMatch.tap()
+        app.buttons["Songs"].firstMatch.tap()
+        let next = app.buttons["songRow-110"]
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: next)
+        waitForExpectations(timeout: 10)
+        XCTAssertLessThan(abs(next.frame.midY - app.frame.midY), app.frame.height * 0.25)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Songs reopens at current song without return bar"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["Pause"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Home"].firstMatch.tap()
+        app.buttons["Songs"].firstMatch.tap()
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: first)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(next.isHittable, "A paused selection must not override the normal sorted starting point")
     }
     @MainActor func testCollectionShuffleStartsPlaybackAndReflectsState() {
         let app = XCUIApplication()

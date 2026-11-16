@@ -45,8 +45,9 @@ above. Record any unverified physical behavior explicitly in release reports.
 
 - Keep the visible Shuffle label constant; expose on/off through color and VoiceOver.
 - Open the active song list around its current song; follow changes only until the
-  user scrolls, searches, changes sorting/filtering, or edits. Show playing song
-  resumes following. Queue current entry remains at the top, with occurrence-based
+  user scrolls, searches, changes sorting/filtering, or edits. Collection lists retain
+  Show playing song to resume following; Songs now uses navigation to return to the
+  playing track (see Songs scrolling below). Queue current entry remains at the top, with occurrence-based
   upcoming entries; do not mark matching upcoming duplicates current.
 - Direct server windows are bounded to 50 rows. Test earlier/later paging, overlap,
   duplicate playlist entries, missing songs, stale revisions, account-scoped liked
@@ -91,8 +92,9 @@ iPad. Lists now also observe the native scroll view pan recognizer from the curr
 row, without adding a competing gesture or replacing its delegate. A first
 simultaneous-gesture attempt interfered with a song menu; retain menu tests as
 well as scroll tests. The same safeguard applies to the queue. Keep
-the long-list test's actual drag, return-button assertion and recenter assertion;
-initial positioning alone is insufficient evidence that manual browsing works.
+the long-list test's actual drag and recenter assertion; its old return-button
+assertion is replaced by absence of that bar and navigation back to Songs. Initial
+positioning alone is insufficient evidence that manual browsing works.
 The native scroll observer must remain hidden from accessibility. The queue's
 current row explicitly retains its combined accessibility element and playback
 value after the observer background is applied; `testCurrentTrackIsMarkedInListAndQueue`
@@ -165,3 +167,28 @@ Regression coverage must keep the menu open across background refresh cycles, re
 - Device acceptance: search “Take on me” on a large library; confirm A-ha ranks above “Take A Chance On Me,” change scopes, clear, open an album then start another search, and compare local/public network responsiveness.
 
 Build 34 is authorized for internal testers and external beta users. Run both complete device suites before upload; verify Apple processing and external review state before claiming beta availability.
+
+
+## Songs scrolling and entry behavior
+
+- Songs loads preceding rows automatically when scrolling upward; no Earlier items
+  button. Preserve the visible song position when prepending, stable row identities,
+  and existing cancellation/revision guards. Do not fetch the entire library at entry.
+- Remove the Show playing song bar from Songs. Opening Songs while playback is
+  active starts around the playing track; paused/stopped playback starts at the
+  normal sorted/filtered view. Searches and explicit sorting/filtering remain in
+  control and must not snap to the playing track.
+- Manual browsing suspends following, including when earlier/later pages arrive or
+  the playing track changes. Returning through Songs navigation resumes positioning
+  for active playback. Other collection and queue behavior remains covered.
+- `testLongSongsListCentersCurrentAndManualBrowsingSuspendsFollowing` retains real
+  scrolling and centering assertions, reaches song 1 outside the initial window,
+  verifies that Next does not disturb manual browsing, reopens Songs at the new
+  playing track, and verifies normal entry after pausing. It also checks that both
+  obsolete Songs buttons are absent. Retain app paging/identity and delayed-response
+  tests, plus all menu tests; do not introduce a competing scroll gesture.
+- Physical acceptance: iPhone/iPad portrait and landscape, slowly cross several
+  previous-page boundaries with local/public connections, verify no visible jump,
+  test search and saved sort/filter choices, and reopen Songs during local/remote
+  playback and while paused/stopped. The unresolved crash report above remains open;
+  removing its former button does not establish a root cause or crash fix.

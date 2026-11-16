@@ -7,6 +7,7 @@ struct TabletShell: View {
     @State private var destination = "Home"
     @State private var searchRoot = UUID()
     @State private var libraryRoot = UUID()
+    @State private var songsRoot = UUID()
     @State private var query = ""
     @State private var searchKind = "all"
     @State private var creatingPlaylist = false
@@ -94,6 +95,7 @@ struct TabletShell: View {
         return Button {
             searching = false
             if value == "Library" { libraryRoot = UUID() }
+            if value == "Songs" { songsRoot = UUID() }
             searchKind = ["Songs": "tracks", "Albums": "albums", "Artists": "artists"][value] ?? "all"
             query = ""
             destination = value
@@ -124,7 +126,7 @@ struct TabletShell: View {
             NavigationStack {
                 switch destination {
                 case "Liked songs": LikedSongsView(model: model)
-                case "Songs": BrowserScreen(model: model, title: "Songs", kind: "tracks", externalQuery: query)
+                case "Songs": BrowserScreen(model: model, title: "Songs", kind: "tracks", externalQuery: query).id(songsRoot)
                 case "Albums": BrowserScreen(model: model, title: "Albums", kind: "albums", externalQuery: query)
                 case "Artists": BrowserScreen(model: model, title: "Artists", kind: "artists", externalQuery: query)
                 case "Channels": CollectionScreen(model: model, section: "channels", title: "Channels")

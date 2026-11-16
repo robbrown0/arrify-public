@@ -233,10 +233,15 @@ struct BrowserScreen: View {
     @State private var likedOnly = false
     @State private var loadedRequestKey: String?
     @State private var globalSearch = false
+    @State private var opening = true
     let externalQuery: String?
     let artist: String?
     let isGlobalSearch: Bool
     private var activeQuery: String { externalQuery ?? query }
+    private var activeTrackID: Int? {
+        guard let id = model.playback.state?.currentTrackId, model.playback.rowStatus(for: id) == .playing else { return nil }
+        return id
+    }
     private var effectiveSort: String { activeQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? sortOrder : "relevance" }
     private var requestKey: String { activeQuery + "|" + sortOrder + "|" + String(likedOnly) }
     init(model: AppModel, title: String, kind: String, externalQuery: String? = nil, artist: String? = nil, isGlobalSearch: Bool = false) {
@@ -255,7 +260,7 @@ struct BrowserScreen: View {
         }
     }
     private var results: some View {
-        FollowingSongList(model: model, browser: browser, query: activeQuery, follows: browser.kind == "tracks" && activeQuery.isEmpty && !likedOnly) { suspendFollowing in
+        FollowingSongList(model: model, browser: browser, query: activeQuery, follows: browser.kind == "tracks" && activeQuery.isEmpty && !likedOnly && activeTrackID != nil, showsReturnControl: false, pagesBackward: true) { suspendFollowing in
             Section {
                 if let artist {
                     NavigationLink("All songs") {
@@ -264,11 +269,8 @@ struct BrowserScreen: View {
                 }
                 RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
             }
-            if browser.previousOffset != nil {
-                Button("Earlier items") { Task { await browser.load(query: activeQuery, previous: true) } }.disabled(browser.loading)
-            }
             if browser.kind == "tracks" {
-                ForEach(Array(trackSections.enumerated()), id: \.offset) { _, section in
+                ForEach(trackSections, id: \.id) { section in
                     Section(section.name) {
                         ForEach(section.rows) { row in
                             SongRow(track: row.track, model: model, onScroll: suspendFollowing) {
@@ -289,7 +291,7 @@ struct BrowserScreen: View {
                                     Text(item.name).font(.headline).lineLimit(2)
                                     Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                                 }
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(.plain).id("entry-\(item.identity)")
                         }
                     }
                 }.listRowBackground(Color.clear)
@@ -302,6 +304,7 @@ struct BrowserScreen: View {
                                     BrowserScreen(model: model, title: item.name, kind: "albums", artist: item.id)
                                 } else { DetailScreen(model: model, entry: item) }
                             } label: { EntryRow(item: item, artwork: model.artwork) }
+                            .id("entry-\(item.identity)")
                         }
                     }
                 }
@@ -343,13 +346,17 @@ struct BrowserScreen: View {
                 .accessibilityLabel("Library options")
             }
         }
+        .onDisappear { opening = true }
         .task(id: requestKey) {
-            if loadedRequestKey == requestKey, let updated = browser.updated, Date().timeIntervalSince(updated) < 30 { return }
+            let isOpening = opening
+            opening = false
+            if !isOpening, loadedRequestKey == requestKey, let updated = browser.updated, Date().timeIntervalSince(updated) < 30 { return }
             loadedRequestKey = nil
+            if !isOpening { browser.navigationRevision += 1 }
             browser.sort = effectiveSort; browser.likedOnly = likedOnly; browser.artist = artist
             browser.resetSearch()
             do { try await Task.sleep(for: .milliseconds(activeQuery.isEmpty ? 0 : 150)) } catch { return }
-            await browser.load(query: activeQuery, around: activeQuery.isEmpty && browser.kind == "tracks" ? model.playback.state?.currentTrackId : nil)
+            await browser.load(query: activeQuery, around: isOpening && activeQuery.isEmpty && !likedOnly && browser.kind == "tracks" ? activeTrackID : nil)
             if !Task.isCancelled && browser.error == nil { loadedRequestKey = requestKey }
         }
         .refreshable { await browser.load(query: activeQuery) }
@@ -358,15 +365,18 @@ struct BrowserScreen: View {
         let first = String(title.prefix(1)).uppercased()
         return first.range(of: "^[A-Z]$", options: .regularExpression) == nil ? "#" : first
     }
-    private var trackSections: [(name: String, rows: [LibraryBrowser.TrackRow])] {
-        guard effectiveSort == "title" else { return [("Songs", browser.trackRows)] }
+    private var trackSections: [(id: String, name: String, rows: [LibraryBrowser.TrackRow])] {
+        guard effectiveSort == "title" else { return [("Songs", "Songs", browser.trackRows)] }
         // Keep server order, including punctuation and non-Latin titles. Use a
         // unique section identity even if several nonalphabetic runs exist.
-        var groups: [(name: String, rows: [LibraryBrowser.TrackRow])] = []
+        var groups: [(id: String, name: String, rows: [LibraryBrowser.TrackRow])] = []
         for row in browser.trackRows {
             let name = initial(row.track.title)
-            if groups.last?.name == name { groups[groups.count - 1].rows.append(row) }
-            else { groups.append((name, [row])) }
+            if groups.last?.name == name {
+                groups[groups.count - 1].rows.append(row)
+                if name == "#" { groups[groups.count - 1].id = "#-\(row.id)" }
+            }
+            else { groups.append((name == "#" ? "#-\(row.id)" : name, name, [row])) }
         }
         return groups
     }
@@ -430,21 +440,52 @@ struct FollowingSongList<Content: View>: View {
     let browser: LibraryBrowser
     var query = ""
     var follows: Bool
+    var showsReturnControl = true
+    var pagesBackward = false
     @ViewBuilder let content: (@escaping () -> Void) -> Content
     @State private var following = true
     @State private var jump = 0
+    @State private var manuallyScrolled = false
+    @State private var previousVisible = false
+    @State private var previousRequest = 0
+    @State private var pagingPrevious = false
     private var currentID: Int? { model.playback.state?.currentTrackId }
     var body: some View {
         ScrollViewReader { proxy in
-            List { content { following = false } }
+            List {
+                if pagesBackward, browser.previousOffset != nil {
+                    ProgressView().frame(maxWidth: .infinity)
+                        .accessibilityLabel(browser.kind == "tracks" ? "Loading previous songs" : "Loading previous items")
+                        .onAppear { previousVisible = true; requestPrevious() }
+                        .onDisappear { previousVisible = false }
+                }
+                content { suspendFollowing() }
+            }
+                .onAppear { following = true; manuallyScrolled = false }
+                .task(id: previousRequest) {
+                    guard previousRequest > 0, manuallyScrolled, previousVisible,
+                          !browser.loading, browser.previousOffset != nil else { return }
+                    pagingPrevious = true
+                    previousVisible = false
+                    defer { pagingPrevious = false }
+                    let anchor = browser.trackRows.first.map { "song-\($0.id)" }
+                        ?? browser.entries.first.map { "entry-\($0.identity)" }
+                    await browser.load(query: query, previous: true)
+                    guard !Task.isCancelled, browser.error == nil, let anchor else { return }
+                    // This task belongs to the list, not the disappearing paging
+                    // sentinel. Prepending must not cancel scroll restoration.
+                    proxy.scrollTo(anchor, anchor: .top)
+                    await Task.yield()
+                }
+                .onChange(of: browser.loading) { if !browser.loading { requestPrevious() } }
                 .scrollContentBackground(.hidden).background(Color.black)
                 .onScrollPhaseChange { _, phase in
-                    if phase == .interacting || phase == .tracking { following = false }
+                    if phase == .interacting || phase == .tracking { suspendFollowing() }
                 }
-                .onChange(of: query) { following = false }
-                .onChange(of: browser.navigationRevision) { following = false }
-                .onChange(of: browser.sort) { following = false }
-                .onChange(of: browser.likedOnly) { following = false }
+                .onChange(of: query) { following = false; cancelPrevious() }
+                .onChange(of: browser.navigationRevision) { following = false; cancelPrevious() }
+                .onChange(of: browser.sort) { if !pagesBackward { following = false } }
+                .onChange(of: browser.likedOnly) { if !pagesBackward { following = false } }
                 .onChange(of: follows) { if follows && following { jump += 1 } }
                 .onChange(of: browser.resumeFollowingRequest) { following = true }
                 .onChange(of: model.playback.state?.playId) { if following && follows { jump += 1 } }
@@ -461,13 +502,27 @@ struct FollowingSongList<Content: View>: View {
                     center(proxy)
                 }
                 .safeAreaInset(edge: .bottom) {
-                    if !following && follows && currentID != nil {
+                    if showsReturnControl && !following && follows && currentID != nil {
                         Button("Show playing song", systemImage: "speaker.wave.2.fill") { following = true; jump += 1 }
                             .buttonStyle(.borderedProminent).tint(.green).foregroundStyle(.black)
                             .padding(8).frame(maxWidth: .infinity).background(.bar)
                     }
                 }
         }
+    }
+    private func cancelPrevious() {
+        manuallyScrolled = false
+        previousRequest += 1
+    }
+    private func suspendFollowing() {
+        following = false
+        manuallyScrolled = true
+        requestPrevious()
+    }
+    private func requestPrevious() {
+        guard pagesBackward, manuallyScrolled, previousVisible, !pagingPrevious,
+              !browser.loading, browser.error == nil, browser.previousOffset != nil else { return }
+        previousRequest += 1
     }
     private func center(_ proxy: ScrollViewProxy) {
         guard let currentID, let row = browser.trackRows.first(where: { $0.track.id == currentID }) else { return }
