@@ -202,8 +202,7 @@ Build 34 is authorized for internal testers and external beta users. Run both co
 - Preserve Home's scroll position when presenting and dismissing the full-screen
   player. The clarified report concerns this overlay transition; it does not request
   resetting Home when selecting or reselecting its navigation item.
-- `testHomeScrollPositionSurvivesFullScreenPlayerDismissal` scrolls Home until its
-  heading is offscreen, records a visible playlist card's position, and verifies the
+- `testHomeScrollPositionSurvivesFullScreenPlayerDismissal` scrolls Home by more than 100 points, records a visible playlist card's position, and verifies the
   same position after opening/minimizing the player twice. Both iPhone and iPad run
   this regression with a personal playlist and remote-playback footer.
 - Physical acceptance: scroll down Home, expand the player, minimize it, and verify
@@ -218,5 +217,7 @@ Build 34 is authorized for internal testers and external beta users. Run both co
   native insertion handling preserve the stable rows and the user's drag.
 - Keep the full previous-page traversal test as a release gate. This reproduced
   crash is separate from unconfirmed physical-device issue #35.
-- The Home fixture fits completely on a large portrait iPad; run its scroll
-  preservation check in landscape there so it actually exercises overflow.
+- The Home preservation fixture uses larger text for real overflow on large iPads.
+  Verify displacement geometrically: UIKit may report a clipped heading as hittable.
+  Avoid rotating this test, which produced inconsistent simulator window geometry
+  in the following test. Keep both player-dismissal and exact-position assertions.

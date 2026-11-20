@@ -190,9 +190,9 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
     }
     @MainActor func testHomeScrollPositionSurvivesFullScreenPlayerDismissal() {
-        XCUIDevice.shared.orientation = .portrait
-        defer { XCUIDevice.shared.orientation = .portrait }
         let app = XCUIApplication()
+        // Larger text gives Home real overflow even on a 13-inch iPad.
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
         app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
         app.launchEnvironment["ARRIFY_UI_PERSONAL_PLAYLIST"] = "1"
@@ -203,26 +203,20 @@ final class LaunchTests: XCTestCase {
         app.buttons["signIn"].tap()
         let title = app.staticTexts["On the record"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
-        if app.textFields["tabletSearch"].exists {
-            // All three fixture rails fit on a large portrait iPad. Landscape
-            // gives this test real scrollable overflow without changing Home.
-            XCUIDevice.shared.orientation = .landscapeLeft
-            expectation(for: NSPredicate { _, _ in app.frame.width > app.frame.height }, evaluatedWith: app)
-            waitForExpectations(timeout: 10)
-        }
         let takeover = app.buttons["Play here"]
         XCTAssertTrue(takeover.waitForExistence(timeout: 10))
         let playlist = app.otherElements["collectionCard-playlists-1"]
+        let initialTitleY = title.frame.minY
         // Move well away from the top and keep a visible card as a position
         // anchor. Drag inside content, avoiding the sidebar and player footer.
         for _ in 0..<12 {
-            if !title.isHittable && playlist.isHittable && playlist.frame.maxY < takeover.frame.minY { break }
+            if title.frame.minY < initialTitleY - 100 && playlist.isHittable && playlist.frame.maxY < takeover.frame.minY { break }
             let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0))
             let start = origin.withOffset(CGVector(dx: 0, dy: takeover.frame.minY - 40))
             let end = origin.withOffset(CGVector(dx: 0, dy: max(180, takeover.frame.minY - 340)))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
-        XCTAssertFalse(title.isHittable, "Home must be scrolled before opening the player")
+        XCTAssertLessThan(title.frame.minY, initialTitleY - 100, "Home must be scrolled before opening the player")
         XCTAssertTrue(playlist.isHittable)
         let scrolledY = playlist.frame.minY
         for _ in 0..<2 {
@@ -233,7 +227,7 @@ final class LaunchTests: XCTestCase {
             XCTAssertTrue(close.waitForNonExistence(timeout: 10))
             expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: playlist)
             waitForExpectations(timeout: 10)
-            XCTAssertFalse(title.isHittable, "Minimizing the player must not reset Home to the top")
+            XCTAssertLessThan(title.frame.minY, initialTitleY - 100, "Minimizing the player must not reset Home to the top")
             XCTAssertEqual(playlist.frame.minY, scrolledY, accuracy: 3,
                            "Home must retain its exact browsing position after player dismissal")
         }
