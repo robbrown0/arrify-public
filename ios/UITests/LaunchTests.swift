@@ -190,6 +190,8 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
     }
     @MainActor func testHomeScrollPositionSurvivesFullScreenPlayerDismissal() {
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
         app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
@@ -201,6 +203,13 @@ final class LaunchTests: XCTestCase {
         app.buttons["signIn"].tap()
         let title = app.staticTexts["On the record"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
+        if app.textFields["tabletSearch"].exists {
+            // All three fixture rails fit on a large portrait iPad. Landscape
+            // gives this test real scrollable overflow without changing Home.
+            XCUIDevice.shared.orientation = .landscapeLeft
+            expectation(for: NSPredicate { _, _ in app.frame.width > app.frame.height }, evaluatedWith: app)
+            waitForExpectations(timeout: 10)
+        }
         let takeover = app.buttons["Play here"]
         XCTAssertTrue(takeover.waitForExistence(timeout: 10))
         let playlist = app.otherElements["collectionCard-playlists-1"]

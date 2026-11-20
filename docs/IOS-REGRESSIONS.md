@@ -208,3 +208,15 @@ Build 34 is authorized for internal testers and external beta users. Run both co
   this regression with a personal playlist and remote-playback footer.
 - Physical acceptance: scroll down Home, expand the player, minimize it, and verify
   the same content remains at the same position with uninterrupted playback.
+
+### Build 35 qualification crash
+
+- The continuous Songs UI test terminated on both devices while loading earlier
+  rows. The iPad crash stack records UICollectionView rejecting a scrolling target
+  during UpdateCoalescingCollectionView.updateContent. Previous-page completion
+  must not call ScrollViewProxy.scrollTo against a changing list snapshot. Let
+  native insertion handling preserve the stable rows and the user's drag.
+- Keep the full previous-page traversal test as a release gate. This reproduced
+  crash is separate from unconfirmed physical-device issue #35.
+- The Home fixture fits completely on a large portrait iPad; run its scroll
+  preservation check in landscape there so it actually exercises overflow.

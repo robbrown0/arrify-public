@@ -459,11 +459,10 @@ struct FollowingSongList<Content: View>: View {
     @State private var previousVisible = false
     @State private var previousRequest = 0
     @State private var pagingPrevious = false
-    @State private var userScrollGeneration = 0
     private var currentID: Int? { model.playback.state?.currentTrackId }
     var body: some View {
         ScrollViewReader { proxy in
-            positionedList(observedList(pagedList(proxy)), proxy: proxy)
+            positionedList(observedList(pagedList), proxy: proxy)
         }
     }
     private var songList: some View {
@@ -481,7 +480,7 @@ struct FollowingSongList<Content: View>: View {
             if phase == .interacting || phase == .tracking { suspendFollowing() }
         }
     }
-    private func pagedList(_ proxy: ScrollViewProxy) -> some View {
+    private var pagedList: some View {
         songList
             .task(id: previousRequest) {
                 guard previousRequest > 0, manuallyScrolled, previousVisible,
@@ -489,16 +488,11 @@ struct FollowingSongList<Content: View>: View {
                 pagingPrevious = true
                 previousVisible = false
                 defer { pagingPrevious = false }
-                let scrollGeneration = userScrollGeneration
-                let anchor = browser.trackRows.first.map { "song-\($0.id)" }
-                    ?? browser.entries.first.map { "entry-\($0.identity)" }
+                // Native List applies the insertion using stable row identities.
+                // Do not issue scrollTo while its collection-view snapshot is
+                // changing: the old index path can already be invalid, and a
+                // forced top anchor would override an ongoing user drag.
                 await browser.load(query: query, previous: true)
-                guard !Task.isCancelled, browser.error == nil,
-                      scrollGeneration == userScrollGeneration, let anchor else { return }
-                // The list owns this task: removing the paging sentinel cannot
-                // cancel restoration. A later user drag always wins.
-                proxy.scrollTo(anchor, anchor: .top)
-                await Task.yield()
             }
             .onChange(of: browser.loading) { if !browser.loading { requestPrevious() } }
     }
@@ -535,12 +529,10 @@ struct FollowingSongList<Content: View>: View {
             }
     }
     private func cancelPrevious() {
-        userScrollGeneration += 1
         manuallyScrolled = false
         previousRequest += 1
     }
     private func suspendFollowing() {
-        userScrollGeneration += 1
         following = false
         manuallyScrolled = true
         requestPrevious()
