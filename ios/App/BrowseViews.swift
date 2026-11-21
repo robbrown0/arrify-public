@@ -39,7 +39,8 @@ struct BrowseScreen: View {
                         }
                     } else if error == nil { ProgressView("Loading Browse…") }
                 }.padding(16)
-            }.navigationTitle("Browse").refreshable { await load(); await loadChart() }
+            }.scrollBounceBehavior(.always, axes: .vertical)
+                .navigationTitle("Browse").refreshable { await load(); await loadChart() }
                 .task { await load() }
                 .task(id: chartRequestKey) { await loadChart() }
         }

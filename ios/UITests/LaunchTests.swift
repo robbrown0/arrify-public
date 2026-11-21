@@ -42,12 +42,18 @@ final class LaunchTests: XCTestCase {
             }
         }
         let list = app.collectionViews.firstMatch
+        let retry = app.buttons["Retry"]
+        func retryFullyVisible() -> Bool {
+            guard retry.exists else { return false }
+            let frame = retry.frame
+            return !frame.isEmpty && list.frame.contains(frame)
+        }
         for _ in 0..<35 {
-            if app.buttons["Retry"].isHittable { break }
+            if retryFullyVisible() { break }
             list.swipeUp()
         }
-        XCTAssertTrue(app.buttons["Retry"].isHittable, "Reaching the boundary must request the next page")
-        app.buttons["Retry"].tap()
+        XCTAssertTrue(retryFullyVisible(), "Reaching the boundary must show the next-page retry")
+        retry.tap()
         let next = row(51)
         XCTAssertTrue(next.waitForExistence(timeout: 10), "Retry must resume the failed page, not reset to page one")
         let last = row(120)
