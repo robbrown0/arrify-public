@@ -883,9 +883,10 @@ actor CallResumeTransitionTransport: HTTPTransport {
                         transitionIds.append(id)
                         if id == lastTransition { return try state() }
                     }
-                    if (value["expected_current"] as? Int) != current ||
-                        (value["expected_revision"] as? Int) != revision ||
-                        (value["owner_epoch"] as? Int) != 1 {
+                    let expectedCurrent = value["expected_current"] as? Int
+                    let expectedRevision = value["expected_revision"] as? Int
+                    let expectedEpoch = value["owner_epoch"] as? Int
+                    if expectedCurrent != current || expectedRevision != revision || expectedEpoch != 1 {
                         return HTTPResult(status: 409, data: Data("{\"error\":{\"code\":\"playback_changed\",\"message\":\"Playback changed\"}}".utf8))
                     }
                     if rejectedTransitions { return HTTPResult(status: 409, data: Data("{\"error\":{\"code\":\"playback_changed\",\"message\":\"Output changed\"}}".utf8)) }
