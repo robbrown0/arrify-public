@@ -134,6 +134,20 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertTrue(player.player.currentItem === last, "Intermediate acknowledgements must never reload older songs")
     }
 
+    @MainActor func testUncachedNextDoesNotWaitForStatePreflight() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.holdStateRequests()
+        let next = Task { await player.send("next") }
+        for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        let sent = await transport.nextWaiting
+        XCTAssertTrue(sent, "A blocked state GET must not delay an owner skip command")
+        await transport.releaseStateRequests()
+        for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        await transport.releaseNext()
+        await next.value
+    }
+
     @MainActor func testRapidCachedSkipIsCoalescedUntilPlaybackProgress() async throws {
         let (player, transport) = try await fixture(cachedNext: true, windowSize: 4)
         defer { player.stop() }

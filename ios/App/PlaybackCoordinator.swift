@@ -664,9 +664,17 @@ import Network
         }
         let generation = sessionGeneration
         do {
-            PlaybackDiagnostics.event("command-state-start")
-            let fresh = try await api.state()
-            PlaybackDiagnostics.event("command-state-ready")
+            let fresh: PlaybackState
+            if navigation, ownsOutput, let known = state {
+                // Next/Previous already carry revision and song fences. The server
+                // validates those atomically; an extra GET only adds a round trip.
+                fresh = known
+                PlaybackDiagnostics.event("command-state-local")
+            } else {
+                PlaybackDiagnostics.event("command-state-start")
+                fresh = try await api.state()
+                PlaybackDiagnostics.event("command-state-ready")
+            }
             guard generation == sessionGeneration else { return }
             state = PlaybackState.merging(fresh, into: state)
             if navigation && (state?.currentTrackId != tapTrack || state?.playId != tapPlay) {
