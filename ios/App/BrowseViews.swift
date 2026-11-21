@@ -180,7 +180,7 @@ struct BrowseChartView: View {
                                 if recent { Text("Chart #\(item.rank)").font(.caption).foregroundStyle(.secondary) }
                             }
                         }.padding(.vertical, 4)
-                            .overlay(alignment: .bottom) { Divider().offset(y: 8) }
+                            .overlay(alignment: .bottom) { Rectangle().fill(Color.secondary.opacity(0.2)).frame(height: 0.5).offset(y: 8) }
                     }
                     if chart.items.isEmpty { Text("No recent releases in this chart. Try another genre or the full Top 40.").foregroundStyle(.secondary) }
                 }
