@@ -127,6 +127,7 @@ import Network
     private var progressVerifiedKey: String?
     private var mediaWindow: [Int: MediaItem] = [:]
     private var resumeCheckpoint: Double?
+    private var endedRetryAfter: TimeInterval?
     private var recoveryRetryAfter: TimeInterval?
     private var recoveryUsed = false
     private var recoveryStableSince: TimeInterval?
@@ -239,6 +240,7 @@ import Network
                     // track would replay it from an old heartbeat cursor.
                     owner.player.pause()
                     owner.message = "Could not confirm the next song. Tap Next to retry."
+                    owner.endedRetryAfter = ProcessInfo.processInfo.systemUptime + 15
                 }
                 owner.endedInFlight = false; owner.finishBackgroundTransition(); owner.startReadAhead()
                 if owner.liveUpdatePending { await owner.reconcile(report: false) }
@@ -465,6 +467,7 @@ import Network
         player.pause(); player.removeAllItems(); queuedTracks = [:]
         artworkPrefetchTask?.cancel(); artworkPrefetchTask = nil
         artworkTask?.cancel(); artworkTask = nil; artwork = nil; receiverArtwork = nil; systemArtwork = nil
+        endedRetryAfter = nil
         loadedKey = nil; completedKey = nil; desiredKey = nil; state = nil; track = nil; position = 0; duration = 0; busy = false
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         nowPlayingGate = NowPlayingUpdateGate()
@@ -540,6 +543,7 @@ import Network
             connectionFailures = 0; connectionInterrupted = false
             serverConnection = await api.connection()
             resumeRecoveryAfterConnection()
+            resumeEndedAfterConnection()
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
             guard generation == sessionGeneration, !Task.isCancelled else { return }
             connectionFailures += 1
@@ -845,6 +849,7 @@ import Network
         }
         let key = "\(id):\(state.ownerEpoch):\(state.playId)"
         if desiredKey != key {
+            endedRetryAfter = nil
             cancelRecovery(); resumeCheckpoint = nil; playbackFailed = false; recoveryUsed = false; resetProgressClock()
         }
         if desiredKey != key, endedInFlight, profile == loadedProfile, queuedEpoch == state.ownerEpoch,
@@ -932,6 +937,23 @@ import Network
               permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true) else { return }
         recoveryUsed = false
         recoverServerRoute()
+    }
+    func resumeEndedAfterConnection(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        guard let retryAfter = endedRetryAfter, now >= retryAfter, !endedInFlight, !commandInFlight,
+              loadedKey != nil, loadedKey == completedKey, cachedTransitions.isEmpty, cachedSyncTask == nil,
+              !cachedReconcileRequired,
+              permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true) else { return }
+        endedRetryAfter = now + 15
+        if advanceCachedSuccessor() { synchronizeCachedTransitions(); return }
+        endedInFlight = true
+        let generation = sessionGeneration
+        transitionTask = backgroundTasks.begin("Finish song transition") { [weak self] in self?.finishBackgroundTransition() }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.send("next", automatic: true)
+            guard self.sessionGeneration == generation else { return }
+            self.endedInFlight = false; self.finishBackgroundTransition()
+        }
     }
     private func remember(_ manifest: Manifest) {
         mediaWindow = Dictionary(manifest.items.map { ($0.trackId, $0) }, uniquingKeysWith: { first, _ in first })
@@ -1176,6 +1198,7 @@ import Network
             self.publishNowPlaying()
         }
         let key = "\(id):\(after.ownerEpoch):\(after.playId)"
+        endedRetryAfter = nil
         desiredKey = key; loadedKey = key; completedKey = nil; seekIntent = after.seekIntent
         position = 0; duration = 0; busy = false; playbackFailed = false; recoveryUsed = false
         resetProgressClock(); message = nil

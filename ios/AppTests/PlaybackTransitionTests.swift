@@ -510,6 +510,26 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(player.state?.currentTrackId, 2)
     }
 
+    @MainActor func testEndedTrackContinuesAfterConnectionReturnsWithoutManualNext() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.failTransitions(true)
+        let first = try XCTUnwrap(player.player.currentItem)
+        player.player.pause()
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: first)
+        for _ in 0..<500 where player.message != "Could not confirm the next song. Tap Next to retry." {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(player.player.rate, 0)
+        XCTAssertTrue(player.player.currentItem === first)
+        await transport.allowTransitionsImmediately()
+        await transport.failTransitions(false)
+        player.resumeEndedAfterConnection(now: ProcessInfo.processInfo.systemUptime + 20)
+        for _ in 0..<200 where player.state?.currentTrackId != 2 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(player.state?.currentTrackId, 2)
+        XCTAssertFalse(player.player.currentItem === first)
+    }
+
     @MainActor func testInterruptionReportSurvivesOverlappingPoll() async throws {
         let (player, transport) = try await fixture()
         defer { player.stop() }
