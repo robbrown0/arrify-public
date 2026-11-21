@@ -84,7 +84,9 @@ final class NowPlayingArtworkTests: XCTestCase {
         await transport.setOwner(coordinator.deviceId)
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         await coordinator.reconcile()
-        for _ in 0..<40 where coordinator.artwork == nil {
+        // Ownership restoration must not autoplay; artwork decoding/disk I/O is
+        // asynchronous and is not a two-second performance contract on CI.
+        for _ in 0..<200 where coordinator.artwork == nil {
             try await Task.sleep(for: .milliseconds(50))
         }
         XCTAssertFalse(coordinator.player.allowsExternalPlayback)
