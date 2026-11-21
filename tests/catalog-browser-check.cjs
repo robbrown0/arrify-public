@@ -10,7 +10,7 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
   window.cards=rows=>'<div class="card-grid">'+rows.map(x=>'<article>'+x.name+'</article>').join('')+'</div>';
   window.empty=(x,y)=>'<p>'+x+'</p>';window.playActions=()=>'<button>Play</button>';window.syncCollectionButton=()=>{};
   window.api=async path=>{calls.push(path);const q=new URL('https://fixture.invalid'+path).searchParams;
-   const term=q.get('q'),offset=Number(q.get('offset'));if(term==='old')await new Promise(r=>setTimeout(r,400));
+   const term=q.get('q');if(term==='unavailable')throw Error('Arrify is briefly unavailable. Try again in a moment.');const offset=Number(q.get('offset'));if(term==='old')await new Promise(r=>setTimeout(r,400));
    if(offset===50&&!window.retried){window.retried=true;throw Error('transient')}
    return {revision:'v1',total:term?1:51,next_offset:term||offset?null:50,items:Array.from({length:term||offset?1:50},(_,i)=>({id:i+offset,title:term||'Song '+(i+offset),name:term||'Album '+(i+offset),track_count:1,artist:'Fixture artist',album:'Fixture album',artist_id:'artist',album_id:'album',quality:'Lossless'}))};
   };
@@ -33,6 +33,7 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  await p.locator('#catalog-count').filter({hasText:'51'}).waitFor();await p.locator('#catalog-more').scrollIntoViewIfNeeded();await p.locator('#catalog-more button').waitFor({state:'visible'});await p.locator('#catalog-more button').click();
  await p.waitForFunction(()=>document.querySelectorAll('#catalog-results tbody tr').length===51);
  assert.ok(await p.evaluate(()=>calls.some(x=>x.includes('offset=50')&&x.includes('revision=v1'))));
+ await p.locator('#catalog-query').fill('unavailable');await p.waitForTimeout(350);assert.equal(await p.locator('#catalog-count').textContent(),'');assert.match(await p.locator('#catalog-more span').textContent(),/briefly unavailable/);
  await p.evaluate(()=>{pager.dispose();document.querySelector('#content').replaceChildren()});assert.equal(await p.locator('#search').isVisible(),true);
  console.log('PASS: scoped Songs/Albums/Artists search, sort, stale responses, revision paging retry, responsive controls');
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});

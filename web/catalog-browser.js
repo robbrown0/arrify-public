@@ -16,7 +16,7 @@ function mountCatalogBrowser(view, epoch) {
  function playbackContext(){if(view==='songs')context={source:{kind:'catalog',id:JSON.stringify(options())}}}
  async function load(reset=false){
   if(!valid()||(!reset&&(busy||offset===null)))return;
-  if(reset){generation++;offset=0;revision=null;rows=[];results.replaceChildren();root.querySelector('#catalog-actions').replaceChildren();playbackContext()}
+  if(reset){generation++;offset=0;revision=null;rows=[];root.querySelector('#catalog-count').textContent='';results.replaceChildren();root.querySelector('#catalog-actions').replaceChildren();playbackContext()}
   const ticket=generation;busy=true;failed=false;retry.hidden=true;status.textContent='Loading '+view+'…';more.hidden=false;more.setAttribute('aria-busy','true');
   const params=new URLSearchParams({...options(),kind:view==='songs'?'tracks':view,limit:'50',offset:String(offset)});if(revision)params.set('revision',revision);
   try{
@@ -28,7 +28,7 @@ function mountCatalogBrowser(view, epoch) {
    if(view==='songs')root.querySelector('#catalog-actions').innerHTML=playActions(page.total);
    if(!rows.length)results.innerHTML=empty('No matching '+view,'Try a different search.');
    syncCollectionButton();more.hidden=offset===null;status.textContent='More music loads as you scroll.';
-  }catch(error){if(valid()&&ticket===generation){failed=true;status.textContent=error.status===409?'The library changed. Refresh this list to continue.':'Couldn’t load '+view+'.';retry.textContent=error.status===409?'Refresh list':'Retry';retry.dataset.reset=String(error.status===409);retry.hidden=false}}
+  }catch(error){if(valid()&&ticket===generation){failed=true;status.textContent=error.status===409?'The library changed. Refresh this list to continue.':(error.message||'Couldn’t load '+view+'.');retry.textContent=error.status===409?'Refresh list':'Retry';retry.dataset.reset=String(error.status===409);retry.hidden=false}}
   finally{if(valid()&&ticket===generation){busy=false;more.removeAttribute('aria-busy');observer?.unobserve(more);if(offset!==null&&!failed)observer?.observe(more)}}
  }
  query.oninput=()=>{syncSort();clearTimeout(timer);generation++;timer=setTimeout(()=>load(true),250)};
