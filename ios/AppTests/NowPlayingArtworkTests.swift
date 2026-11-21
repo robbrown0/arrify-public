@@ -640,14 +640,24 @@ final class PlaybackDiagnosticsTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let writer = DiagnosticWriter(directory: directory)
         writer.monitor(enabled: true)
+        // Export is a queue barrier: start the timer before blocking the main thread.
+        _ = try await writer.export()
         // Deliberately block only this test process, below the system watchdog limit.
-        blockMainThreadForDiagnosticTest()
+        blockMainThreadForDiagnosticTest(directory: directory)
         writer.monitor(enabled: false)
         let export = try await writer.export()
         XCTAssertTrue(try String(contentsOf: export, encoding: .utf8).contains("main-unresponsive"))
         await writer.clear()
     }
-    @MainActor private func blockMainThreadForDiagnosticTest() { Thread.sleep(forTimeInterval: 5.5) }
+    @MainActor private func blockMainThreadForDiagnosticTest(directory: URL) {
+        XCTAssertTrue(Thread.isMainThread)
+        let deadline = ProcessInfo.processInfo.systemUptime + 10
+        let log = directory.appendingPathComponent("current.txt")
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if (try? String(contentsOf: log, encoding: .utf8))?.contains("main-unresponsive") == true { return }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+    }
 
     @MainActor func testRealLocalAudioAdvancesWithDiagnosticRecording() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
