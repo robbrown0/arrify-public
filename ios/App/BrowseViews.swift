@@ -1,11 +1,18 @@
 import SwiftUI
 import ArrifyCore
 
+private struct BrowseCategoryDestination: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let decade: Bool
+}
+
 struct BrowseScreen: View {
     let model: AppModel
     @State private var overview: BrowseOverview?
     @State private var error: String?
     @State private var section = "All"
+    @State private var categoryDestination: BrowseCategoryDestination?
     @State private var chartGenre = "overall"
     @State private var chart: BrowseChart?
     @State private var chartError: String?
@@ -14,7 +21,7 @@ struct BrowseScreen: View {
     private var chartRequestKey: String { section + ":" + chartGenre }
     var body: some View {
         NavigationStack {
-            ScrollView {
+            List {
                 VStack(alignment: .leading, spacing: 24) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack { ForEach(["All", "What’s New", "What’s Hot", "Decades", "Genres"], id: \.self) { name in
@@ -39,10 +46,17 @@ struct BrowseScreen: View {
                         }
                     } else if error == nil { ProgressView("Loading Browse…") }
                 }.padding(16)
-            }.scrollBounceBehavior(.always, axes: .vertical)
+                    .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
+            }.listStyle(.plain).scrollContentBackground(.hidden)
                 .navigationTitle("Browse").refreshable { await load(); await loadChart() }
                 .task { await load() }
                 .task(id: chartRequestKey) { await loadChart() }
+                .navigationDestination(item: $categoryDestination) { destination in
+                    BrowseCategoryView(model: model, title: destination.title,
+                        initial: BrowseFilters(genre: destination.decade ? "" : destination.id,
+                                               decade: destination.decade ? destination.id : ""))
+                        .id(destination)
+                }
         }
     }
     private func loadChart() async {
@@ -69,7 +83,7 @@ struct BrowseScreen: View {
             Text(title).font(.title2.bold())
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 12)], spacing: 12) {
                 ForEach(Array(values.enumerated()), id: \.element.id) { index, item in
-                    NavigationLink { BrowseCategoryView(model: model, title: item.name, initial: BrowseFilters(genre: decade ? "" : item.id, decade: decade ? item.id : "")) } label: {
+                    Button { categoryDestination = BrowseCategoryDestination(id: item.id, title: item.name, decade: decade) } label: {
                         VStack(alignment: .leading, spacing: 12) { Text(item.name).font(.headline); Text("\(item.count) songs").font(.subheadline); Spacer(); Image(systemName: decade ? "clock" : "music.note").font(.title) }
                             .frame(maxWidth: .infinity, minHeight: 110, alignment: .leading).padding()
                             .background([Color.teal, .purple, .blue, .orange, .pink, .indigo][index % 6].opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
