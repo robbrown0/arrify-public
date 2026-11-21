@@ -24,6 +24,7 @@ actor UITestTransport: HTTPTransport {
     private var playlists: [[String: Any]] = ProcessInfo.processInfo.environment["ARRIFY_UI_PERSONAL_PLAYLIST"] == "1"
         ? [["id": "1", "kind": "playlists", "name": "Rain", "subtitle": "", "section": "personal", "track_count": 2]] : []
     private var favoriteIds: Set<Int> = []
+    private var catalogFailures: Set<String> = []
     private let album = #"{"id":"aaaaaaaaaaaaaaaaaaaaaaaa","kind":"albums","name":"M!ssundaztood","subtitle":"P!nk","section":"","artwork":null,"track_count":2}"#
     private let station = #"{"id":"sirius-80son8","kind":"channels","name":"80s on 8","subtitle":"","section":"channels","artwork":null,"track_count":2}"#
     private let mix = #"{"id":"mood-feel-good","kind":"collections","name":"Feel Good Favorites","subtitle":"Familiar favorites","section":"moods","artwork":null,"track_count":2}"#
@@ -32,6 +33,33 @@ actor UITestTransport: HTTPTransport {
         let path = request.url!.path
         let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func parameter(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
+        if ProcessInfo.processInfo.environment["ARRIFY_UI_CATALOG_PAGING"] == "1",
+           path.hasSuffix("/catalog") || path.hasSuffix("/library/detail") {
+            let kind = parameter("kind").isEmpty ? "tracks" : parameter("kind")
+            let offset = Int(parameter("offset")) ?? 0
+            let detail = path.hasSuffix("/library/detail")
+            let artist = parameter("artist")
+            let failureKey = kind + ":" + artist + ":" + String(offset)
+            if !detail && artist.isEmpty && (offset == 0 || offset == 50), !catalogFailures.contains(failureKey) {
+                catalogFailures.insert(failureKey)
+                return HTTPResult(status: 429, data: Data(#"{"error":{"code":"rate_limited","message":"Retry shortly."}}"#.utf8))
+            }
+            func entry(_ id: Int, kind: String) -> [String: Any] {
+                ["id": String(id), "kind": kind, "name": String(format: "Catalog %@ %03d", kind == "artists" ? "Artist" : "Album", id),
+                 "subtitle": "Fixture artist", "section": "", "track_count": 1]
+            }
+            if detail {
+                let id = Int(parameter("id")) ?? 1
+                let row: [String: Any] = ["id": id, "title": "Album song \(id)", "artist": "Fixture artist", "album": "Album \(id)"]
+                return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: ["item": entry(id, kind: kind), "items": [row], "total": 1, "offset": 0, "revision": "paging", "next_offset": NSNull()]))
+            }
+            let ids = artist.isEmpty ? Array((offset + 1)...min(120, offset + 50)) : [Int(artist) ?? 1]
+            let items: [[String: Any]] = ids.map { id in
+                kind == "tracks" ? ["id": id, "title": String(format: "Catalog Song %03d", id), "artist": "Fixture artist", "album": "Album"] : entry(id, kind: kind)
+            }
+            let total = artist.isEmpty ? 120 : 1
+            return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: ["items": items, "total": total, "offset": offset, "revision": "paging", "next_offset": offset + items.count < total ? offset + items.count as Any : NSNull()]))
+        }
         if ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_LIST"] == "1" {
             if path.hasSuffix("/catalog") && parameter("kind").isEmpty {
                 let offset = Int(parameter("around")).map { max(0, $0 - 26) } ?? Int(parameter("offset")) ?? 0

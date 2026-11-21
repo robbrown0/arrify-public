@@ -58,6 +58,11 @@ import CryptoKit
     var error: String?
     var updated: Date?
     private var revision: String?
+    private var failedRequest: (query: String, more: Bool, previous: Bool, around: Int?, letter: String?)?
+    func retry() async {
+        guard let request = failedRequest, !loading else { return }
+        await load(query: request.query, more: request.more, previous: request.previous, around: request.around, letter: request.letter)
+    }
     private var generation = UUID()
     init(api: APIClient, kind: String = "tracks", source: LibrarySource? = nil) { self.api = api; self.kind = kind; self.source = source }
     func refreshPopularity(query: String = "") async {
@@ -86,7 +91,7 @@ import CryptoKit
     }
     func resetSearch() {
         generation = UUID(); tracks = []; entries = []; nextOffset = nil; previousOffset = nil; startOffset = 0
-        revision = nil; updated = nil; error = nil; loading = true
+        revision = nil; updated = nil; error = nil; failedRequest = nil; loading = true
     }
     func load(query: String = "", more: Bool = false, previous: Bool = false, around: Int? = nil, letter: String? = nil) async {
         if letter != nil { navigationRevision += 1 }
@@ -128,11 +133,16 @@ import CryptoKit
                 total = page.total; revision = page.revision
                 if !previous { nextOffset = page.nextOffset }
             }
-            error = nil; updated = Date()
+            error = nil; failedRequest = nil; updated = Date()
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch APIError.rejected(_, let code, _) where code == "catalog_changed" && (more || previous) {
             guard generation == token else { return }
             await load(query: query)
-        } catch { if generation == token { self.error = error.localizedDescription } }
+        } catch {
+            if generation == token {
+                failedRequest = (query, more, previous, around, letter)
+                self.error = error.localizedDescription
+            }
+        }
     }
 }
 

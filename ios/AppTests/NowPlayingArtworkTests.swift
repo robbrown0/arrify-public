@@ -809,3 +809,52 @@ private actor WindowCatalogTransport: HTTPTransport {
         return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: result))
     }
 }
+
+extension NowPlayingArtworkTests {
+    @MainActor func testCatalogRetryKeepsFailedPageForEveryKind() async throws {
+        for kind in ["tracks", "albums", "artists"] {
+            let transport = FailedPageTransport()
+            let api = APIClient(transport: transport, store: UITestStore())
+            try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+            let browser = LibraryBrowser(api: api, kind: kind)
+            await browser.load(query: "kept")
+            XCTAssertNotNil(browser.error)
+            await browser.retry()
+            XCTAssertNil(browser.error)
+            XCTAssertEqual(browser.nextOffset, 1)
+            await browser.load(query: "kept", more: true)
+            XCTAssertNotNil(browser.error)
+            XCTAssertEqual(kind == "tracks" ? browser.tracks.count : browser.entries.count, 1)
+            await browser.retry()
+            XCTAssertNil(browser.error)
+            XCTAssertNil(browser.nextOffset)
+            XCTAssertEqual(kind == "tracks" ? browser.tracks.count : browser.entries.count, 2)
+            let requests = await transport.offsets
+            XCTAssertEqual(requests, [0, 0, 1, 1])
+            let queries = await transport.queries
+            XCTAssertEqual(queries, Array(repeating: "kept", count: 4))
+        }
+    }
+}
+private actor FailedPageTransport: HTTPTransport {
+    private let fallback = UITestTransport()
+    private var failed: Set<Int> = []
+    private(set) var offsets: [Int] = []
+    private(set) var queries: [String] = []
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        guard request.url!.path.hasSuffix("/catalog") else { return try await fallback.send(request) }
+        let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems ?? []
+        func value(_ name: String) -> String? { query.first { $0.name == name }?.value }
+        let offset = Int(value("offset") ?? "0") ?? 0
+        offsets.append(offset); queries.append(value("q") ?? "")
+        if failed.insert(offset).inserted {
+            return HTTPResult(status: 429, data: Data(#"{"error":{"code":"rate_limited","message":"Retry shortly."}}"#.utf8))
+        }
+        let kind = value("kind") ?? "tracks"
+        let row: [String: Any] = kind == "tracks"
+            ? ["id": offset + 1, "title": "Song", "artist": "Artist", "album": "Album"]
+            : ["id": String(offset + 1), "kind": kind, "name": "Item", "subtitle": "", "section": "", "track_count": 1]
+        let page: [String: Any] = ["items": [row], "total": 2, "offset": offset, "revision": "fixture", "next_offset": offset == 0 ? 1 as Any : NSNull()]
+        return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: page))
+    }
+}
