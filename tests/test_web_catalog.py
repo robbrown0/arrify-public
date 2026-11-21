@@ -56,3 +56,9 @@ class WebCatalogHTTPTests(unittest.TestCase):
         code,raw,_ = self.call('/api/v1/listening', {'action':'play','device_id':'a'*32,
             'expected_revision':shuffled['listening']['revision'],'source':source,'track_id':999},cookie=self.hostcookie,csrf=self.a.csrf(self.session))
         self.assertEqual(code,409,raw)
+
+    def test_catalog_script_is_publicly_served(self):
+        code,raw,headers=self.call('/catalog-browser.js')
+        self.assertEqual(code,200)
+        self.assertIn(b'function mountCatalogBrowser',raw)
+        self.assertIn('javascript',headers['Content-Type'])
