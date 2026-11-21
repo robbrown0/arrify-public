@@ -22,7 +22,7 @@ struct BrowseScreen: View {
     var body: some View {
         NavigationStack {
             List {
-                VStack(alignment: .leading, spacing: 24) {
+                Group {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack { ForEach(["All", "What’s New", "What’s Hot", "Decades", "Genres"], id: \.self) { name in
                             Button(name) { section = name }.buttonStyle(.bordered).tint(section == name ? .green : .gray)
@@ -45,8 +45,8 @@ struct BrowseScreen: View {
                             if section != "Decades" { categories("Genres", overview.genres, decade: false) }
                         }
                     } else if error == nil { ProgressView("Loading Browse…") }
-                }.padding(16)
-                    .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
+                }.listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowSeparator(.hidden).listRowBackground(Color.clear)
             }.listStyle(.plain).buttonStyle(.borderless).scrollContentBackground(.hidden)
                 .navigationTitle("Browse").refreshable { await load(); await loadChart() }
                 .task { await load() }
@@ -156,9 +156,10 @@ struct BrowseChartView: View {
     let chart: BrowseChart?
     let error: String?
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        Group {
             Text(recent ? "What’s New" : "What’s Hot — Top 40").font(.title2.bold())
             Picker("Chart genre", selection: $genre) { Text("All genres · U.S.").tag("overall"); ForEach(genres.filter { $0.id != "other" }) { Text($0.name).tag($0.id) } }
+                .pickerStyle(.menu).labelsHidden()
             if let error { Text(error).foregroundStyle(.orange) }
             if let chart {
                 DisclosureGroup("Chart info") {
@@ -180,8 +181,8 @@ struct BrowseChartView: View {
                                 else { BrowseRequestRow(model: model, entry: item, genre: genre) }
                                 if recent { Text("Chart #\(item.rank)").font(.caption).foregroundStyle(.secondary) }
                             }
-                        }
-                        Divider()
+                        }.padding(.vertical, 4)
+                            .overlay(alignment: .bottom) { Divider().offset(y: 8) }
                     }
                     if chart.items.isEmpty { Text("No recent releases in this chart. Try another genre or the full Top 40.").foregroundStyle(.secondary) }
                 }
