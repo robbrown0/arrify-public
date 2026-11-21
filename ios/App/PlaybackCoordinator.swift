@@ -1178,7 +1178,8 @@ import Network
             self.failPreparation()
         }
         let item: AVPlayerItem
-        if let next = player.items().dropFirst().first, queuedTracks[ObjectIdentifier(next)] == id {
+        if let next = player.items().dropFirst().first, queuedTracks[ObjectIdentifier(next)] == id,
+           next.status != .failed, (next.asset as? AVURLAsset)?.url == file {
             if let old = player.currentItem { queuedTracks.removeValue(forKey: ObjectIdentifier(old)) }
             player.advanceToNextItem(); item = next
         } else {
