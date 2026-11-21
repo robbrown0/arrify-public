@@ -33,6 +33,15 @@ import Network
     private var queuedTracks: [ObjectIdentifier: Int] = [:]
     private var queuedEpoch = -1
     private var transitionTask: UIBackgroundTaskIdentifier = .invalid
+    // A bounded journal of already audible cached transitions. A response lost
+    // after commit retries the same transition ID, never a new Next command.
+    private var cachedTransitions: [PlaybackCommand] = []
+    private var cachedSyncTask: Task<Void, Never>?
+    private var cachedSyncGeneration = UUID()
+    private var cachedReconcileRequired = false
+    private var cachedMetadata: [Int: Track] = [:]
+    private var offlinePausePending = false
+    private var cachedSyncAfter = 0.0
     private var nowPlayingGate = NowPlayingUpdateGate()
     private var artworkRevision = 0
     private var receiverMetadataKey: String?
@@ -205,6 +214,11 @@ import Network
             owner.completedKey = owner.loadedKey
             owner.endedTransitionID = UUID().uuidString.lowercased()
             owner.endedInFlight = true
+            if owner.advanceCachedSuccessor() {
+                owner.endedInFlight = false
+                owner.synchronizeCachedTransitions()
+                return
+            }
             PlaybackDiagnostics.event("track-ended awaiting-server-confirmation")
             owner.transitionTask = owner.backgroundTasks.begin("Finish song transition") { [weak owner] in
                 owner?.finishBackgroundTransition()
@@ -365,6 +379,10 @@ import Network
     }
     /// Wall-clock observation still runs when AVPlayer's media-time observer stops.
     func checkPlaybackProgress(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        if now >= cachedSyncAfter, !cachedTransitions.isEmpty || cachedReconcileRequired {
+            cachedSyncAfter = now + 3
+            synchronizeCachedTransitions()
+        }
         guard ownsOutput, loadedKey != nil, loadedKey != completedKey, !busy, !recovering, !playbackFailed,
               permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true),
               let item = player.currentItem else { resetProgressClock(); return }
@@ -437,6 +455,8 @@ import Network
         localPeer.stop()
         outputRefreshTask?.cancel(); outputRefreshTask = nil; routeDiagnostics.clear()
         selectionToken = UUID(); selectingTrackID = nil
+        cachedSyncGeneration = UUID(); cachedSyncTask?.cancel(); cachedSyncTask = nil
+        cachedTransitions = []; cachedReconcileRequired = false; cachedMetadata = [:]; offlinePausePending = false
         sessionGeneration = UUID(); permission = PlaybackPermission(); connectionInterrupted = false; connectionFailures = 0; message = nil
         aheadTask?.cancel(); aheadTask = nil; aheadCompletedRevision = nil; cache.reset(); finishBackgroundTransition()
         eventsTask?.cancel(); eventsTask = nil; liveUpdatePending = false; reportPending = false; liveConnected = false
@@ -463,6 +483,9 @@ import Network
         await reconcile(report: false)
     }
     func reconcile(report: Bool = true) async {
+        if !cachedTransitions.isEmpty || cachedSyncTask != nil || cachedReconcileRequired {
+            synchronizeCachedTransitions(); return
+        }
         guard !endedInFlight, !commandInFlight else { return }
         if reconciling {
             // Preserve interruption/heartbeat reports that overlap an older poll.
@@ -578,6 +601,13 @@ import Network
             PlaybackDiagnostics.event("navigation-coalesced")
             return
         }
+        if action == "next", !automatic, !commandInFlight, advanceCachedSuccessor(automatic: false) {
+            controlRevision += 1
+            navigationPending = true; navigationStarted = ProcessInfo.processInfo.systemUptime
+            navigationTarget = desiredKey
+            synchronizeCachedTransitions()
+            return
+        }
         let tapTrack = state?.currentTrackId
         let tapPlay = state?.playId
         if navigation {
@@ -597,6 +627,16 @@ import Network
             if commandInFlight { pendingPause = true; return }
         } else if !automatic && ["play", "resume", "takeover", "next", "previous", "queue_jump", "seek"].contains(action) {
             cancelRecovery()
+        }
+        if !cachedTransitions.isEmpty || cachedSyncTask != nil || cachedReconcileRequired {
+            synchronizeCachedTransitions()
+            await cachedSyncTask?.value
+            guard requestGeneration == sessionGeneration else { return }
+            if !cachedTransitions.isEmpty || cachedReconcileRequired {
+                if action == "pause" { offlinePausePending = true }
+                message = action == "pause" ? "Paused. Waiting to sync." : "Playing downloaded music. This control needs a connection."
+                finishNavigation(); return
+            }
         }
         while commandInFlight {
             do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
@@ -858,7 +898,7 @@ import Network
         message = "This song could not be prepared. Tap Retry or choose another song."
     }
     private func cancelRecovery() {
-        if recovering { playbackFailed = true; player.currentItem?.cancelPendingSeeks() }
+        if recovering { PlaybackDiagnostics.event("recovery-cancelled"); playbackFailed = true; player.currentItem?.cancelPendingSeeks() }
         recoveryGeneration = UUID()
         routeRecoveryTask?.cancel(); routeRecoveryTask = nil
         recoveryDeadlineTask?.cancel(); recoveryDeadlineTask = nil
@@ -913,7 +953,7 @@ import Network
                 do {
                     try Task.checkCancellation()
                     let url: URL
-                    if attempt == 0, let media = self.mediaWindow[id], let local = self.cache.file(for: media) {
+                    if let media = self.mediaWindow[id], let local = self.cache.file(for: media) {
                         url = local
                     } else if attempt == 2, let retryURL, !retryURL.isFileURL,
                               let alternate = try await self.api.alternateMediaURL(retryURL) {
@@ -1072,6 +1112,119 @@ import Network
             try await Task.sleep(for: .milliseconds(50))
         }
     }
+    /// Called at end-of-item, before any network await. Only completed local
+    /// files from the last authorized window qualify; unknown songs never do.
+    private func advanceCachedSuccessor(automatic: Bool = true) -> Bool {
+        guard cachedTransitions.count < 3, !cachedReconcileRequired, !busy, !recovering, let before = state,
+              permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: before.playing, mediaReady: true),
+              ownsOutput, profile == loadedProfile, let id = before.upcomingTrackIds?.first,
+              let media = mediaWindow[id], let file = cache.file(for: media),
+              let after = before.advancingCached(to: id, automatic: automatic) else { return false }
+        var command = PlaybackCommand(action: "next", deviceId: deviceId)
+        command.ownerEpoch = before.ownerEpoch; command.expectedRevision = before.queueRevision
+        command.expectedCurrent = before.currentTrackId; command.expectedNext = id
+        command.automatic = automatic; command.transitionId = automatic ? (endedTransitionID ?? UUID().uuidString.lowercased()) : UUID().uuidString.lowercased()
+        cachedTransitions.append(command)
+        cancelPreparation(); cancelRecovery()
+        let token = preparationGeneration
+        preparationBackgroundTask = backgroundTasks.begin("Prepare current song") { [weak self] in
+            guard let self, self.preparationGeneration == token else { return }
+            self.failPreparation()
+        }
+        let item: AVPlayerItem
+        if let next = player.items().dropFirst().first, queuedTracks[ObjectIdentifier(next)] == id {
+            if let old = player.currentItem { queuedTracks.removeValue(forKey: ObjectIdentifier(old)) }
+            player.advanceToNextItem(); item = next
+        } else {
+            item = AVPlayerItem(url: file)
+            player.removeAllItems(); queuedTracks = [ObjectIdentifier(item): id]; player.insert(item, after: nil)
+        }
+        state = after
+        track = cachedMetadata[id]
+        artwork = nil; receiverArtwork = nil; systemArtwork = nil
+        artworkTask?.cancel()
+        artworkTask = Task { [weak self] in
+            guard let self else { return }
+            let decoded = await self.artworkStore.image("/api/v1/artwork/\(id)", pixels: 2048)
+            guard !Task.isCancelled, self.state?.currentTrackId == id else { return }
+            self.artwork = decoded; self.artworkRevision += 1
+            self.systemArtwork = decoded.map { NowPlayingArtwork.make(image: $0) }
+            self.publishNowPlaying()
+        }
+        let key = "\(id):\(after.ownerEpoch):\(after.playId)"
+        desiredKey = key; loadedKey = key; completedKey = nil; seekIntent = after.seekIntent
+        position = 0; duration = 0; busy = false; playbackFailed = false; recoveryUsed = false
+        resetProgressClock(); message = nil
+        // Audio session remains active through a natural transition.
+        player.play(); publishNowPlaying()
+        prepareTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if self.preparationGeneration == token { self.finishPreparationBackgroundTask() } }
+            do { try await self.waitForPreparedPlayback(key: key, token: token, started: ProcessInfo.processInfo.systemUptime) }
+            catch {
+                guard !Task.isCancelled, self.preparationGeneration == token else { return }
+                self.failPreparation()
+            }
+        }
+        PlaybackDiagnostics.event("cached-transition local pending=\(cachedTransitions.count)")
+        return true
+    }
+
+    private func synchronizeCachedTransitions() {
+        guard cachedSyncTask == nil, !cachedTransitions.isEmpty || cachedReconcileRequired else { return }
+        let generation = cachedSyncGeneration
+        cachedSyncTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.cachedSyncGeneration == generation {
+                    self.cachedSyncTask = nil
+                    if self.cachedTransitions.isEmpty, !self.cachedReconcileRequired, self.offlinePausePending {
+                        self.offlinePausePending = false
+                        Task { [weak self] in await self?.send("pause") }
+                    }
+                }
+            }
+            do {
+                while let command = self.cachedTransitions.first {
+                    let ack = try await self.api.command(command)
+                    guard self.cachedSyncGeneration == generation, !Task.isCancelled else { return }
+                    // A lost acknowledgement can return a newer remote change.
+                    guard ack.ownerDeviceId == self.deviceId, ack.ownerEpoch == command.ownerEpoch,
+                          ack.queueRevision == (command.expectedRevision ?? -1) + 1,
+                          ack.currentTrackId == command.expectedNext, ack.playing else {
+                        self.cachedTransitions = []; self.cachedReconcileRequired = false
+                        self.state = nil; await self.apply(ack)
+                        PlaybackDiagnostics.event("cached-transition superseded")
+                        return
+                    }
+                    self.cachedTransitions.removeFirst()
+                    if self.cachedTransitions.isEmpty {
+                        // Same play ID: applying the acknowledgement must not seek,
+                        // replay, or replace the local item already making progress.
+                        await self.apply(ack)
+                    }
+                    PlaybackDiagnostics.event("cached-transition acknowledged")
+                }
+                if self.cachedReconcileRequired {
+                    let fresh = try await self.api.state()
+                    guard self.cachedSyncGeneration == generation, !Task.isCancelled else { return }
+                    self.cachedReconcileRequired = false; self.state = nil
+                    await self.apply(fresh)
+                }
+                self.startReadAhead()
+            } catch {
+                guard self.cachedSyncGeneration == generation, !Task.isCancelled else { return }
+                if case APIError.rejected(let status, _, _) = error, [401, 403, 409].contains(status) {
+                    self.cachedTransitions = []; self.cachedReconcileRequired = true
+                    self.player.pause(); self.permission.userPause(); self.cancelRecovery()
+                    PlaybackDiagnostics.event("cached-transition rejected status=\(status)")
+                } else {
+                    PlaybackDiagnostics.event("cached-transition sync-deferred")
+                }
+            }
+        }
+    }
+
     private func synchronizeQueuedItems() {
         let expected = state?.repeatMode == "one" ? [] : Array((state?.upcomingTrackIds ?? []).prefix(3))
         let queued = Array(player.items().dropFirst())
@@ -1096,6 +1249,7 @@ import Network
         }
     }
     private func startReadAhead() {
+        guard cachedTransitions.isEmpty, !cachedReconcileRequired else { return }
         guard aheadTask == nil, !endedInFlight, !recovering, !playbackFailed, !busy, ownsOutput, permission.enabled, state?.playing == true, aheadCompletedRevision != state?.queueRevision else { return }
         let generation = UUID(); aheadGeneration = generation
         aheadTask = Task { [weak self] in
@@ -1112,10 +1266,16 @@ import Network
                         for item in manifest.items.prefix(4) {
                             guard !Task.isCancelled else { return }
                             _ = await artworkStore.image("/api/v1/artwork/\(item.trackId)", pixels: 2048)
+                            if let metadata = try? await self.api.track(item.trackId), !Task.isCancelled {
+                                self.cachedMetadata[item.trackId] = metadata
+                            }
                         }
                     }
                     // Download current first. Do not open duplicate remote players for future songs.
-                    await self.cache.fill(manifest, api: self.api)
+                    await self.cache.fill(manifest, api: self.api) { [weak self] in
+                        guard let self, !Task.isCancelled else { return }
+                        try? await self.enqueueAhead(manifest)
+                    }
                     guard !Task.isCancelled, !self.endedInFlight, self.state?.ownerEpoch == manifest.ownerEpoch, self.state?.queueRevision == manifest.queueRevision else { return }
                     // Replace only future items with verified local files; never interrupt current audio.
                     for queued in self.player.items().dropFirst() {

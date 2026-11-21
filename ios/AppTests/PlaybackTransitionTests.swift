@@ -5,7 +5,7 @@ import ArrifyCore
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
-    @MainActor func fixture(onHistoryRecorded: (@MainActor () -> Void)? = nil, audioSession: any PlaybackAudioSession = UITestAudioSession(), backgroundTasks: any PlaybackBackgroundTasks = SystemPlaybackBackgroundTasks()) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
+    @MainActor func fixture(cachedNext: Bool = false, onHistoryRecorded: (@MainActor () -> Void)? = nil, audioSession: any PlaybackAudioSession = UITestAudioSession(), backgroundTasks: any PlaybackBackgroundTasks = SystemPlaybackBackgroundTasks()) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
         let transport = CallResumeTransitionTransport()
         let api = APIClient(transport: transport, store: UITestStore())
         try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
@@ -47,7 +47,85 @@ final class PlaybackTransitionTests: XCTestCase {
             XCTFail(detail)
             throw NSError(domain: "PlaybackFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: detail])
         }
+        // Existing network-path regressions exercise an unverified successor.
+        // Cached continuity is covered separately with cachedNext: true.
+        if !cachedNext { cache.invalidate(2) }
         return (coordinator, transport)
+    }
+
+    @MainActor func testCachedEndAdvancesBeforeAcknowledgementAndDelayedPollCannotRewind() async throws {
+        let (player, transport) = try await fixture(cachedNext: true)
+        defer { player.stop() }
+        let first = try XCTUnwrap(player.player.currentItem)
+        let next = player.player.items()[1]
+        await transport.failTransitions(true)
+        player.player.pause()
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: first)
+        for _ in 0..<100 where player.state?.currentTrackId != 2 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(player.state?.currentTrackId, 2)
+        XCTAssertTrue(player.player.currentItem === next)
+        await player.reconcile()
+        XCTAssertEqual(player.state?.currentTrackId, 2, "Offline reconciliation must not restore the ended song")
+        for _ in 0..<100 where !player.isPlaying { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(player.isPlaying)
+    }
+
+    @MainActor func testCachedManualSkipIsImmediateAndPauseWinsWhileOffline() async throws {
+        let (player, transport) = try await fixture(cachedNext: true)
+        defer { player.stop() }
+        await transport.failTransitions(true)
+        let next = player.player.items()[1]
+        let start = ProcessInfo.processInfo.systemUptime
+        await player.send("next")
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 0.5)
+        XCTAssertTrue(player.player.currentItem === next)
+        await player.send("pause")
+        XCTAssertEqual(player.player.rate, 0)
+        XCTAssertFalse(player.showsPauseControl)
+    }
+
+    @MainActor func testLostCachedTransitionAcknowledgementRetriesSameIDWithoutReplay() async throws {
+        let (player, transport) = try await fixture(cachedNext: true)
+        defer { player.stop() }
+        await transport.dropNextAcknowledgement()
+        let first = try XCTUnwrap(player.player.currentItem)
+        let next = player.player.items()[1]
+        player.player.pause()
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: first)
+        for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        await transport.releaseNext()
+        for _ in 0..<100 { if await transport.nextCommits == 1 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(100))
+        await player.reconcile()
+        for _ in 0..<100 { if await transport.nextRequests >= 2 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        let commits = await transport.nextCommits
+        let ids = await transport.transitionIds
+        XCTAssertEqual(commits, 1)
+        XCTAssertEqual(Set(ids).count, 1)
+        XCTAssertTrue(player.player.currentItem === next)
+        XCTAssertEqual(player.state?.currentTrackId, 2)
+    }
+
+    @MainActor func testCancelledReadAheadKeepsUsefulDownloadAndReportsItReady() async throws {
+        let api = APIClient(transport: UITestTransport(), store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let data = Data("""
+        {"owner_epoch":1,"queue_revision":1,"retry_after_seconds":1,"items":[{"track_id":1,"profile":"original","state":"ready","size_bytes":4,"mime_type":"audio/mpeg","url":"/api/v1/stream/1"}]}
+        """.utf8)
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let manifest = try decoder.decode(Manifest.self, from: data)
+        let probe = CacheDownloadProbe()
+        let cache = AudioCache(download: { try await probe.download($0) })
+        defer { cache.reset() }
+        let first = Task { await cache.fill(manifest, api: api) }
+        for _ in 0..<100 { if await probe.calls == 1 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        first.cancel()
+        await cache.fill(manifest, api: api)
+        await first.value
+        let calls = await probe.calls
+        XCTAssertEqual(calls, 1, "A queue refresh must adopt, not restart, a useful download")
+        XCTAssertNotNil(cache.file(for: manifest.items[0]))
+        XCTAssertEqual(cache.items.first?.state, "ready")
     }
 
     @MainActor func testSelectionFeedbackAppearsBeforeSlowStateRequestAndClearsOnStop() async throws {
@@ -642,6 +720,11 @@ actor CallResumeTransitionTransport: HTTPTransport {
     private var failingMedia = false
     func failMedia(_ value: Bool) { failingMedia = value }
     private var failingTransitions = false
+    private var loseNextAck = false
+    private var lastTransition: String?
+    private(set) var nextCommits = 0
+    private(set) var transitionIds: [String] = []
+    func dropNextAcknowledgement() { loseNextAck = true }
     func failTransitions(_ value: Bool) { failingTransitions = value }
     private var pendingPoll: CheckedContinuation<Void, Never>?
     private var pendingNext: CheckedContinuation<Void, Never>?
@@ -671,10 +754,16 @@ actor CallResumeTransitionTransport: HTTPTransport {
                 let action = value["action"] as? String
                 if action == "next" {
                     nextRequests += 1
+                    if let id = value["transition_id"] as? String {
+                        transitionIds.append(id)
+                        if id == lastTransition { return try state() }
+                    }
                     if failingTransitions { throw URLError(.networkConnectionLost) }
                     nextWaiting = true
                     await withCheckedContinuation { pendingNext = $0 }
-                    current = 2; revision += 1
+                    current = 2; revision += 1; nextCommits += 1
+                    lastTransition = value["transition_id"] as? String
+                    if loseNextAck { loseNextAck = false; throw URLError(.networkConnectionLost) }
                 } else if action == "pause" { playing = false; revision += 1 }
                 else if action == "heartbeat" {
                     observations.append(Observation(current: value["expected_current"] as? Int ?? 0,
@@ -779,4 +868,15 @@ private final class ActivationCalls: @unchecked Sendable {
         if hold { waiting = true; await withCheckedContinuation { continuation = $0 } }
     }
     func release() { hold = false; continuation?.resume(); continuation = nil }
+}
+
+private actor CacheDownloadProbe {
+    private(set) var calls = 0
+    func download(_ url: URL) async throws -> (URL, URLResponse) {
+        calls += 1
+        try await Task.sleep(for: .milliseconds(200))
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data([1, 2, 3, 4]).write(to: file)
+        return (file, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
 }

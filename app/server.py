@@ -336,6 +336,11 @@ class Handler(BaseHTTPRequestHandler):
             image=Path('/spectrum-channel/artwork')/(logo[1]+'.webp')
             if not image.is_file():raise Error(404,'Artwork not available.')
             return self.send(200,image.read_bytes(),'image/webp',{'Cache-Control':'private, max-age=86400'})
+        if path=='/api/v1/catalog':
+            from .native_catalog import page
+            from .native_auth import NativeError
+            try:return self.json(page(lib,self.path,a,uid))
+            except NativeError as exc:raise Error(exc.status,exc.message) from None
         if path=='/api/v1/stations':
             from .channels import PersonalStations
             a.rate_limit(('stations-read',uid),90,60)
@@ -579,6 +584,11 @@ class Handler(BaseHTTPRequestHandler):
             self.server.listening.logout(uid,data,a.digest(self.token()[0]))
             return self.json({'ok':True},extra={'Set-Cookie':self.cookie('',True)})
         if path=='/api/v1/listening':
+            if data.get('action')=='play' and 'source' in data:
+                from .native_library import expand_playback
+                from .native_auth import NativeError
+                try:data=expand_playback(lib,a,uid,data)
+                except NativeError as exc:raise Error(exc.status,exc.message) from None
             result=self.server.listening.command(uid,data)
             return self.listening_result(result,user)
         if path=='/api/v1/player':
