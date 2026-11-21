@@ -63,7 +63,7 @@ jobs:
           if [ "$NAVIGATION_ONLY" = "true" ]; then
             ONLY_TESTS=(-only-testing:ArrifyUITests/LaunchTests/testBrowseCategoriesChartsAndRequests -only-testing:ArrifyUITests/LaunchTests/testEmptyPlayerAndSingleTapAlbumActions -only-testing:ArrifyUITests/LaunchTests/testArtistsSelectDistinctItemsAndVisiblePageRetry)
           fi
-          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath "build/${DEVICE_FAMILY}Tests.xcresult" "${ONLY_TESTS[@]}" CODE_SIGNING_ALLOWED=NO test
+          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath "build/${DEVICE_FAMILY}Tests.xcresult" "${ONLY_TESTS[@]}" CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test
       - name: Export test screenshots
         if: always()
         env:

@@ -5,6 +5,11 @@ import ArrifyCore
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        executionTimeAllowance = 60
+    }
+
     @MainActor func fixture(cachedNext: Bool = false, windowSize: Int = 2, onHistoryRecorded: (@MainActor () -> Void)? = nil, audioSession: any PlaybackAudioSession = UITestAudioSession(), backgroundTasks: any PlaybackBackgroundTasks = SystemPlaybackBackgroundTasks()) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
         let transport = CallResumeTransitionTransport()
         let api = APIClient(transport: transport, store: UITestStore())
@@ -50,7 +55,13 @@ final class PlaybackTransitionTests: XCTestCase {
         }
         // Existing network-path regressions exercise an unverified successor.
         // Cached continuity is covered separately with cachedNext: true.
-        if !cachedNext { cache.invalidate(2) }
+        if !cachedNext {
+            let queuedURL = (coordinator.player.items()[1].asset as? AVURLAsset)?.url
+            cache.invalidate(2)
+            // Exercise server-confirmed navigation without invalidating the audio
+            // already queued in AVPlayer. AVPlayer may open that file lazily.
+            if let queuedURL { try bytes.write(to: queuedURL) }
+        }
         return (coordinator, transport)
     }
 
@@ -401,8 +412,15 @@ final class PlaybackTransitionTests: XCTestCase {
         for _ in 0..<500 where player.reconciling { try await Task.sleep(for: .milliseconds(10)) }
         await transport.advanceExternally()
         await player.send("next")
+        // Owner navigation sends immediately; the server rejects stale song/revision
+        // fences, then reconciliation adopts the external advance without skipping.
+        for _ in 0..<200 where player.state?.currentTrackId != 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         let requests = await transport.nextRequests
-        XCTAssertEqual(requests, 0)
+        let commits = await transport.nextCommits
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(commits, 0)
         XCTAssertEqual(player.state?.currentTrackId, 2)
         XCTAssertFalse(player.navigationPending)
     }
@@ -864,6 +882,11 @@ actor CallResumeTransitionTransport: HTTPTransport {
                     if let id = value["transition_id"] as? String {
                         transitionIds.append(id)
                         if id == lastTransition { return try state() }
+                    }
+                    if (value["expected_current"] as? Int) != current ||
+                        (value["expected_revision"] as? Int) != revision ||
+                        (value["owner_epoch"] as? Int) != 1 {
+                        return HTTPResult(status: 409, data: Data("{\"error\":{\"code\":\"playback_changed\",\"message\":\"Playback changed\"}}".utf8))
                     }
                     if rejectedTransitions { return HTTPResult(status: 409, data: Data("{\"error\":{\"code\":\"playback_changed\",\"message\":\"Output changed\"}}".utf8)) }
                     if failingTransitions { throw URLError(.networkConnectionLost) }

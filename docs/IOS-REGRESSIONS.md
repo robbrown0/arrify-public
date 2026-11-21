@@ -302,3 +302,7 @@ Additional resilience qualification: three consecutive downloaded skips must sta
 Owner Next/Previous commands use the existing revision/song fences directly instead of a redundant state GET. `testUncachedNextDoesNotWaitForStatePreflight` holds state reads and requires the skip command to reach the server anyway. Uncached audio still needs media data; the cached path is the only offline/near-instant guarantee.
 
 After the downloaded window is exhausted, a successful control connection can retry a previously failed end transition after a cooldown, using the same transition ID and ended-song fence. `testEndedTrackContinuesAfterConnectionReturnsWithoutManualNext` preserves silence instead of replaying the finished song, then requires automatic continuation after reconnection.
+
+### Qualification hang prevention (2026-11-21)
+
+Owner Next no longer does a state preflight. The stale-current regression now uses a fake server with the production revision/current/owner fences: it verifies one rejected attempt, zero committed skips, and reconciliation to the externally advanced track. Server-path fixtures retain queued audio bytes after removing verified cache eligibility, avoiding nondeterministic lazy AVPlayer file-open failures. Playback transition tests have a 60-second execution allowance; Apple workflows enable per-test timeouts so a leaked continuation produces a test failure instead of consuming the entire job. All existing app/UI tests remain enabled.
