@@ -379,3 +379,8 @@ dialog#party-host-display{position:fixed;inset:0;margin:0;width:100vw;max-width:
  :root .main-wrap:has(.catalog-browser) .topbar .breadcrumbs,
  :root .main-wrap:has(.catalog-browser) .topbar .account{grid-row:1}
 }
+
+@media(max-width:760px){
+ .catalog-browser:focus-within{min-height:100dvh}
+ .catalog-controls input{font-size:16px;scroll-margin-top:80px;scroll-margin-bottom:100px}
+}
