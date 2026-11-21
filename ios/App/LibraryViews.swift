@@ -363,7 +363,10 @@ struct BrowserScreen: View {
         .task(id: requestKey) {
             let isOpening = opening
             opening = false
-            if !isOpening, loadedRequestKey == requestKey, let updated = browser.updated, Date().timeIntervalSince(updated) < 30 { return }
+            // Returning from a sheet is not a new catalog request. Replacing
+            // rows here can dismiss a native menu or reset manual browsing.
+            // New queries/navigation and explicit pull-to-refresh still load.
+            if !isOpening, loadedRequestKey == requestKey, browser.updated != nil { return }
             loadedRequestKey = nil
             if !isOpening { browser.navigationRevision += 1 }
             browser.sort = effectiveSort; browser.likedOnly = likedOnly; browser.artist = artist

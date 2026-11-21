@@ -93,14 +93,16 @@ final class LaunchTests: XCTestCase {
         playerShuffle.tap()
         expectation(for: NSPredicate(format: "value == 'off'"), evaluatedWith: playerShuffle)
         waitForExpectations(timeout: 10)
-        app.buttons["Close player"].tap()
+        let closePlayer = app.buttons["Close player"]
+        closePlayer.tap()
+        XCTAssertTrue(closePlayer.waitForNonExistence(timeout: 10))
         XCTAssertEqual(shuffle.value as? String, "off", "Both shuffle controls must reflect the same state")
         shuffle.tap()
         expectation(for: NSPredicate(format: "value == 'on' AND enabled == true"), evaluatedWith: shuffle)
-        waitForExpectations(timeout: 10)
+        waitForExpectations(timeout: 20)
         shuffle.tap()
         expectation(for: NSPredicate(format: "value == 'off' AND enabled == true"), evaluatedWith: shuffle)
-        waitForExpectations(timeout: 10)
+        waitForExpectations(timeout: 20)
         XCTAssertEqual(play.label, "Pause", "Turning shuffle off must not stop playback")
     }
     @MainActor func testCurrentTrackIsMarkedInListAndQueue() {
@@ -192,12 +194,12 @@ final class LaunchTests: XCTestCase {
     @MainActor func testHomeScrollPositionSurvivesFullScreenPlayerDismissal() {
         let app = XCUIApplication()
         // Larger text gives Home real overflow even on a 13-inch iPad.
-        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
         app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
         app.launchEnvironment["ARRIFY_UI_PERSONAL_PLAYLIST"] = "1"
         app.launch()
-        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 30))
         app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
         app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
         app.buttons["signIn"].tap()

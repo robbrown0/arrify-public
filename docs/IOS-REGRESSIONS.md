@@ -221,3 +221,11 @@ Build 34 is authorized for internal testers and external beta users. Run both co
   Verify displacement geometrically: UIKit may report a clipped heading as hittable.
   Avoid rotating this test, which produced inconsistent simulator window geometry
   in the following test. Keep both player-dismissal and exact-position assertions.
+
+- A sheet return with the same loaded catalog query must preserve rows regardless
+  of elapsed time. Fresh navigation, query changes and pull-to-refresh still load.
+  The menu stability test remains enabled to catch native-menu dismissal.
+- Hosted-runner evidence showed Shuffle already highlighted while accessibility
+  snapshots took 5–15 seconds. The test now waits for player dismissal and allows
+  20 seconds for the two post-dismissal state observations; state, enabled, tap,
+  and continued-playback assertions are unchanged. This is not a user latency target.
