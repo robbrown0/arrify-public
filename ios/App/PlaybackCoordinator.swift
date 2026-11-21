@@ -182,8 +182,8 @@ import Network
         // Route music through AVAudioSession; external item playback can open
         // a video-style receiver surface even when the source contains only audio.
         player.allowsExternalPlayback = false
-        // Buffered successors must not become audible before the server confirms
-        // the transition. A delayed/failed command must never play B then reload A.
+        // End events choose either verified local continuity or a server-confirmed
+        // transition; automatic AVQueuePlayer advancement would bypass that fence.
         player.actionAtItemEnd = .pause
         configureSystemControls()
         installTimeObserver()
@@ -914,6 +914,8 @@ import Network
     }
     private func remember(_ manifest: Manifest) {
         mediaWindow = Dictionary(manifest.items.map { ($0.trackId, $0) }, uniquingKeysWith: { first, _ in first })
+        cachedMetadata = cachedMetadata.filter { mediaWindow[$0.key] != nil }
+        for item in manifest.items { if let track = item.track { cachedMetadata[item.trackId] = track } }
     }
     /// This only replaces the authorized current item; it never advances the queue.
     func recoverServerRoute() {

@@ -129,6 +129,7 @@ public struct PlaybackCommand: Encodable, Sendable {
     public init(action: String, deviceId: String) { self.action = action; self.deviceId = deviceId }
 }
 public struct MediaItem: Codable, Sendable {
+    public var track: Track?
     public let trackId: Int
     public let sourceRevision: String?
     public let profile: String

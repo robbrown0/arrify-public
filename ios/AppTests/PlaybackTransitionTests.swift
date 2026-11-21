@@ -5,7 +5,7 @@ import ArrifyCore
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
-    @MainActor func fixture(cachedNext: Bool = false, onHistoryRecorded: (@MainActor () -> Void)? = nil, audioSession: any PlaybackAudioSession = UITestAudioSession(), backgroundTasks: any PlaybackBackgroundTasks = SystemPlaybackBackgroundTasks()) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
+    @MainActor func fixture(cachedNext: Bool = false, windowSize: Int = 2, onHistoryRecorded: (@MainActor () -> Void)? = nil, audioSession: any PlaybackAudioSession = UITestAudioSession(), backgroundTasks: any PlaybackBackgroundTasks = SystemPlaybackBackgroundTasks()) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
         let transport = CallResumeTransitionTransport()
         let api = APIClient(transport: transport, store: UITestStore())
         try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
@@ -25,6 +25,7 @@ final class PlaybackTransitionTests: XCTestCase {
         let bytes = try Data(contentsOf: audio)
         try FileManager.default.removeItem(at: audio)
         await transport.setSize(bytes.count)
+        await transport.setWindowSize(windowSize)
         let cache = AudioCache(download: { url in
             let target = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
             try bytes.write(to: target)
@@ -36,11 +37,11 @@ final class PlaybackTransitionTests: XCTestCase {
         let manifest = try await api.manifest(deviceId: coordinator.deviceId, epoch: 1, profile: "original")
         await cache.fill(manifest, api: api)
         await coordinator.send("resume")
-        for _ in 0..<500 where coordinator.player.items().count < 2 || !coordinator.isPlaying {
+        for _ in 0..<500 where coordinator.player.items().count < windowSize || !coordinator.isPlaying {
             if coordinator.playbackFailed { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        guard coordinator.player.items().count == 2, coordinator.isPlaying else {
+        guard coordinator.player.items().count == windowSize, coordinator.isPlaying else {
             let error = coordinator.player.currentItem?.error as NSError?
             let detail = "Fixture failed to play: \(error?.domain ?? "none") / \(error?.code ?? 0), \(coordinator.message ?? "no message")"
             coordinator.stop()
@@ -104,6 +105,51 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(Set(ids).count, 1)
         XCTAssertTrue(player.player.currentItem === next)
         XCTAssertEqual(player.state?.currentTrackId, 2)
+    }
+
+    @MainActor func testThreeCachedSkipsContinueOfflineAndReconcileInOrder() async throws {
+        let (player, transport) = try await fixture(cachedNext: true, windowSize: 4)
+        defer { player.stop() }
+        await transport.failTransitions(true)
+        for expected in 2...4 {
+            for _ in 0..<200 where player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
+            let start = ProcessInfo.processInfo.systemUptime
+            await player.send("next")
+            XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 0.5)
+            XCTAssertEqual(player.state?.currentTrackId, expected)
+            await player.reconcile()
+            XCTAssertEqual(player.state?.currentTrackId, expected)
+        }
+        let last = player.player.currentItem
+        await transport.failTransitions(false)
+        await transport.allowTransitionsImmediately()
+        await player.reconcile()
+        for _ in 0..<200 { if await transport.nextCommits == 3 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        let commits = await transport.nextCommits
+        XCTAssertEqual(commits, 3)
+        XCTAssertEqual(player.state?.currentTrackId, 4)
+        XCTAssertTrue(player.player.currentItem === last, "Intermediate acknowledgements must never reload older songs")
+    }
+
+    @MainActor func testRapidCachedSkipIsCoalescedUntilPlaybackProgress() async throws {
+        let (player, transport) = try await fixture(cachedNext: true, windowSize: 4)
+        defer { player.stop() }
+        await transport.failTransitions(true)
+        await player.send("next")
+        await player.send("next")
+        XCTAssertEqual(player.state?.currentTrackId, 2)
+    }
+
+    @MainActor func testRejectedCachedTransitionStopsAndDoesNotReplayOldTrack() async throws {
+        let (player, transport) = try await fixture(cachedNext: true)
+        defer { player.stop() }
+        await transport.rejectTransitions()
+        await player.send("next")
+        for _ in 0..<100 where player.showsPauseControl { try await Task.sleep(for: .milliseconds(10)) }
+        await player.reconcile()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(player.player.rate, 0)
+        XCTAssertFalse(player.showsPauseControl)
     }
 
     @MainActor func testCancelledReadAheadKeepsUsefulDownloadAndReportsItReady() async throws {
@@ -698,6 +744,12 @@ actor CallResumeTransitionTransport: HTTPTransport {
     private var owner = ""
     private var size = 0
     private var current = 1
+    private var windowSize = 2
+    private var immediateTransitions = false
+    private var rejectedTransitions = false
+    func setWindowSize(_ value: Int) { windowSize = value }
+    func allowTransitionsImmediately() { immediateTransitions = true }
+    func rejectTransitions() { rejectedTransitions = true }
     private var positionSeconds = 0.0
     func setPosition(_ seconds: Double) { positionSeconds = seconds }
     private var revision = 1
@@ -742,7 +794,7 @@ actor CallResumeTransitionTransport: HTTPTransport {
             "server_time": revision, "queue_revision": revision, "owner_device_id": owner,
             "owner_epoch": 1, "intent": revision, "playing": playing, "observed": "playing",
             "seek_target_seconds": 0, "seek_intent": current, "play_id": current,
-            "upcoming_track_ids": current == 1 ? [2] : []
+            "upcoming_track_ids": current < windowSize ? Array((current + 1)...windowSize) : []
         ] as [String: Any]))
     }
     func send(_ request: URLRequest) async throws -> HTTPResult {
@@ -758,10 +810,11 @@ actor CallResumeTransitionTransport: HTTPTransport {
                         transitionIds.append(id)
                         if id == lastTransition { return try state() }
                     }
+                    if rejectedTransitions { return HTTPResult(status: 409, data: Data("{\"error\":{\"code\":\"playback_changed\",\"message\":\"Output changed\"}}".utf8)) }
                     if failingTransitions { throw URLError(.networkConnectionLost) }
                     nextWaiting = true
-                    await withCheckedContinuation { pendingNext = $0 }
-                    current = 2; revision += 1; nextCommits += 1
+                    if !immediateTransitions { await withCheckedContinuation { pendingNext = $0 } }
+                    current = value["expected_next"] as? Int ?? 2; revision += 1; nextCommits += 1
                     lastTransition = value["transition_id"] as? String
                     if loseNextAck { loseNextAck = false; throw URLError(.networkConnectionLost) }
                 } else if action == "pause" { playing = false; revision += 1 }
@@ -790,7 +843,7 @@ actor CallResumeTransitionTransport: HTTPTransport {
             if failingMedia { throw URLError(.notConnectedToInternet) }
             return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: [
                 "owner_epoch": 1, "queue_revision": revision, "retry_after_seconds": 1,
-                "items": [1,2].map { ["track_id": $0, "profile": "original", "state": "ready",
+                "items": Array(1...windowSize).map { ["track_id": $0, "profile": "original", "state": "ready",
                     "url": "/api/v1/stream/\($0)", "mime_type": "audio/wav", "size_bytes": size, "source_revision": "fixture"] as [String: Any] }
             ] as [String: Any]))
         }
