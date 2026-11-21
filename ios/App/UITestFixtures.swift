@@ -125,7 +125,7 @@ actor UITestTransport: HTTPTransport {
                 return HTTPResult(status:200, data: try JSONSerialization.data(withJSONObject: ["item":entry, "items":items, "total":items.count, "revision":"fixture", "next_offset":NSNull()]))
             }
             let personal = playlists.first.flatMap { try? JSONSerialization.data(withJSONObject: $0) }.flatMap { String(data: $0, encoding: .utf8) } ?? album
-            let item = parameter("kind") == "playlists" ? personal : parameter("kind") == "channels" ? station : parameter("kind") == "collections" ? mix : album
+            let item = parameter("kind") == "playlists" ? personal : parameter("kind") == "channels" ? station : parameter("kind") == "collections" ? mix : parameter("kind") == "artists" ? #"{"id":"bbbbbbbbbbbbbbbbbbbbbbbb","kind":"artists","name":"P!nk","subtitle":"","section":"","artwork":null,"track_count":2}"# : album
             value = "{\"item\":\(item),\"items\":\(songs),\"total\":2,\"revision\":\"fixture\",\"next_offset\":null}"
         } else if path.hasSuffix("catalog") {
             let text = parameter("q")
