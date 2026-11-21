@@ -61,6 +61,9 @@ final class PlaybackTransitionTests: XCTestCase {
             // Exercise server-confirmed navigation without invalidating the audio
             // already queued in AVPlayer. AVPlayer may open that file lazily.
             if let queuedURL { try bytes.write(to: queuedURL) }
+            // Simulate the download completing while the command is in flight.
+            // The tap must use the server path, but preparation needs real audio.
+            await transport.restoreAudioOnAcknowledgement { await cache.fill(manifest, api: api) }
         }
         return (coordinator, transport)
     }
@@ -251,7 +254,7 @@ final class PlaybackTransitionTests: XCTestCase {
         let assertions = RecordingBackgroundTasks()
         let session = DelayedActivationSession()
         let (player, transport) = try await fixture(audioSession: session, backgroundTasks: assertions)
-        defer { player.stop() }
+        defer { session.release(); player.stop() }
         let next = Task { await player.send("next") }
         for _ in 0..<500 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
         session.hold = true
@@ -853,6 +856,8 @@ actor CallResumeTransitionTransport: HTTPTransport {
     func failTransitions(_ value: Bool) { failingTransitions = value }
     private var pendingPoll: CheckedContinuation<Void, Never>?
     private var pendingNext: CheckedContinuation<Void, Never>?
+    private var restoreAudio: (@Sendable () async -> Void)?
+    func restoreAudioOnAcknowledgement(_ action: @escaping @Sendable () async -> Void) { restoreAudio = action }
     private(set) var pollWaiting = false
     private(set) var nextWaiting = false
     private(set) var observations: [Observation] = []
@@ -893,6 +898,7 @@ actor CallResumeTransitionTransport: HTTPTransport {
                     if failingTransitions { throw URLError(.networkConnectionLost) }
                     nextWaiting = true
                     if !immediateTransitions { await withCheckedContinuation { pendingNext = $0 } }
+                    await restoreAudio?()
                     current = value["expected_next"] as? Int ?? 2; revision += 1; nextCommits += 1
                     lastTransition = value["transition_id"] as? String
                     if loseNextAck { loseNextAck = false; throw URLError(.networkConnectionLost) }

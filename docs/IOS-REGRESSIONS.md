@@ -306,3 +306,5 @@ After the downloaded window is exhausted, a successful control connection can re
 ### Qualification hang prevention (2026-11-21)
 
 Owner Next no longer does a state preflight. The stale-current regression now uses a fake server with the production revision/current/owner fences: it verifies one rejected attempt, zero committed skips, and reconciliation to the externally advanced track. Server-path fixtures retain queued audio bytes after removing verified cache eligibility, avoiding nondeterministic lazy AVPlayer file-open failures. Playback transition tests have a 60-second execution allowance; Apple workflows enable per-test timeouts so a leaked continuation produces a test failure instead of consuming the entire job. All existing app/UI tests remain enabled.
+
+Playback app tests now run before the UI suite on both Apple workflows. This preserves every test while reporting playback failures before spending time on UI automation. The server-path fixture restores verified audio when its held command is acknowledged, modeling a download completing in flight; it does not stream a fake fixture URL. Both app and UI result bundles are retained.
