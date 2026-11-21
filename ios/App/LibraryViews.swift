@@ -306,7 +306,7 @@ struct BrowserScreen: View {
                                     Text(item.name).font(.headline).lineLimit(2)
                                     Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                                 }
-                            }.buttonStyle(.plain).id("entry-\(item.identity)")
+                            }.buttonStyle(.plain).accessibilityIdentifier("catalogEntry-\(item.identity)").id("entry-\(item.identity)")
                         }
                     }
                 }.listRowBackground(Color.clear)
@@ -316,6 +316,7 @@ struct BrowserScreen: View {
                         ForEach(section.rows, id: \.identity) { item in
                             Button { selectedEntry = item } label: { EntryRow(item: item, artwork: model.artwork) }
                                 .buttonStyle(.plain)
+                                .accessibilityIdentifier("catalogEntry-\(item.identity)")
                             .id("entry-\(item.identity)")
                         }
                     }

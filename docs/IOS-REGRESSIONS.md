@@ -230,3 +230,11 @@ Build 34 is authorized for internal testers and external beta users. Run both co
   snapshots took 5–15 seconds. The test now waits for player dismissal and allows
   20 seconds for the two post-dismissal state observations; state, enabled, tap,
   and continued-playback assertions are unchanged. This is not a user latency target.
+
+### Catalog paging accessibility selectors
+
+- Build 36 qualification found duplicate artist text labels: artwork placeholders
+  and row titles share the same name. Select stable catalog button identifiers,
+  not the first matching text, to test actual row visibility and navigation.
+- Retain initial failure, next-page retry, distinct destination, Back, and final
+  visible-row assertions on both devices. Attach final-page screenshots.

@@ -3,10 +3,10 @@ final class LaunchTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
-    @MainActor func testSongsInitialFailureAndVisiblePageRetry() { checkCatalogPaging("Songs", noun: "Song") }
-    @MainActor func testAlbumsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Albums", noun: "Album") }
-    @MainActor func testArtistsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Artists", noun: "Artist") }
-    @MainActor private func checkCatalogPaging(_ section: String, noun: String) {
+    @MainActor func testSongsInitialFailureAndVisiblePageRetry() { checkCatalogPaging("Songs") }
+    @MainActor func testAlbumsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Albums") }
+    @MainActor func testArtistsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Artists") }
+    @MainActor private func checkCatalogPaging(_ section: String) {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
         app.launchEnvironment["ARRIFY_UI_CATALOG_PAGING"] = "1"
@@ -19,18 +19,20 @@ final class LaunchTests: XCTestCase {
         app.buttons[section].firstMatch.tap()
         XCTAssertTrue(app.buttons["Retry"].waitForExistence(timeout: 10))
         app.buttons["Retry"].tap()
-        let first = app.staticTexts["Catalog \(noun) 001"].firstMatch
+        func row(_ id: Int) -> XCUIElement {
+            app.buttons[section == "Songs" ? "songRow-\(id)" : "catalogEntry-\(section.lowercased()):\(id)"]
+        }
+        let first = row(1)
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         // A prefetched footer must not drain the next page before the user scrolls.
         let quiet = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.buttons["Retry"].exists }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [quiet], timeout: 3), .timedOut)
         if section != "Songs" {
             for id in [1, 2] {
-                let label = String(format: "Catalog %@ %03d", noun, id)
-                XCTAssertTrue(app.staticTexts[label].firstMatch.isHittable)
-                app.staticTexts[label].firstMatch.tap()
+                XCTAssertTrue(row(id).isHittable)
+                row(id).tap()
                 if section == "Artists" {
-                    let album = app.staticTexts[String(format: "Catalog Album %03d", id)].firstMatch
+                    let album = app.buttons["catalogEntry-albums:\(id)"]
                     XCTAssertTrue(album.waitForExistence(timeout: 10)); album.tap()
                 }
                 XCTAssertTrue(app.staticTexts["Album song \(id)"].waitForExistence(timeout: 10), "Each selection must open its own album")
@@ -46,14 +48,16 @@ final class LaunchTests: XCTestCase {
         }
         XCTAssertTrue(app.buttons["Retry"].isHittable, "Reaching the boundary must request the next page")
         app.buttons["Retry"].tap()
-        let next = app.staticTexts["Catalog \(noun) 051"].firstMatch
+        let next = row(51)
         XCTAssertTrue(next.waitForExistence(timeout: 10), "Retry must resume the failed page, not reset to page one")
-        let last = app.staticTexts["Catalog \(noun) 120"].firstMatch
+        let last = row(120)
         for _ in 0..<55 {
-            if last.isHittable { break }
+            if last.exists && last.isHittable { break }
             list.swipeUp()
         }
         XCTAssertTrue(last.isHittable, "Continuous paging must reach the final item")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "\(section) final catalog page"; screenshot.lifetime = .keepAlways; add(screenshot)
         XCTAssertFalse(app.buttons["Retry"].exists)
     }
     @MainActor func testLongSongsListCentersCurrentAndManualBrowsingSuspendsFollowing() {
