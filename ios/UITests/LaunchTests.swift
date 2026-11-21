@@ -53,7 +53,9 @@ final class LaunchTests: XCTestCase {
             list.swipeUp()
         }
         XCTAssertTrue(retryFullyVisible(), "Reaching the boundary must show the next-page retry")
-        retry.tap()
+        // The frame is verified inside the list; avoid UIKit's transient invalid
+        // suggested activation point while the newly inserted footer settles.
+        retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let next = row(51)
         XCTAssertTrue(next.waitForExistence(timeout: 10), "Retry must resume the failed page, not reset to page one")
         let last = row(120)
