@@ -36,18 +36,32 @@ final class LaunchTests: XCTestCase {
                     XCTAssertTrue(album.waitForExistence(timeout: 10)); album.tap()
                 }
                 XCTAssertTrue(app.staticTexts["Album song \(id)"].waitForExistence(timeout: 10), "Each selection must open its own album")
-                app.navigationBars.buttons.firstMatch.tap()
-                if section == "Artists" { app.navigationBars.buttons.firstMatch.tap() }
+                let albumBar = app.navigationBars[String(format: "Catalog Album %03d", id)]
+                XCTAssertTrue(albumBar.waitForExistence(timeout: 5))
+                albumBar.buttons["BackButton"].tap()
+                if section == "Artists" {
+                    let artistBar = app.navigationBars[String(format: "Catalog Artist %03d", id)]
+                    XCTAssertTrue(artistBar.waitForExistence(timeout: 5))
+                    artistBar.buttons["BackButton"].tap()
+                }
                 XCTAssertTrue(first.waitForExistence(timeout: 5), "Back must return to the catalog without reopening a detail")
             }
         }
         let list = app.collectionViews.firstMatch
+        let retry = app.buttons["Retry"]
+        func retryFullyVisible() -> Bool {
+            guard retry.exists else { return false }
+            let frame = retry.frame
+            return !frame.isEmpty && list.frame.contains(frame)
+        }
         for _ in 0..<35 {
-            if app.buttons["Retry"].isHittable { break }
+            if retryFullyVisible() { break }
             list.swipeUp()
         }
-        XCTAssertTrue(app.buttons["Retry"].isHittable, "Reaching the boundary must request the next page")
-        app.buttons["Retry"].tap()
+        XCTAssertTrue(retryFullyVisible(), "Reaching the boundary must show the next-page retry")
+        // The frame is verified inside the list; avoid UIKit's transient invalid
+        // suggested activation point while the newly inserted footer settles.
+        retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let next = row(51)
         XCTAssertTrue(next.waitForExistence(timeout: 10), "Retry must resume the failed page, not reset to page one")
         let last = row(120)
@@ -347,7 +361,9 @@ final class LaunchTests: XCTestCase {
             let album = app.buttons["Go to album"]
             XCTAssertTrue(album.waitForExistence(timeout: 5)); album.tap()
             XCTAssertTrue(app.navigationBars["M!ssundaztood"].waitForExistence(timeout: 10))
+            assertFullWindowOnPad(app, title: "M!ssundaztood")
             app.buttons["Done"].tap()
+            XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5))
         }
         app.buttons["More options for Just Like a Pill"].tap()
         let original = app.buttons["Browse original album"]
@@ -361,7 +377,27 @@ final class LaunchTests: XCTestCase {
         original.tap()
         XCTAssertTrue(app.navigationBars["Original album"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
+        assertFullWindowOnPad(app, title: "Original album")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Original album from one tap"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5)); app.buttons["Close player"].tap()
+        app.buttons["Songs"].firstMatch.tap()
+        let menu = app.buttons["More options for Just Like a Pill"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        for (action, title) in [("Go to artist", "P!nk"), ("Go to album", "M!ssundaztood")] {
+            menu.tap(); app.buttons[action].tap()
+            XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 10))
+            assertFullWindowOnPad(app, title: title)
+            app.buttons["Done"].tap()
+            XCTAssertTrue(menu.waitForExistence(timeout: 5), "Done must return to the original song list")
+        }
+    }
+    @MainActor private func assertFullWindowOnPad(_ app: XCUIApplication, title: String) {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return }
+        let bar = app.navigationBars[title]
+        XCTAssertEqual(bar.frame.width, app.frame.width, accuracy: 4, "Music destination must fill the iPad window")
+        XCTAssertLessThan(bar.frame.minY - app.frame.minY, 100)
+        XCTAssertTrue(app.buttons["Done"].isHittable)
     }
 
     @MainActor func testSearchPopularityAndSongOptions() {
@@ -919,7 +955,9 @@ extension LaunchTests {
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
         app.segmentedControls.buttons["Albums"].tap()
         XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
-        app.navigationBars.buttons.firstMatch.tap()
+        let categoryBar = app.navigationBars["Pop"]
+        XCTAssertTrue(categoryBar.waitForExistence(timeout: 5))
+        categoryBar.buttons["BackButton"].tap()
         let hot = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "What’s Hot,")).firstMatch
         for _ in 0..<5 {
             if hot.exists && hot.isHittable { break }
@@ -927,6 +965,14 @@ extension LaunchTests {
         }
         XCTAssertTrue(hot.isHittable); hot.tap()
         XCTAssertTrue(app.staticTexts["Unavailable fixture song"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Refresh chart"].exists)
+        app.buttons["Chart info"].tap()
+        XCTAssertTrue(app.staticTexts["Fixture chart 1"].waitForExistence(timeout: 5))
+        let chartArea = app.staticTexts["Unavailable fixture song"].frame.midX / app.frame.width
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: chartArea, dy: 0.35))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: chartArea, dy: 0.8))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertTrue(app.staticTexts["Fixture chart 2"].waitForExistence(timeout: 10), "Pull to refresh must reload the active chart")
         app.buttons["Request"].tap()
         XCTAssertTrue(app.buttons["Requested"].waitForExistence(timeout: 10))
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Native Browse chart"; shot.lifetime = .keepAlways; add(shot)

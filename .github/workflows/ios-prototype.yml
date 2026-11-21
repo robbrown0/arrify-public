@@ -11,6 +11,10 @@ on:
         description: Rerun iPad qualification after a simulator infrastructure failure
         type: boolean
         default: false
+      navigation_refresh_only:
+        description: Targeted chart refresh, music destination, and catalog paging checks
+        type: boolean
+        default: false
       volume_alignment_only:
         description: Targeted iPad mini-player volume layout qualification
         type: boolean
@@ -49,11 +53,15 @@ jobs:
         env:
           DEVICE_FAMILY: ${{ matrix.device }}
           VOLUME_ONLY: ${{ inputs.volume_alignment_only }}
+          NAVIGATION_ONLY: ${{ inputs.navigation_refresh_only }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
           ONLY_TESTS=()
           if [ "$VOLUME_ONLY" = "true" ]; then
             ONLY_TESTS=(-only-testing:ArrifyAppTests/NowPlayingArtworkTests/testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testTabletVolumeUsesNativeHeightCenteredInControlRow -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible)
+          fi
+          if [ "$NAVIGATION_ONLY" = "true" ]; then
+            ONLY_TESTS=(-only-testing:ArrifyUITests/LaunchTests/testBrowseCategoriesChartsAndRequests -only-testing:ArrifyUITests/LaunchTests/testEmptyPlayerAndSingleTapAlbumActions -only-testing:ArrifyUITests/LaunchTests/testArtistsSelectDistinctItemsAndVisiblePageRetry)
           fi
           xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath "build/${DEVICE_FAMILY}Tests.xcresult" "${ONLY_TESTS[@]}" CODE_SIGNING_ALLOWED=NO test
       - name: Export test screenshots
