@@ -121,10 +121,13 @@ final class PlaybackTransitionTests: XCTestCase {
             XCTAssertEqual(player.state?.currentTrackId, expected)
         }
         let last = player.player.currentItem
-        await transport.failTransitions(false)
         await transport.allowTransitionsImmediately()
-        await player.reconcile()
-        for _ in 0..<200 { if await transport.nextCommits == 3 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        await transport.failTransitions(false)
+        for _ in 0..<200 {
+            await player.reconcile()
+            if await transport.nextCommits == 3 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         let commits = await transport.nextCommits
         XCTAssertEqual(commits, 3)
         XCTAssertEqual(player.state?.currentTrackId, 4)
@@ -585,6 +588,24 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertFalse(player.recovering)
         XCTAssertFalse(player.showsPauseControl)
         XCTAssertEqual(player.player.rate, 0)
+    }
+
+    @MainActor func testConnectionReturnRetriesExhaustedRecoveryButPausePreventsRestart() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.failMedia(true)
+        player.recoverServerRoute()
+        for _ in 0..<500 where !player.playbackFailed { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(player.playbackFailed)
+        player.resumeRecoveryAfterConnection()
+        XCTAssertFalse(player.recovering, "Retry cycles must be spaced out")
+        player.resumeRecoveryAfterConnection(now: ProcessInfo.processInfo.systemUptime + 20)
+        XCTAssertTrue(player.recovering, "A working connection should allow recovery without a user tap")
+        await player.send("pause")
+        player.resumeRecoveryAfterConnection(now: ProcessInfo.processInfo.systemUptime + 60)
+        XCTAssertFalse(player.recovering)
+        XCTAssertEqual(player.player.rate, 0)
+        XCTAssertFalse(player.showsPauseControl)
     }
 
     @MainActor func testPauseTakesEffectWhileNextCommandAwaitsServer() async throws {

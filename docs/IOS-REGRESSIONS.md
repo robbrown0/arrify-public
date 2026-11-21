@@ -296,3 +296,5 @@ A future shared streaming/cache data path could avoid downloading the active aud
 twice. An optional cellular AAC profile would reduce bandwidth needs; do not silently
 change a user's Original quality preference. Neither can guarantee playback after
 the downloaded window is exhausted during a sustained outage.
+
+Additional resilience qualification: three consecutive downloaded skips must stay local and reconcile in order; rapid repeated taps coalesce until actual playback progress; rejection stops local audio without replaying the old song. Exhausted current-song recovery may restart after a successful connection and a 15-second cooldown, but Pause and interruptions always prevent that restart. Manifest metadata accompanies the cached window so offline song titles do not depend on a separate request. Web Songs playback expands the complete filtered/sorted source beyond the visible page; Shuffle starts that source atomically.

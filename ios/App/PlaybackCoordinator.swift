@@ -127,6 +127,7 @@ import Network
     private var progressVerifiedKey: String?
     private var mediaWindow: [Int: MediaItem] = [:]
     private var resumeCheckpoint: Double?
+    private var recoveryRetryAfter: TimeInterval?
     private var recoveryUsed = false
     private var recoveryStableSince: TimeInterval?
     private var pendingPause = false
@@ -538,6 +539,7 @@ import Network
             if ownsOutput { refreshOutput() }
             connectionFailures = 0; connectionInterrupted = false
             serverConnection = await api.connection()
+            resumeRecoveryAfterConnection()
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
             guard generation == sessionGeneration, !Task.isCancelled else { return }
             connectionFailures += 1
@@ -898,6 +900,7 @@ import Network
         message = "This song could not be prepared. Tap Retry or choose another song."
     }
     private func cancelRecovery() {
+        recoveryRetryAfter = nil
         if recovering { PlaybackDiagnostics.event("recovery-cancelled"); playbackFailed = true; player.currentItem?.cancelPendingSeeks() }
         recoveryGeneration = UUID()
         routeRecoveryTask?.cancel(); routeRecoveryTask = nil
@@ -908,9 +911,19 @@ import Network
     private func failRecovery() {
         cancelRecovery(); playbackFailed = true; player.pause()
         finishNavigation()
-        message = "Playback stopped. Tap Retry to reconnect."
+        recoveryRetryAfter = ProcessInfo.processInfo.systemUptime + 15
+        message = "Waiting for playback to reconnect. Tap Retry to try now."
         PlaybackDiagnostics.event("recovery-exhausted")
         publishNowPlaying()
+    }
+    /// A successful control connection may restart an exhausted media recovery,
+    /// but never a user pause, interruption, changed owner, or completed song.
+    func resumeRecoveryAfterConnection(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        guard let retryAfter = recoveryRetryAfter, now >= retryAfter,
+              playbackFailed, !recovering, !busy, loadedKey != nil, loadedKey != completedKey,
+              permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true) else { return }
+        recoveryUsed = false
+        recoverServerRoute()
     }
     private func remember(_ manifest: Manifest) {
         mediaWindow = Dictionary(manifest.items.map { ($0.trackId, $0) }, uniquingKeysWith: { first, _ in first })
@@ -925,6 +938,7 @@ import Network
               let current = player.currentItem, let id = state?.currentTrackId,
               queuedTracks[ObjectIdentifier(current)] == id, let epoch = state?.ownerEpoch else { return }
         guard !recoveryUsed else { failRecovery(); return }
+        recoveryRetryAfter = nil
         recoveryUsed = true; recoveryStableSince = nil; recovering = true; playbackFailed = false; progressVerifiedKey = nil
         let token = UUID(); recoveryGeneration = token
         recoveryBackgroundTask = backgroundTasks.begin("Recover current song") { [weak self] in
