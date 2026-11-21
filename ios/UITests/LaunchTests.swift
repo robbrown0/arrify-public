@@ -36,8 +36,14 @@ final class LaunchTests: XCTestCase {
                     XCTAssertTrue(album.waitForExistence(timeout: 10)); album.tap()
                 }
                 XCTAssertTrue(app.staticTexts["Album song \(id)"].waitForExistence(timeout: 10), "Each selection must open its own album")
-                app.navigationBars.buttons.firstMatch.tap()
-                if section == "Artists" { app.navigationBars.buttons.firstMatch.tap() }
+                let albumBar = app.navigationBars[String(format: "Catalog Album %03d", id)]
+                XCTAssertTrue(albumBar.waitForExistence(timeout: 5))
+                albumBar.buttons["BackButton"].tap()
+                if section == "Artists" {
+                    let artistBar = app.navigationBars[String(format: "Catalog Artist %03d", id)]
+                    XCTAssertTrue(artistBar.waitForExistence(timeout: 5))
+                    artistBar.buttons["BackButton"].tap()
+                }
                 XCTAssertTrue(first.waitForExistence(timeout: 5), "Back must return to the catalog without reopening a detail")
             }
         }
@@ -949,7 +955,9 @@ extension LaunchTests {
         XCTAssertTrue(app.buttons["Play Just Like a Pill by P!nk"].waitForExistence(timeout: 10))
         app.segmentedControls.buttons["Albums"].tap()
         XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
-        app.navigationBars.buttons.firstMatch.tap()
+        let categoryBar = app.navigationBars["Pop"]
+        XCTAssertTrue(categoryBar.waitForExistence(timeout: 5))
+        categoryBar.buttons["BackButton"].tap()
         let hot = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "What’s Hot,")).firstMatch
         for _ in 0..<5 {
             if hot.exists && hot.isHittable { break }
