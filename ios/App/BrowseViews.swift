@@ -47,7 +47,7 @@ struct BrowseScreen: View {
                     } else if error == nil { ProgressView("Loading Browse…") }
                 }.padding(16)
                     .listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(Color.clear)
-            }.listStyle(.plain).scrollContentBackground(.hidden)
+            }.listStyle(.plain).buttonStyle(.borderless).scrollContentBackground(.hidden)
                 .navigationTitle("Browse").refreshable { await load(); await loadChart() }
                 .task { await load() }
                 .task(id: chartRequestKey) { await loadChart() }
