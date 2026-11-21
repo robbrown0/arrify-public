@@ -13,6 +13,7 @@ class WebCatalogHTTPTests(unittest.TestCase):
         fixture.PartyHTTPTests.setUp(self)
         catalog = catalog_fixture.NativeLibraryTests(); catalog.setUp()
         self.s.library = catalog.lib
+        for track in catalog.lib.tracks.values(): track['quality']='Lossless'
         catalog.lib.track = lambda tid: catalog.lib.tracks[tid]
         self.p.lib = catalog.lib
         self.s.listening = Listening(self.p)
@@ -27,6 +28,7 @@ class WebCatalogHTTPTests(unittest.TestCase):
             data=json.loads(raw);self.assertEqual(data['kind'],kind);self.assertEqual(len(data['items']),1)
         code,raw,_ = self.call('/api/v1/catalog?kind=tracks&sort=title&limit=50',cookie=self.hostcookie)
         self.assertEqual(code,200,raw);first=json.loads(raw)
+        self.assertEqual(first['items'][0]['quality'],'Lossless')
         code,raw,_ = self.call('/api/v1/catalog?kind=tracks&sort=title&limit=50&offset=50&revision='+first['revision'],cookie=self.hostcookie)
         self.assertEqual(code,200,raw);second=json.loads(raw)
         self.assertFalse({x['id'] for x in first['items']} & {x['id'] for x in second['items']})

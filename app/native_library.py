@@ -13,7 +13,7 @@ def track(row):
     return {'id': row['id'], 'title': row.get('title') or '', 'artist': row.get('artist') or '',
             'album': row.get('album') or '', 'artwork': row.get('artwork'),
             'album_id': row.get('album_id'), 'artist_id': row.get('artist_id'),
-            'popularity': row.get('popularity')}
+            'popularity': row.get('popularity'), 'quality': row.get('quality')}
 
 
 def enrich_popularity(library, items):
