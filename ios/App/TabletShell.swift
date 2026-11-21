@@ -62,6 +62,8 @@ struct TabletShell: View {
                     }
                     content.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                // Keep navigation/scroll content from intercepting taps in the sidebar.
+                .contentShape(.interaction, Rectangle())
             }
             if model.playback.needsTakeover {
                 PlaybackTakeoverBanner(playback: model.playback)
