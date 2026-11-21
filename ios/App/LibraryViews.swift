@@ -305,7 +305,7 @@ struct BrowserScreen: View {
                                         .aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 10))
                                     Text(item.name).font(.headline).lineLimit(2)
                                     Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                                }
+                                }.contentShape(.interaction, Rectangle())
                             }.buttonStyle(.plain).accessibilityIdentifier("catalogEntry-\(item.identity)").id("entry-\(item.identity)")
                         }
                     }
@@ -314,7 +314,11 @@ struct BrowserScreen: View {
                 ForEach(Array(entrySections.enumerated()), id: \.offset) { _, section in
                     Section(section.name) {
                         ForEach(section.rows, id: \.identity) { item in
-                            Button { selectedEntry = item } label: { EntryRow(item: item, artwork: model.artwork) }
+                            Button { selectedEntry = item } label: {
+                                EntryRow(item: item, artwork: model.artwork)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(.interaction, Rectangle())
+                            }
                                 .buttonStyle(.plain)
                                 .accessibilityIdentifier("catalogEntry-\(item.identity)")
                             .id("entry-\(item.identity)")

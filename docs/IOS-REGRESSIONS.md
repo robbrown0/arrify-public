@@ -238,3 +238,6 @@ Build 34 is authorized for internal testers and external beta users. Run both co
   not the first matching text, to test actual row visibility and navigation.
 - Retain initial failure, next-page retry, distinct destination, Back, and final
   visible-row assertions on both devices. Attach final-page screenshots.
+- Center taps on artist rows must navigate, including the blank trailing area.
+  Plain catalog buttons need a full-width interaction shape inside their label;
+  text-only taps hid this bug. Keep button-level taps in the destination test.
