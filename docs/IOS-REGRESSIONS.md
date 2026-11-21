@@ -256,3 +256,5 @@ Build 34 is authorized for internal testers and external beta users. Run both co
 - `testEmptyPlayerAndSingleTapAlbumActions` checks full iPad navigation-bar width
   and top placement, usable Done, and return from player and song-list origins.
   Physically verify portrait, landscape, narrow iPad windows and nested destinations.
+
+- Browse must use its enclosing Library navigation stack on iPhone; category Back returns to Browse, then Library. Standalone iPad Browse owns its stack. Covered by `testBrowseCategoriesChartsAndRequests`.

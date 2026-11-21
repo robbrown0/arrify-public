@@ -112,7 +112,7 @@ struct TabletShell: View {
     @ViewBuilder private var content: some View {
         switch destination {
         case "Home": HomeScreen(model: model)
-        case "Browse": BrowseScreen(model: model)
+        case "Browse": NavigationStack { BrowseScreen(model: model) }
         case "Library": LibraryHome(model: model).id(libraryRoot)
         case "Moods": MoodScreen(model: model)
         case "Settings": SettingsView(model: model)

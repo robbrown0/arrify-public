@@ -20,44 +20,42 @@ struct BrowseScreen: View {
     @State private var loadedChartKey: String?
     private var chartRequestKey: String { section + ":" + chartGenre }
     var body: some View {
-        NavigationStack {
-            List {
-                Group {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack { ForEach(["All", "What’s New", "What’s Hot", "Decades", "Genres"], id: \.self) { name in
-                            Button(name) { section = name }.buttonStyle(.bordered).tint(section == name ? .green : .gray)
-                        } }
-                    }
-                    if let error { Text(error).foregroundStyle(.orange); Button("Retry") { Task { await load() } } }
-                    if let overview {
-                        if overview.indexing { Text("Organizing your library in the background. Refresh to see new categories.").font(.footnote).foregroundStyle(.secondary) }
-                        if section == "What’s New" {
-                            BrowseChartView(model: model, genres: overview.genres, recent: true, genre: $chartGenre, chart: chart, error: chartError)
-                        } else if section == "What’s Hot" {
-                            BrowseChartView(model: model, genres: overview.genres, recent: false, genre: $chartGenre, chart: chart, error: chartError)
-                        } else {
-                            if section == "All" {
-                                Text("Discover").font(.title2.bold())
-                                Button { section = "What’s New" } label: { discovery("What’s New", "Recent releases in the charts · past 90 days", "sparkles") }
-                                Button { section = "What’s Hot" } label: { discovery("What’s Hot", "U.S. Top 40 and genre rankings · refreshed daily", "flame") }
-                            }
-                            if section != "Genres" { categories("Decades", overview.decades, decade: true) }
-                            if section != "Decades" { categories("Genres", overview.genres, decade: false) }
-                        }
-                    } else if error == nil { ProgressView("Loading Browse…") }
-                }.listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    .listRowSeparator(.hidden).listRowBackground(Color.clear)
-            }.listStyle(.plain).buttonStyle(.borderless).scrollContentBackground(.hidden)
-                .navigationTitle("Browse").refreshable { await load(); await loadChart() }
-                .task { await load() }
-                .task(id: chartRequestKey) { await loadChart() }
-                .navigationDestination(item: $categoryDestination) { destination in
-                    BrowseCategoryView(model: model, title: destination.title,
-                        initial: BrowseFilters(genre: destination.decade ? "" : destination.id,
-                                               decade: destination.decade ? destination.id : ""))
-                        .id(destination)
+        List {
+            Group {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack { ForEach(["All", "What’s New", "What’s Hot", "Decades", "Genres"], id: \.self) { name in
+                        Button(name) { section = name }.buttonStyle(.bordered).tint(section == name ? .green : .gray)
+                    } }
                 }
-        }
+                if let error { Text(error).foregroundStyle(.orange); Button("Retry") { Task { await load() } } }
+                if let overview {
+                    if overview.indexing { Text("Organizing your library in the background. Refresh to see new categories.").font(.footnote).foregroundStyle(.secondary) }
+                    if section == "What’s New" {
+                        BrowseChartView(model: model, genres: overview.genres, recent: true, genre: $chartGenre, chart: chart, error: chartError)
+                    } else if section == "What’s Hot" {
+                        BrowseChartView(model: model, genres: overview.genres, recent: false, genre: $chartGenre, chart: chart, error: chartError)
+                    } else {
+                        if section == "All" {
+                            Text("Discover").font(.title2.bold())
+                            Button { section = "What’s New" } label: { discovery("What’s New", "Recent releases in the charts · past 90 days", "sparkles") }
+                            Button { section = "What’s Hot" } label: { discovery("What’s Hot", "U.S. Top 40 and genre rankings · refreshed daily", "flame") }
+                        }
+                        if section != "Genres" { categories("Decades", overview.decades, decade: true) }
+                        if section != "Decades" { categories("Genres", overview.genres, decade: false) }
+                    }
+                } else if error == nil { ProgressView("Loading Browse…") }
+            }.listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowSeparator(.hidden).listRowBackground(Color.clear)
+        }.listStyle(.plain).buttonStyle(.borderless).scrollContentBackground(.hidden)
+            .navigationTitle("Browse").refreshable { await load(); await loadChart() }
+            .task { await load() }
+            .task(id: chartRequestKey) { await loadChart() }
+            .navigationDestination(item: $categoryDestination) { destination in
+                BrowseCategoryView(model: model, title: destination.title,
+                    initial: BrowseFilters(genre: destination.decade ? "" : destination.id,
+                                           decade: destination.decade ? destination.id : ""))
+                    .id(destination)
+            }
     }
     private func loadChart() async {
         let token = UUID(); chartGeneration = token
