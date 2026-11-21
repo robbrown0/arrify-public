@@ -247,6 +247,7 @@ struct BrowserScreen: View {
     @State private var likedOnly = false
     @State private var loadedRequestKey: String?
     @State private var globalSearch = false
+    @State private var selectedEntry: LibraryEntry?
     @State private var opening = true
     let externalQuery: String?
     let artist: String?
@@ -298,7 +299,7 @@ struct BrowserScreen: View {
                 Section {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 145, maximum: 240))], alignment: .leading, spacing: 20) {
                         ForEach(browser.entries, id: \.identity) { item in
-                            NavigationLink { DetailScreen(model: model, entry: item) } label: {
+                            Button { selectedEntry = item } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     RemoteCover(path: item.artwork, title: item.name, artwork: model.artwork)
                                         .aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 10))
@@ -313,11 +314,8 @@ struct BrowserScreen: View {
                 ForEach(Array(entrySections.enumerated()), id: \.offset) { _, section in
                     Section(section.name) {
                         ForEach(section.rows, id: \.identity) { item in
-                            NavigationLink {
-                                if item.kind == "artists" {
-                                    BrowserScreen(model: model, title: item.name, kind: "albums", artist: item.id)
-                                } else { DetailScreen(model: model, entry: item) }
-                            } label: { EntryRow(item: item, artwork: model.artwork) }
+                            Button { selectedEntry = item } label: { EntryRow(item: item, artwork: model.artwork) }
+                                .buttonStyle(.plain)
                             .id("entry-\(item.identity)")
                         }
                     }
@@ -326,16 +324,16 @@ struct BrowserScreen: View {
             if !browser.loading && browser.tracks.isEmpty && browser.entries.isEmpty && browser.error == nil {
                 ContentUnavailableView(activeQuery.isEmpty ? "No \(title.lowercased()) yet" : "No matching \(title.lowercased())", systemImage: "magnifyingglass", description: Text(activeQuery.isEmpty ? "Music added to your server will appear here." : "Try another name."))
             }
-            if let offset = browser.nextOffset {
-                ProgressView().frame(maxWidth: .infinity)
-                    .task(id: offset) { await browser.load(query: activeQuery, more: true) }
-            }
-            if browser.error != nil { Button("Retry") { Task { await browser.load(query: activeQuery) } } }
             if externalQuery == nil && !isGlobalSearch && !activeQuery.isEmpty {
                 Button("Search entire library", systemImage: "magnifyingglass") { globalSearch = true }
             }
         }
         .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $selectedEntry) { item in
+            if item.kind == "artists" {
+                BrowserScreen(model: model, title: item.name, kind: "albums", artist: item.id).id(item.identity)
+            } else { DetailScreen(model: model, entry: item).id(item.identity) }
+        }
         .sheet(isPresented: $globalSearch) { SearchScreen(model: model, initialQuery: activeQuery).presentationDragIndicator(.visible) }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -462,10 +460,14 @@ struct FollowingSongList<Content: View>: View {
     @State private var previousVisible = false
     @State private var previousRequest = 0
     @State private var pagingPrevious = false
+    @State private var viewport = CGRect.zero
+    @State private var nextVisible = false
+    @State private var nextRequest = 0
     private var currentID: Int? { model.playback.state?.currentTrackId }
     var body: some View {
         ScrollViewReader { proxy in
             positionedList(observedList(pagedList), proxy: proxy)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { viewport = $0 }
         }
     }
     private var songList: some View {
@@ -473,10 +475,25 @@ struct FollowingSongList<Content: View>: View {
             if pagesBackward, browser.previousOffset != nil {
                 ProgressView().frame(maxWidth: .infinity)
                     .accessibilityLabel(browser.kind == "tracks" ? "Loading previous songs" : "Loading previous items")
-                    .onAppear { previousVisible = true; requestPrevious() }
+                    .onGeometryChange(for: Bool.self) { geometry in
+                        viewport.height > 0 && viewport.intersects(geometry.frame(in: .global))
+                    } action: { visible in previousVisible = visible; if visible { requestPrevious() } }
                     .onDisappear { previousVisible = false }
+                    .id("previous-page-\(browser.previousOffset ?? 0)")
             }
             content { suspendFollowing() }
+            if let offset = browser.nextOffset, browser.error == nil {
+                ProgressView().frame(maxWidth: .infinity)
+                    .accessibilityLabel("Loading more items")
+                    .onGeometryChange(for: Bool.self) { geometry in
+                        viewport.height > 0 && viewport.intersects(geometry.frame(in: .global))
+                    } action: { visible in nextVisible = visible; if visible { requestNext() } }
+                    .onDisappear { nextVisible = false }
+                    .id("next-page-\(offset)")
+            }
+            if browser.error != nil {
+                Button("Retry") { Task { await browser.retry() } }.disabled(browser.loading)
+            }
         }
         .scrollContentBackground(.hidden).background(Color.black)
         .onScrollPhaseChange { _, phase in
@@ -497,7 +514,12 @@ struct FollowingSongList<Content: View>: View {
                 // forced top anchor would override an ongoing user drag.
                 await browser.load(query: query, previous: true)
             }
-            .onChange(of: browser.loading) { if !browser.loading { requestPrevious() } }
+            .task(id: nextRequest) {
+                guard nextRequest > 0, nextVisible, !browser.loading, browser.error == nil else { return }
+                nextVisible = false
+                await browser.load(query: query, more: true)
+            }
+            .onChange(of: browser.loading) { if !browser.loading { requestPrevious(); requestNext() } }
     }
     private func observedList<Base: View>(_ base: Base) -> some View {
         base
@@ -530,6 +552,10 @@ struct FollowingSongList<Content: View>: View {
                         .padding(8).frame(maxWidth: .infinity).background(.bar)
                 }
             }
+    }
+    private func requestNext() {
+        guard nextVisible, !browser.loading, browser.error == nil, browser.nextOffset != nil else { return }
+        nextRequest += 1
     }
     private func cancelPrevious() {
         manuallyScrolled = false
@@ -766,8 +792,6 @@ struct DetailScreen: View {
                     let track = row.track
                     SongRow(track: track, model: model, onScroll: suspendFollowing) { browser.resumeFollowingRequest += 1; Task { await model.playback.play(source: item.source, trackId: track.id) } }.id("song-\(row.id)")
                 }
-                if let offset = browser.nextOffset { ProgressView().frame(maxWidth: .infinity).task(id: offset) { await browser.load(more: true) } }
-                if browser.error != nil { Button("Retry") { Task { await browser.load() } } }
                 if !browser.loading && browser.total == 0 && browser.error == nil { Text("No local songs yet.").foregroundStyle(.secondary) }
             }
         }.scrollContentBackground(.hidden).background(Color.black)
