@@ -12,6 +12,7 @@ from .native_auth import NativeError
 
 
 from .media_identity import source_revision
+from .native_library import track as track_metadata
 
 
 class NativeMedia:
@@ -140,7 +141,8 @@ class NativeMedia:
                         'device_id': device, 'owner_epoch': epoch, 'profile': profile, 'level': 'off'})
                 items.append({'track_id': tid, 'source_revision': revision, 'profile': profile,
                     'state': state, 'duration_seconds': None, 'mime_type': mime, 'size_bytes': size, 'url': url,
-                    'url_expires': expires if url else None, 'range_supported': True})
+                    'url_expires': expires if url else None, 'range_supported': True,
+                    'track': track_metadata({**dict(row), 'id': tid, 'artwork': '/api/v1/artwork/' + str(tid)})})
             except (OSError, ValueError, CatalogError):
                 items.append({'track_id': tid, 'state': 'unavailable', 'source_revision': None,
                     'profile': profile, 'duration_seconds': None, 'mime_type': None, 'size_bytes': None,

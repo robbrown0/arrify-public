@@ -11,6 +11,9 @@ import ArrifyCore
     private let download: @Sendable (URL) async throws -> (URL, URLResponse)
     private static var didPrune = false
     private var generation = UUID()
+    private var fillGeneration = UUID()
+    private var downloadTokens: [String: UUID] = [:]
+    private var downloads: [String: Task<Void, Never>] = [:]
     var items: [BufferEntry] = []
     var downloadedBytes: Int { items.reduce(0) { $0 + $1.loadedBytes } }
     init(download: (@Sendable (URL) async throws -> (URL, URLResponse))? = nil) {
@@ -41,13 +44,18 @@ import ArrifyCore
         update(id, state: "retrying")
     }
     func reset() {
-        generation = UUID(); files = [:]; items = []
+        generation = UUID(); fillGeneration = UUID()
+        for task in downloads.values { task.cancel() }; downloads = [:]; downloadTokens = [:]
+        files = [:]; items = []
         try? FileManager.default.removeItem(at: directory)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
-    func fill(_ manifest: Manifest, api: APIClient) async {
+    func fill(_ manifest: Manifest, api: APIClient, onReady: (() async -> Void)? = nil) async {
         let epoch = generation
+        let pass = UUID(); fillGeneration = pass
         let window = Array(manifest.items.prefix(4)); let wanted = Set(window.map(\.trackId))
+        let wantedKeys = Set(window.map { key($0) })
+        for key in Array(downloads.keys) where !wantedKeys.contains(key) { downloads.removeValue(forKey: key)?.cancel(); downloadTokens.removeValue(forKey: key) }
         for id in Array(files.keys) where !wanted.contains(id) {
             if let old = files.removeValue(forKey: id) { try? FileManager.default.removeItem(at: old.url) }
         }
@@ -57,29 +65,46 @@ import ArrifyCore
                                totalBytes: min(256 * 1024 * 1024, max(0, item.sizeBytes ?? 0)), state: ready ? "ready" : "queued")
         }
         for item in window {
-            guard epoch == generation, !Task.isCancelled else { return }
-            guard file(for: item) == nil else { continue }
+            guard epoch == generation, fillGeneration == pass, !Task.isCancelled else { return }
+            if file(for: item) != nil { await onReady?(); continue }
             guard item.state == "ready", let size = item.sizeBytes, size > 0 else { continue }
             guard size <= 256 * 1024 * 1024 else { update(item.trackId, state: "oversized"); continue }
             guard files.values.reduce(0, { $0 + $1.bytes }) + size <= 512 * 1024 * 1024 else { update(item.trackId, state: "budget"); continue }
-            update(item.trackId, state: "downloading")
-            do {
-                let remote = try await api.mediaURL(item)
-                let (temporary, response) = try await download(remote)
-                defer { try? FileManager.default.removeItem(at: temporary) }
-                guard epoch == generation, !Task.isCancelled else { return }
-                guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-                      (try FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.intValue == size else { throw APIError.invalidResponse }
-                let suffix = item.mimeType == "audio/flac" || item.mimeType == "audio/x-flac" ? ".flac" : item.mimeType == "audio/mpeg" ? ".mp3" : item.mimeType == "audio/mp4" ? ".m4a" : ["audio/wav", "audio/x-wav", "audio/wave"].contains(item.mimeType ?? "") ? ".wav" : ".audio"
-                let target = directory.appendingPathComponent(UUID().uuidString + suffix)
-                try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: temporary.path)
-                try FileManager.default.moveItem(at: temporary, to: target)
-                if let old = files[item.trackId] { try? FileManager.default.removeItem(at: old.url) }
-                files[item.trackId] = Entry(key: key(item), url: target, bytes: size)
-                update(item.trackId, state: "ready", bytes: size)
-            } catch {
-                if epoch == generation { update(item.trackId, state: "retrying") }
+            let cacheKey = key(item)
+            if downloads[cacheKey] == nil {
+                update(item.trackId, state: "downloading")
+                let token = UUID(); downloadTokens[cacheKey] = token
+                downloads[cacheKey] = Task { [weak self] in
+                    guard let self else { return }
+                    defer { if self.downloadTokens[cacheKey] == token { self.downloads.removeValue(forKey: cacheKey); self.downloadTokens.removeValue(forKey: cacheKey) } }
+                    do {
+                        let remote = try await api.mediaURL(item)
+                        PlaybackDiagnostics.event("cache-download-start bytes=\(size)")
+                        let (temporary, response) = try await self.download(remote)
+                        defer { try? FileManager.default.removeItem(at: temporary) }
+                        guard self.generation == epoch, !Task.isCancelled else { return }
+                        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                              (try FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.intValue == size else { throw APIError.invalidResponse }
+                        let suffix = item.mimeType == "audio/flac" || item.mimeType == "audio/x-flac" ? ".flac" : item.mimeType == "audio/mpeg" ? ".mp3" : item.mimeType == "audio/mp4" ? ".m4a" : ["audio/wav", "audio/x-wav", "audio/wave"].contains(item.mimeType ?? "") ? ".wav" : ".audio"
+                        let target = self.directory.appendingPathComponent(UUID().uuidString + suffix)
+                        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: temporary.path)
+                        try FileManager.default.moveItem(at: temporary, to: target)
+                        if let old = self.files[item.trackId] { try? FileManager.default.removeItem(at: old.url) }
+                        self.files[item.trackId] = Entry(key: cacheKey, url: target, bytes: size)
+                        self.update(item.trackId, state: "ready", bytes: size)
+                        PlaybackDiagnostics.event("cache-download-ready bytes=\(size)")
+                    } catch {
+                        guard self.generation == epoch, !Task.isCancelled else { return }
+                        self.update(item.trackId, state: "retrying")
+                        PlaybackDiagnostics.event("cache-download-failed code=\((error as NSError).code)")
+                    }
+                }
             }
+            // Cancellation of a stale queue reader does not cancel a useful
+            // current/next download. reset() and window eviction do cancel it.
+            await downloads[cacheKey]?.value
+            guard epoch == generation, fillGeneration == pass, !Task.isCancelled else { return }
+            if file(for: item) != nil { await onReady?() }
         }
     }
     private func update(_ id: Int, state: String, bytes: Int = 0) {

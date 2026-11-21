@@ -68,6 +68,19 @@ public struct PlaybackState: Codable, Sendable {
     public var durationSeconds: Double?
     public var output: String?
 
+    /// Predict only a known successor; no new rotation choices are made offline.
+    public func advancingCached(to next: Int, automatic: Bool = true) -> Self? {
+        guard playing, (!automatic || repeatMode != "one"), upcomingTrackIds?.first == next else { return nil }
+        return Self(partial: false, currentTrackId: next, positionSeconds: 0,
+                    serverTime: serverTime, queueRevision: queueRevision + 1,
+                    ownerDeviceId: ownerDeviceId, ownerActive: ownerActive, ownerEpoch: ownerEpoch,
+                    intent: intent + 1, playing: true, observed: "playing",
+                    seekTargetSeconds: 0, seekIntent: seekIntent + 1, playId: playId + 1,
+                    upcomingTrackIds: Array((upcomingTrackIds ?? []).dropFirst()),
+                    shuffle: shuffle, repeatMode: repeatMode, queueControlsAvailable: queueControlsAvailable,
+                    context: context, durationSeconds: nil, output: output)
+    }
+
     public static func merging(_ update: Self, into current: Self?) -> Self {
         guard let current else { return update }
         guard update.ownerEpoch >= current.ownerEpoch, update.queueRevision >= current.queueRevision else { return current }
@@ -116,6 +129,7 @@ public struct PlaybackCommand: Encodable, Sendable {
     public init(action: String, deviceId: String) { self.action = action; self.deviceId = deviceId }
 }
 public struct MediaItem: Codable, Sendable {
+    public var track: Track?
     public let trackId: Int
     public let sourceRevision: String?
     public let profile: String

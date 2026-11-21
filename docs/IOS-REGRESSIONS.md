@@ -258,3 +258,53 @@ Build 34 is authorized for internal testers and external beta users. Run both co
   Physically verify portrait, landscape, narrow iPad windows and nested destinations.
 
 - Browse must use its enclosing Library navigation stack on iPhone; category Back returns to Browse, then Library. Standalone iPad Browse owns its stack. Covered by `testBrowseCategoriesChartsAndRequests`.
+
+## Cached continuity and web catalog (2026-11-21, #47)
+
+The car diagnostic report establishes an end-of-song gap after three failed state
+requests; the successor was cached when a manual Next succeeded 33 seconds later.
+Proxy started uncached, stalled at 54.5 seconds, and had no complete cached file
+for recovery. The earlier fix fenced ended items against replay but intentionally
+required a server acknowledgement before advancing. That is insufficient for
+connection-loss resilience.
+
+User-approved policy: the active device may continue through its verified downloaded
+window during an outage. An unreachable device cannot immediately learn of takeover;
+brief overlapping playback is accepted. On reconnect, ownership/conflict responses
+must stop local continuation. Never claim an unknown queue item is cached or invent
+station rotation decisions. Keep the three-successor and storage bounds.
+
+Required coverage: cached natural end and manual Next without a state GET, immediate
+local Pause, duplicate tap coalescing, lost acknowledgement with the same transition
+ID, stale polls, owner/queue conflicts, uncached fallback, background protection,
+cache cancellation/adoption and byte validation. Existing no-cache transition tests
+retain the no-replay fence. Native volume geometry and every prior release check
+remain required. Physical car/network-loss and AirPlay acceptance remain separate
+from simulator results.
+
+Web: Songs, Albums, Artists use the indexed catalog with category-scoped search,
+sorting and revision-fenced pagination. Test stale search responses, page failures
+and retry, signed-out access, full-selection playback beyond the visible page,
+correct album/artist destination and responsive controls. Internal release only.
+
+Architecture references: Apple AVQueuePlayer and preferredForwardBufferDuration
+(https://developer.apple.com/documentation/avfoundation/avplayeritem/preferredforwardbufferduration),
+and Media3's prioritization of nearby items
+(https://developer.android.com/media/media3/exoplayer/preloading-media/preloadmanager).
+Buffer tuning is not a substitute for local transitions and completed cache files.
+A future shared streaming/cache data path could avoid downloading the active audio
+twice. An optional cellular AAC profile would reduce bandwidth needs; do not silently
+change a user's Original quality preference. Neither can guarantee playback after
+the downloaded window is exhausted during a sustained outage.
+
+Additional resilience qualification: three consecutive downloaded skips must stay local and reconcile in order; rapid repeated taps coalesce until actual playback progress; rejection stops local audio without replaying the old song. Exhausted current-song recovery may restart after a successful connection and a 15-second cooldown, but Pause and interruptions always prevent that restart. Manifest metadata accompanies the cached window so offline song titles do not depend on a separate request. Web Songs playback expands the complete filtered/sorted source beyond the visible page; Shuffle starts that source atomically.
+
+Owner Next/Previous commands use the existing revision/song fences directly instead of a redundant state GET. `testUncachedNextDoesNotWaitForStatePreflight` holds state reads and requires the skip command to reach the server anyway. Uncached audio still needs media data; the cached path is the only offline/near-instant guarantee.
+
+After the downloaded window is exhausted, a successful control connection can retry a previously failed end transition after a cooldown, using the same transition ID and ended-song fence. `testEndedTrackContinuesAfterConnectionReturnsWithoutManualNext` preserves silence instead of replaying the finished song, then requires automatic continuation after reconnection.
+
+### Qualification hang prevention (2026-11-21)
+
+Owner Next no longer does a state preflight. The stale-current regression now uses a fake server with the production revision/current/owner fences: it verifies one rejected attempt, zero committed skips, and reconciliation to the externally advanced track. Server-path fixtures retain queued audio bytes after removing verified cache eligibility, avoiding nondeterministic lazy AVPlayer file-open failures. Playback transition tests have a 60-second execution allowance; Apple workflows enable per-test timeouts so a leaked continuation produces a test failure instead of consuming the entire job. All existing app/UI tests remain enabled.
+
+Playback app tests now run before the UI suite on both Apple workflows. This preserves every test while reporting playback failures before spending time on UI automation. The server-path fixture restores verified audio when its held command is acknowledged, modeling a download completing in flight; it does not stream a fake fixture URL. Both app and UI result bundles are retained.

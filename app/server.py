@@ -210,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/.well-known/apple-app-site-association':
                 app_ids=[x.strip() for x in os.environ.get('ARRIFY_IOS_APP_IDS','').split(',') if re.fullmatch(r'[A-Z0-9]{10}\.[A-Za-z0-9.-]+',x.strip())]
                 return self.json({'applinks':{'details':[{'appIDs':app_ids,'components':[{'/':'/party/join'}]}] if app_ids else []}})
-            assets={'/account-access.html':'account-access.html','/account-access.js':'account-access.js','/account-ui.js':'account-ui.js','/branding.js':'branding.js','/privacy':'privacy.html','/buffer-status.js':'buffer-status.js','/device-buffer-worker.js':'device-buffer-worker.js','/party':'party.html','/party-display':'party.html','/party-guest.js':'party-guest.js','/party-host.js':'party-host.js','/party.css':'party.css','/metadata.js':'metadata.js','/browse.js':'browse.js','/connections.js':'connections.js','/apple-music.js':'apple-music.js','/spotify.js':'spotify.js','/listening.js':'listening.js','/api.js':'api.js','/navigation.js':'navigation.js','/gapless.js':'gapless.js','/':'index.html','/app.js':'app.js','/player.js':'player.js','/playback.js':'playback.js','/install.js':'install.js','/sw.js':'sw.js','/offline.html':'offline.html','/manifest.webmanifest':'manifest.webmanifest','/style.css':'style.css','/brand.css':'brand.css','/recover':'recover.html','/recover.js':'recover.js','/output.js':'output.js','/timeline.js':'timeline.js'}
+            assets={'/catalog-browser.js':'catalog-browser.js','/account-access.html':'account-access.html','/account-access.js':'account-access.js','/account-ui.js':'account-ui.js','/branding.js':'branding.js','/privacy':'privacy.html','/buffer-status.js':'buffer-status.js','/device-buffer-worker.js':'device-buffer-worker.js','/party':'party.html','/party-display':'party.html','/party-guest.js':'party-guest.js','/party-host.js':'party-host.js','/party.css':'party.css','/metadata.js':'metadata.js','/browse.js':'browse.js','/connections.js':'connections.js','/apple-music.js':'apple-music.js','/spotify.js':'spotify.js','/listening.js':'listening.js','/api.js':'api.js','/navigation.js':'navigation.js','/gapless.js':'gapless.js','/':'index.html','/app.js':'app.js','/player.js':'player.js','/playback.js':'playback.js','/install.js':'install.js','/sw.js':'sw.js','/offline.html':'offline.html','/manifest.webmanifest':'manifest.webmanifest','/style.css':'style.css','/brand.css':'brand.css','/recover':'recover.html','/recover.js':'recover.js','/output.js':'output.js','/timeline.js':'timeline.js'}
             if re.fullmatch(r'/assets/fonts/(outfit|dm-sans)-latin-wght-normal\.woff2',path):
                 return self.send(200,(WEB/path.lstrip('/')).read_bytes(),'font/woff2',{'Cache-Control':'public, max-age=86400'})
             if re.fullmatch(r'/assets/channels/(80s-on-8|the-bridge|the-blend|1st-wave|the-pulse|classic-rewind|the-spectrum)\.svg',path):
@@ -336,6 +336,11 @@ class Handler(BaseHTTPRequestHandler):
             image=Path('/spectrum-channel/artwork')/(logo[1]+'.webp')
             if not image.is_file():raise Error(404,'Artwork not available.')
             return self.send(200,image.read_bytes(),'image/webp',{'Cache-Control':'private, max-age=86400'})
+        if path=='/api/v1/catalog':
+            from .native_catalog import page
+            from .native_auth import NativeError
+            try:return self.json(page(lib,self.path,a,uid))
+            except NativeError as exc:raise Error(exc.status,exc.message) from None
         if path=='/api/v1/stations':
             from .channels import PersonalStations
             a.rate_limit(('stations-read',uid),90,60)
@@ -579,6 +584,11 @@ class Handler(BaseHTTPRequestHandler):
             self.server.listening.logout(uid,data,a.digest(self.token()[0]))
             return self.json({'ok':True},extra={'Set-Cookie':self.cookie('',True)})
         if path=='/api/v1/listening':
+            if data.get('action')=='play' and 'source' in data:
+                from .native_library import expand_playback
+                from .native_auth import NativeError
+                try:data=expand_playback(lib,a,uid,data)
+                except NativeError as exc:raise Error(exc.status,exc.message) from None
             result=self.server.listening.command(uid,data)
             return self.listening_result(result,user)
         if path=='/api/v1/player':

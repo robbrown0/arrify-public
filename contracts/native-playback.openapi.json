@@ -896,6 +896,10 @@
           },
           "range_supported": {
             "type": "boolean"
+          },
+          "track": {
+            "$ref": "#/components/schemas/Track",
+            "description": "Optional metadata retained with the downloaded playback window for offline transitions."
           }
         },
         "required": [

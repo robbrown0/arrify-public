@@ -33,12 +33,18 @@ jobs:
       - name: Qualify API and playback policy
         working-directory: ios
         run: swift test
-      - name: Qualify all app and UI regressions
+      - name: Qualify all playback app regressions
         env:
           DEVICE_FAMILY: ${{ matrix.device }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
-          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath build/TestFlightQualification.xcresult CODE_SIGNING_ALLOWED=NO test
+          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath build/TestFlightAppTests.xcresult -only-testing:ArrifyAppTests CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test
+      - name: Qualify all UI regressions
+        env:
+          DEVICE_FAMILY: ${{ matrix.device }}
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
+          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath build/TestFlightQualification.xcresult -only-testing:ArrifyUITests CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test
       - name: Export screenshots
         if: always()
         run: |
@@ -52,6 +58,7 @@ jobs:
           name: testflight-qualification-${{ inputs.build_number }}-${{ matrix.device }}-${{ github.run_attempt }}
           path: |
             build/TestFlightQualification.xcresult
+            build/TestFlightAppTests.xcresult
             build/screenshots
           retention-days: 7
   distribute:
