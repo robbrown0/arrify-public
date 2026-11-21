@@ -370,3 +370,12 @@ dialog#party-host-display{position:fixed;inset:0;margin:0;width:100vw;max-width:
 .catalog-controls label{display:flex;flex-direction:column;gap:6px;color:var(--muted,#aaa)}
 .catalog-controls input,.catalog-controls select{box-sizing:border-box;width:100%;min-height:44px;border-radius:12px;background:#242424;color:#fff;border:1px solid #444;padding:10px 14px;font:inherit}
 .catalog-controls input:focus-visible,.catalog-controls select:focus-visible{outline:2px solid #35cf69;outline-offset:2px}
+
+/* Category pages have one scoped search beside their sorting controls. */
+.main-wrap:has(.catalog-browser) .topbar .search-box,
+.main-wrap:has(.catalog-browser) .topbar .search-cancel{display:none}
+@media(max-width:760px){
+ :root .main-wrap:has(.catalog-browser) .topbar{min-height:calc(56px + var(--safe-top,0px))}
+ :root .main-wrap:has(.catalog-browser) .topbar .breadcrumbs,
+ :root .main-wrap:has(.catalog-browser) .topbar .account{grid-row:1}
+}

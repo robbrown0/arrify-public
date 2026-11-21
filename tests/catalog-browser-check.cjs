@@ -2,7 +2,7 @@
 const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:assert/strict');
 (async()=>{const browser=await chromium.launch({args:['--no-sandbox']});try{
  const p=await browser.newPage({viewport:{width:393,height:852}});
- await p.route('**/*',r=>r.fulfill({body:'<main id="content"></main>'}));await p.goto('https://fixture.invalid');await p.setContent('<main id="content"></main>');
+ await p.route('**/*',r=>r.fulfill({body:'<main id="content"></main>'}));await p.goto('https://fixture.invalid');await p.setContent('<div class="main-wrap"><header class="topbar"><div class="breadcrumbs">Back</div><form class="search-box"><input id="search" type="search"></form><div class="account">Account</div></header><main id="content"></main></div>');
  await p.addStyleTag({content:fs.readFileSync('web/style.css','utf8')});
  await p.evaluate(()=>{
   window.me={id:1};window.requestEpoch=1;window.context={};window.calls=[];window.state=null;window.liked=new Set();window.shownTracks=[];window.ArrifyPlayer={likeIcon:()=>'<span>♡</span>'};
@@ -17,7 +17,7 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  });const app=fs.readFileSync('web/app.js','utf8');await p.addScriptTag({content:app.split('\n').filter(l=>['art','cards','tabs','table'].some(n=>l.startsWith('function '+n+'('))).join('\n')});await p.addScriptTag({path:'web/catalog-browser.js'});
  for(const view of ['songs','albums','artists']){
   await p.evaluate(view=>{window.pager?.dispose();document.querySelector('#content').innerHTML=catalogBrowserView(view);window.pager=mountCatalogBrowser(view,1)},view);
-  await p.locator('#catalog-count').filter({hasText:'51'}).waitFor();
+  await p.locator('#catalog-count').filter({hasText:'51'}).waitFor();assert.equal(await p.locator('#search').isVisible(),false);assert.equal(await p.locator('input[type=search]:visible').count(),1);
   await p.locator('#catalog-sort').selectOption('recent');
   await p.waitForFunction(()=>calls.at(-1).includes('sort=recent'));
   await p.locator('#catalog-query').fill('old');await p.waitForTimeout(280);await p.locator('#catalog-query').fill('new');
@@ -29,5 +29,6 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  await p.locator('#catalog-count').filter({hasText:'51'}).waitFor();await p.locator('#catalog-more').scrollIntoViewIfNeeded();await p.locator('#catalog-more button').waitFor({state:'visible'});await p.locator('#catalog-more button').click();
  await p.waitForFunction(()=>document.querySelectorAll('#catalog-results tbody tr').length===51);
  assert.ok(await p.evaluate(()=>calls.some(x=>x.includes('offset=50')&&x.includes('revision=v1'))));
+ await p.evaluate(()=>{pager.dispose();document.querySelector('#content').replaceChildren()});assert.equal(await p.locator('#search').isVisible(),true);
  console.log('PASS: scoped Songs/Albums/Artists search, sort, stale responses, revision paging retry, responsive controls');
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});
