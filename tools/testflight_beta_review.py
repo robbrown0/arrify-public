@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Search songs, albums, and artists from one iPad search field with visible scopes. Exact title matches appear first, changing scope keeps your query, and repeated searches do less work. This update also includes the recent song-action menu, original-album lookup, saved server address, and playback handoff improvements. Please test search responsiveness, menus during playback, and iPad keyboard and player layouts.'}
+    attrs = {'whatsNew': 'Songs now loads earlier songs automatically as you scroll upward, without an Earlier items button or Show playing song bar. Open Songs during playback to start at the playing track; paused playback opens the normal sorted view. Manual browsing stays in place as playback advances. Includes unified search and exact-match ranking from the previous update. Please test scrolling across page boundaries, reopening Songs during local and remote playback, search, and song-action menus.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:

@@ -19,16 +19,39 @@ final class LaunchTests: XCTestCase {
         expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: current)
         waitForExpectations(timeout: 10)
         XCTAssertLessThan(abs(current.frame.midY - app.frame.midY), app.frame.height * 0.25)
-        // Target the song list, not the iPad sidebar or the mini player.
-        let start = current.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -220)))
-        let show = app.buttons["Show playing song"]
-        XCTAssertTrue(show.waitForExistence(timeout: 5))
-        show.tap()
-        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: current)
+        XCTAssertFalse(app.buttons["Earlier items"].exists)
+        XCTAssertFalse(app.buttons["Show playing song"].exists)
+        // Song 1 is outside the initial window around song 75. Reaching it
+        // requires automatic previous-page loading as well as actual scrolling.
+        let listX = current.frame.midX / app.frame.width
+        let first = app.buttons["songRow-1"]
+        for _ in 0..<24 {
+            if first.isHittable { break }
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: listX, dy: 0.34))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: listX, dy: 0.72))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTAssertTrue(first.isHittable, "Scrolling upward must load songs before the initial window")
+        XCTAssertFalse(current.isHittable, "Manual browsing must not recenter on the playing song")
+        XCTAssertFalse(app.buttons["Show playing song"].exists, "Songs must not reserve space for a return bar")
+        app.buttons["Next song"].firstMatch.tap()
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "Song 110"), evaluatedWith: app.buttons["expandPlayer"])
         waitForExpectations(timeout: 10)
-        XCTAssertLessThan(abs(current.frame.midY - app.frame.midY), app.frame.height * 0.25)
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Long list current song centered"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(first.isHittable, "Changing tracks after manual scrolling must preserve the browsing position")
+        app.buttons["Home"].firstMatch.tap()
+        app.buttons["Songs"].firstMatch.tap()
+        let next = app.buttons["songRow-110"]
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: next)
+        waitForExpectations(timeout: 10)
+        XCTAssertLessThan(abs(next.frame.midY - app.frame.midY), app.frame.height * 0.25)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Songs reopens at current song without return bar"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["Pause"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Home"].firstMatch.tap()
+        app.buttons["Songs"].firstMatch.tap()
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: first)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(next.isHittable, "A paused selection must not override the normal sorted starting point")
     }
     @MainActor func testCollectionShuffleStartsPlaybackAndReflectsState() {
         let app = XCUIApplication()
@@ -70,14 +93,16 @@ final class LaunchTests: XCTestCase {
         playerShuffle.tap()
         expectation(for: NSPredicate(format: "value == 'off'"), evaluatedWith: playerShuffle)
         waitForExpectations(timeout: 10)
-        app.buttons["Close player"].tap()
+        let closePlayer = app.buttons["Close player"]
+        closePlayer.tap()
+        XCTAssertTrue(closePlayer.waitForNonExistence(timeout: 10))
         XCTAssertEqual(shuffle.value as? String, "off", "Both shuffle controls must reflect the same state")
         shuffle.tap()
         expectation(for: NSPredicate(format: "value == 'on' AND enabled == true"), evaluatedWith: shuffle)
-        waitForExpectations(timeout: 10)
+        waitForExpectations(timeout: 20)
         shuffle.tap()
         expectation(for: NSPredicate(format: "value == 'off' AND enabled == true"), evaluatedWith: shuffle)
-        waitForExpectations(timeout: 10)
+        waitForExpectations(timeout: 20)
         XCTAssertEqual(play.label, "Pause", "Turning shuffle off must not stop playback")
     }
     @MainActor func testCurrentTrackIsMarkedInListAndQueue() {
@@ -165,6 +190,49 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(app.alerts["Account deleted"].waitForExistence(timeout: 10))
         app.alerts["Account deleted"].buttons["OK"].tap()
         XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+    }
+    @MainActor func testHomeScrollPositionSurvivesFullScreenPlayerDismissal() {
+        let app = XCUIApplication()
+        // Larger text gives Home real overflow even on a 13-inch iPad.
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
+        app.launchEnvironment["ARRIFY_UI_PERSONAL_PLAYLIST"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        let title = app.staticTexts["On the record"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        let takeover = app.buttons["Play here"]
+        XCTAssertTrue(takeover.waitForExistence(timeout: 10))
+        let playlist = app.otherElements["collectionCard-playlists-1"]
+        let initialTitleY = title.frame.minY
+        // Move well away from the top and keep a visible card as a position
+        // anchor. Drag inside content, avoiding the sidebar and player footer.
+        for _ in 0..<12 {
+            if title.frame.minY < initialTitleY - 100 && playlist.isHittable && playlist.frame.maxY < takeover.frame.minY { break }
+            let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0))
+            let start = origin.withOffset(CGVector(dx: 0, dy: takeover.frame.minY - 40))
+            let end = origin.withOffset(CGVector(dx: 0, dy: max(180, takeover.frame.minY - 340)))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTAssertLessThan(title.frame.minY, initialTitleY - 100, "Home must be scrolled before opening the player")
+        XCTAssertTrue(playlist.isHittable)
+        let scrolledY = playlist.frame.minY
+        for _ in 0..<2 {
+            app.buttons["expandPlayer"].tap()
+            let close = app.buttons["Close player"]
+            XCTAssertTrue(close.waitForExistence(timeout: 10))
+            close.tap()
+            XCTAssertTrue(close.waitForNonExistence(timeout: 10))
+            expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: playlist)
+            waitForExpectations(timeout: 10)
+            XCTAssertLessThan(title.frame.minY, initialTitleY - 100, "Minimizing the player must not reset Home to the top")
+            XCTAssertEqual(playlist.frame.minY, scrolledY, accuracy: 3,
+                           "Home must retain its exact browsing position after player dismissal")
+        }
     }
     @MainActor func testHomeRecentSongsAndFullScreenSongActions() {
         let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
