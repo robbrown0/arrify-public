@@ -25,6 +25,7 @@ actor UITestTransport: HTTPTransport {
         ? [["id": "1", "kind": "playlists", "name": "Rain", "subtitle": "", "section": "personal", "track_count": 2]] : []
     private var favoriteIds: Set<Int> = []
     private var catalogFailures: Set<String> = []
+    private var chartRequests = 0
     private let album = #"{"id":"aaaaaaaaaaaaaaaaaaaaaaaa","kind":"albums","name":"M!ssundaztood","subtitle":"P!nk","section":"","artwork":null,"track_count":2}"#
     private let station = #"{"id":"sirius-80son8","kind":"channels","name":"80s on 8","subtitle":"","section":"channels","artwork":null,"track_count":2}"#
     private let mix = #"{"id":"mood-feel-good","kind":"collections","name":"Feel Good Favorites","subtitle":"Familiar favorites","section":"moods","artwork":null,"track_count":2}"#
@@ -82,7 +83,8 @@ actor UITestTransport: HTTPTransport {
         } else if path.hasSuffix("/native/register") {
             value = #"{"message":"Account created. Check your email to verify your address. An administrator must also approve your account before you can listen."}"#
         } else if path == "/api/v1/browse/charts" {
-            value = #"{"items":[{"title":"Unavailable fixture song","artist":"Fixture artist","rank":1,"request_key":"012345678901234567890123","track":null,"requested":null}],"source":"Fixture chart","pending":false,"stale":false}"#
+            chartRequests += 1
+            value = #"{"items":[{"title":"Unavailable fixture song","artist":"Fixture artist","rank":1,"request_key":"012345678901234567890123","track":null,"requested":null}],"source":"Fixture chart \#(chartRequests)","pending":false,"stale":false}"#
         } else if path == "/api/v1/browse/request" {
             value = #"{"available":false}"#
         } else if path == "/api/v1/browse" {

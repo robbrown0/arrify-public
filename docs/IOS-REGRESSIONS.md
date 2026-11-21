@@ -241,3 +241,18 @@ Build 34 is authorized for internal testers and external beta users. Run both co
 - Center taps on artist rows must navigate, including the blank trailing area.
   Plain catalog buttons need a full-width interaction shape inside their label;
   text-only taps hid this bug. Keep button-level taps in the destination test.
+
+### Chart refresh and iPad music destinations
+
+- Remove the permanent Refresh chart button on both devices. Entering a chart or
+  changing its genre loads it; Browse pull-to-refresh must await both overview
+  and active-chart loading, not merely refresh categories. Preserve current rows
+  during same-chart refresh and reject responses from superseded requests.
+- `testBrowseCategoriesChartsAndRequests` checks that Refresh chart is absent and
+  pull-to-refresh changes the fixture response from chart 1 to chart 2.
+- iPad song-menu album, artist, radio and original-album browsing fills the window.
+  Retain explicit Done dismissal, returning to the originating player/list.
+  iPhone keeps its existing sheet behavior; queue and add-to-playlist remain sheets.
+- `testEmptyPlayerAndSingleTapAlbumActions` checks full iPad navigation-bar width
+  and top placement, usable Done, and return from player and song-list origins.
+  Physically verify portrait, landscape, narrow iPad windows and nested destinations.

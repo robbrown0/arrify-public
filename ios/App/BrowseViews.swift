@@ -6,6 +6,12 @@ struct BrowseScreen: View {
     @State private var overview: BrowseOverview?
     @State private var error: String?
     @State private var section = "All"
+    @State private var chartGenre = "overall"
+    @State private var chart: BrowseChart?
+    @State private var chartError: String?
+    @State private var chartGeneration = UUID()
+    @State private var loadedChartKey: String?
+    private var chartRequestKey: String { section + ":" + chartGenre }
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -19,9 +25,9 @@ struct BrowseScreen: View {
                     if let overview {
                         if overview.indexing { Text("Organizing your library in the background. Refresh to see new categories.").font(.footnote).foregroundStyle(.secondary) }
                         if section == "What’s New" {
-                            BrowseChartView(model: model, genres: overview.genres, recent: true)
+                            BrowseChartView(model: model, genres: overview.genres, recent: true, genre: $chartGenre, chart: chart, error: chartError)
                         } else if section == "What’s Hot" {
-                            BrowseChartView(model: model, genres: overview.genres, recent: false)
+                            BrowseChartView(model: model, genres: overview.genres, recent: false, genre: $chartGenre, chart: chart, error: chartError)
                         } else {
                             if section == "All" {
                                 Text("Discover").font(.title2.bold())
@@ -33,8 +39,24 @@ struct BrowseScreen: View {
                         }
                     } else if error == nil { ProgressView("Loading Browse…") }
                 }.padding(16)
-            }.navigationTitle("Browse").refreshable { await load() }
+            }.navigationTitle("Browse").refreshable { await load(); await loadChart() }
                 .task { await load() }
+                .task(id: chartRequestKey) { await loadChart() }
+        }
+    }
+    private func loadChart() async {
+        let token = UUID(); chartGeneration = token
+        guard section == "What’s New" || section == "What’s Hot" else { chart = nil; chartError = nil; return }
+        let recent = section == "What’s New"
+        let key = chartRequestKey
+        if loadedChartKey != key { chart = nil }
+        chartError = nil
+        do {
+            let result = try await model.api.browseChart(genre: chartGenre, recent: recent)
+            guard chartGeneration == token, !Task.isCancelled else { return }
+            chart = result; loadedChartKey = key
+        } catch where RequestCancellation.matches(error) {} catch {
+            if chartGeneration == token { chartError = error.localizedDescription }
         }
     }
     private func discovery(_ name: String, _ description: String, _ icon: String) -> some View {
@@ -115,16 +137,13 @@ struct BrowseChartView: View {
     let model: AppModel
     let genres: [BrowseCategory]
     let recent: Bool
-    @State private var genre = "overall"
-    @State private var chart: BrowseChart?
-    @State private var error: String?
-    @State private var generation = UUID()
-    private var requestKey: String { genre + (recent ? ":new" : ":hot") }
+    @Binding var genre: String
+    let chart: BrowseChart?
+    let error: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(recent ? "What’s New" : "What’s Hot — Top 40").font(.title2.bold())
             Picker("Chart genre", selection: $genre) { Text("All genres · U.S.").tag("overall"); ForEach(genres.filter { $0.id != "other" }) { Text($0.name).tag($0.id) } }
-            Button("Refresh chart", systemImage: "arrow.clockwise") { Task { await load() } }
             if let error { Text(error).foregroundStyle(.orange) }
             if let chart {
                 DisclosureGroup("Chart info") {
@@ -152,12 +171,7 @@ struct BrowseChartView: View {
                     if chart.items.isEmpty { Text("No recent releases in this chart. Try another genre or the full Top 40.").foregroundStyle(.secondary) }
                 }
             } else if error == nil { ProgressView("Loading chart…") }
-        }.task(id: requestKey) { await load() }
-    }
-    private func load() async {
-        let token = UUID(); generation = token; chart = nil; error = nil
-        do { let result = try await model.api.browseChart(genre: genre, recent: recent); guard generation == token, !Task.isCancelled else { return }; chart = result }
-        catch where RequestCancellation.matches(error) {} catch { if generation == token { self.error = error.localizedDescription } }
+        }
     }
 }
 

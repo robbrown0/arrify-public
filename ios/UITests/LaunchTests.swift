@@ -347,7 +347,9 @@ final class LaunchTests: XCTestCase {
             let album = app.buttons["Go to album"]
             XCTAssertTrue(album.waitForExistence(timeout: 5)); album.tap()
             XCTAssertTrue(app.navigationBars["M!ssundaztood"].waitForExistence(timeout: 10))
+            assertFullWindowOnPad(app, title: "M!ssundaztood")
             app.buttons["Done"].tap()
+            XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5))
         }
         app.buttons["More options for Just Like a Pill"].tap()
         let original = app.buttons["Browse original album"]
@@ -361,7 +363,27 @@ final class LaunchTests: XCTestCase {
         original.tap()
         XCTAssertTrue(app.navigationBars["Original album"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["M!ssundaztood"].waitForExistence(timeout: 10))
+        assertFullWindowOnPad(app, title: "Original album")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Original album from one tap"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["Close player"].waitForExistence(timeout: 5)); app.buttons["Close player"].tap()
+        app.buttons["Songs"].firstMatch.tap()
+        let menu = app.buttons["More options for Just Like a Pill"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        for (action, title) in [("Go to artist", "P!nk"), ("Go to album", "M!ssundaztood")] {
+            menu.tap(); app.buttons[action].tap()
+            XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 10))
+            assertFullWindowOnPad(app, title: title)
+            app.buttons["Done"].tap()
+            XCTAssertTrue(menu.waitForExistence(timeout: 5), "Done must return to the original song list")
+        }
+    }
+    @MainActor private func assertFullWindowOnPad(_ app: XCUIApplication, title: String) {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return }
+        let bar = app.navigationBars[title]
+        XCTAssertEqual(bar.frame.width, app.frame.width, accuracy: 4, "Music destination must fill the iPad window")
+        XCTAssertLessThan(bar.frame.minY - app.frame.minY, 100)
+        XCTAssertTrue(app.buttons["Done"].isHittable)
     }
 
     @MainActor func testSearchPopularityAndSongOptions() {
@@ -927,6 +949,14 @@ extension LaunchTests {
         }
         XCTAssertTrue(hot.isHittable); hot.tap()
         XCTAssertTrue(app.staticTexts["Unavailable fixture song"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Refresh chart"].exists)
+        app.buttons["Chart info"].tap()
+        XCTAssertTrue(app.staticTexts["Fixture chart 1"].waitForExistence(timeout: 5))
+        let chartArea = app.staticTexts["Unavailable fixture song"].frame.midX / app.frame.width
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: chartArea, dy: 0.35))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: chartArea, dy: 0.8))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertTrue(app.staticTexts["Fixture chart 2"].waitForExistence(timeout: 10), "Pull to refresh must reload the active chart")
         app.buttons["Request"].tap()
         XCTAssertTrue(app.buttons["Requested"].waitForExistence(timeout: 10))
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Native Browse chart"; shot.lifetime = .keepAlways; add(shot)

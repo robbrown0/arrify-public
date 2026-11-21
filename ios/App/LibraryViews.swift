@@ -704,6 +704,20 @@ struct StableSongMenu: UIViewRepresentable {
     }
 }
 
+// Browsing destinations use the available iPad window, with their own explicit
+// dismissal control. iPhone retains its established sheet presentation.
+private extension View {
+    @ViewBuilder func musicBrowserPresentation<Item: Identifiable, Content: View>(
+        item: Binding<Item?>, @ViewBuilder content: @escaping (Item) -> Content
+    ) -> some View {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            fullScreenCover(item: item, content: content)
+        } else {
+            sheet(item: item, content: content)
+        }
+    }
+}
+
 struct SongActionsMenu: View, Equatable {
     // Playback ticks must not rebuild an open menu. Local presentation state
     // and observed favorites still invalidate this view normally.
@@ -749,10 +763,10 @@ struct SongActionsMenu: View, Equatable {
         }.frame(width: 44, height: 44)
         .sheet(item: $playlistTrack) { selected in AddToPlaylistView(model: model, track: selected) }
         .sheet(isPresented: $showQueue) { UpNextView(playback: model.playback) }
-        .sheet(item: $destination) { entry in
+        .musicBrowserPresentation(item: $destination) { entry in
             NavigationStack { DetailScreen(model: model, entry: entry).toolbar { Button("Done") { destination = nil } } }
         }
-        .sheet(item: $originalAlbumTrack) { selected in OriginalAlbumView(model: model, track: selected) }
+        .musicBrowserPresentation(item: $originalAlbumTrack) { selected in OriginalAlbumView(model: model, track: selected) }
     }
 }
 
