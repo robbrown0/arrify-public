@@ -10,7 +10,9 @@ function mountCatalogBrowser(view, epoch) {
  try{const saved=localStorage.getItem(storage);if([...sort.options].some(x=>x.value===saved))sort.value=saved}catch{}
  let generation=0,disposed=false,busy=false,offset=0,revision=null,rows=[],failed=false,observer,timer;
  const valid=()=>!disposed&&epoch===requestEpoch&&owner===me?.id&&root.isConnected;
- const options=()=>({q:query.value.trim(),sort:sort.value});
+ let browseSort=sort.value;
+ function syncSort(){const searching=Boolean(query.value.trim());sort.value=searching?'relevance':browseSort;sort.disabled=searching}
+ const options=()=>({q:query.value.trim(),sort:query.value.trim()?'relevance':browseSort});
  function playbackContext(){if(view==='songs')context={source:{kind:'catalog',id:JSON.stringify(options())}}}
  async function load(reset=false){
   if(!valid()||(!reset&&(busy||offset===null)))return;
@@ -29,8 +31,8 @@ function mountCatalogBrowser(view, epoch) {
   }catch(error){if(valid()&&ticket===generation){failed=true;status.textContent=error.status===409?'The library changed. Refresh this list to continue.':'Couldn’t load '+view+'.';retry.textContent=error.status===409?'Refresh list':'Retry';retry.dataset.reset=String(error.status===409);retry.hidden=false}}
   finally{if(valid()&&ticket===generation){busy=false;more.removeAttribute('aria-busy');observer?.unobserve(more);if(offset!==null&&!failed)observer?.observe(more)}}
  }
- query.oninput=()=>{clearTimeout(timer);generation++;timer=setTimeout(()=>load(true),250)};
- sort.onchange=()=>{try{localStorage.setItem(storage,sort.value)}catch{}clearTimeout(timer);load(true)};
+ query.oninput=()=>{syncSort();clearTimeout(timer);generation++;timer=setTimeout(()=>load(true),250)};
+ sort.onchange=()=>{browseSort=sort.value;try{localStorage.setItem(storage,sort.value)}catch{}clearTimeout(timer);load(true)};
  retry.onclick=()=>load(retry.dataset.reset==='true');
  if(typeof IntersectionObserver==='function'){observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)&&!failed)load()},{rootMargin:'0px 0px 400px 0px'})}
  load(true);

@@ -23,6 +23,10 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
   await p.locator('#catalog-query').fill('old');await p.waitForTimeout(280);await p.locator('#catalog-query').fill('new');
   await p.waitForTimeout(800);assert.equal(await p.locator(view==='songs'?'#catalog-results .track-name':'#catalog-results h3').textContent(),'new');
   assert.ok(await p.evaluate(()=>calls.some(x=>x.includes('kind='+('songs'===document.querySelector('h1').textContent.toLowerCase()?'tracks':document.querySelector('h1').textContent.toLowerCase())))));
+  assert.equal(await p.locator('#catalog-sort').inputValue(),'relevance');assert.equal(await p.locator('#catalog-sort').isDisabled(),true);
+  assert.equal(await p.evaluate(()=>new URL('https://fixture.invalid'+calls.at(-1)).searchParams.get('sort')),'relevance');
+  if(view==='songs')assert.equal(await p.evaluate(()=>JSON.parse(context.source.id).sort),'relevance');
+  await p.locator('#catalog-query').fill('');await p.waitForTimeout(350);assert.equal(await p.locator('#catalog-sort').inputValue(),'recent');assert.equal(await p.locator('#catalog-sort').isEnabled(),true);
   for(const width of [320,393,834,1440]){await p.setViewportSize({width,height:852});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false)}
  }
  await p.evaluate(()=>{pager.dispose();document.querySelector('#content').innerHTML=catalogBrowserView('songs');window.retried=false;window.pager=mountCatalogBrowser('songs',1)});
