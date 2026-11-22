@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Songs now loads earlier songs automatically as you scroll upward, without an Earlier items button or Show playing song bar. Open Songs during playback to start at the playing track; paused playback opens the normal sorted view. Manual browsing stays in place as playback advances. Includes unified search and exact-match ranking from the previous update. Please test scrolling across page boundaries, reopening Songs during local and remote playback, search, and song-action menus.'}
+    attrs = {'whatsNew': 'Same app code as internal build 38, uploaded as build 39 for external beta testing. Downloaded upcoming songs can start locally without waiting for server confirmation, with faster cached Next and improved recovery after connection loss. Chart refresh uses pull-to-refresh and refresh on entry; iPad album and artist destinations open full screen with Done. Please test song transitions, repeated skips, background and car playback, AirPlay, interruptions, and reconnection. Offline playback requires completed downloads; report any stalled cache downloads with Playback diagnostics.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:
