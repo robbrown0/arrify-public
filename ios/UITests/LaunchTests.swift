@@ -54,9 +54,12 @@ final class LaunchTests: XCTestCase {
             let frame = retry.frame
             return !frame.isEmpty && list.frame.contains(frame)
         }
+        // Traverse the full 120-item fixture with deliberate flings. Default
+        // short swipes need dozens of accessibility round trips on iPhone.
+        // Keep the same visible Retry/final-row assertions and timeout.
         for _ in 0..<35 {
             if retryFullyVisible() { break }
-            list.swipeUp()
+            list.swipeUp(velocity: .fast)
         }
         XCTAssertTrue(retryFullyVisible(), "Reaching the boundary must show the next-page retry")
         // The frame is verified inside the list; avoid UIKit's transient invalid
@@ -67,7 +70,7 @@ final class LaunchTests: XCTestCase {
         let last = row(120)
         for _ in 0..<55 {
             if last.exists && last.isHittable { break }
-            list.swipeUp()
+            list.swipeUp(velocity: .fast)
         }
         XCTAssertTrue(last.isHittable, "Continuous paging must reach the final item")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
