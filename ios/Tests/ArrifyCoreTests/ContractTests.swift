@@ -290,22 +290,39 @@ private actor AuthEvents {
 }
 private actor RecoveryTransport: HTTPTransport {
     let base = FakeTransport()
-    var offline = false; var reject = false; var temporary = false
+    var offline = false; var reject = false; var temporary = false; var throttled = false
     var attempts: [String] = []
     var foregroundMarker: String?
     func setOffline(_ value: Bool) { offline = value }
     func setReject(_ value: Bool) { reject = value }
     func setTemporary(_ value: Bool) { temporary = value }
+    func setThrottled(_ value: Bool) { throttled = value }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         if offline { throw URLError(.notConnectedToInternet) }
         if request.url?.path.hasSuffix("refresh") == true {
             let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: String]
             attempts.append(body["attempt_id"]!)
             if reject { return HTTPResult(status: 401, data: Data(#"{"error":{"code":"invalid_refresh","message":"Sign in again."}}"#.utf8)) }
+            if throttled { return HTTPResult(status: 429, data: Data(), retryAfterSeconds: 900) }
             if temporary { return HTTPResult(status: 503, data: Data()) }
             if attempts.count == 1 { throw URLError(.networkConnectionLost) }
         }
         if request.url?.path.hasSuffix("catalog") == true { foregroundMarker = request.value(forHTTPHeaderField: "X-Arrify-Foreground") }
         return try await base.send(request)
+    }
+}
+
+extension ContractTests {
+    func testServerThrottleSurvivesConnectivityChangesWithoutLosingLogin() async throws {
+        let transport = RecoveryTransport(); let store = MemoryStore()
+        await transport.setThrottled(true)
+        let api = APIClient(transport: transport, store: store)
+        try await api.login(endpoint: "https://example.com", username: "test", password: "test", deviceName: "test")
+        _ = try? await api.catalog(query: "")
+        await api.networkChanged()
+        _ = try? await api.catalog(query: "")
+        let attempts = await transport.attempts; let saved = try await store.load()
+        XCTAssertEqual(attempts.count, 1)
+        XCTAssertNotNil(saved)
     }
 }

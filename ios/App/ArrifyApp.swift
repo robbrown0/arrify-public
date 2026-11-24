@@ -16,7 +16,9 @@ import AVKit
     var error: String?
     var accountDeleted = false
     init(api suppliedAPI: APIClient? = nil) {
-        if let suppliedAPI { api = suppliedAPI } else {
+        if let suppliedAPI { api = suppliedAPI }
+        else if let existing = RemoteControlRuntime.api { api = existing }
+        else {
         #if DEBUG
         if ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] == "1" {
             api = APIClient(transport: UITestTransport(), store: UITestStore())
