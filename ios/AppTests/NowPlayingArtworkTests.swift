@@ -34,6 +34,25 @@ final class NowPlayingArtworkTests: XCTestCase {
         model.playback.stop()
     }
 
+    @MainActor func testLibraryRefreshRecoversPlaybackOwnershipWithoutWaitingForPoll() async throws {
+        let transport = AuthRevocationTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        let model = AppModel(api: api)
+        await model.restore()
+        await model.login(username: "fixture", password: "fixture")
+        model.playback.stop() // Isolate recovery from the periodic playback poll.
+        await transport.expireNextLibraryAccess()
+        _ = try await api.library()
+        for _ in 0..<100 where model.playback.state == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(model.signedIn)
+        XCTAssertEqual(model.playback.state?.ownerDeviceId, "other-device")
+        XCTAssertEqual(model.playback.state?.currentTrackId, 1)
+        XCTAssertFalse(model.playback.ownsOutput)
+        await model.playback.send("takeover")
+        XCTAssertTrue(model.playback.ownsOutput)
+        model.playback.stop()
+    }
+
     func testCatalogSectionTitlesFollowUnicodeCasefoldOrder() {
         let expected: [(String, String)] = [
             ("Sail", "S"), ("ßeta", "S"), ("Sun", "S"),
@@ -903,8 +922,14 @@ private actor AuthRevocationTransport: HTTPTransport {
     let fixture = UITestTransport()
     var revoked = false
     var remote = true
+    var expireLibrary = false
     func setRevoked(_ value: Bool) { revoked = value }
+    func expireNextLibraryAccess() { expireLibrary = true }
     func send(_ request: URLRequest) async throws -> HTTPResult {
+        if expireLibrary && request.url?.path == "/api/v1/native/library" {
+            expireLibrary = false
+            return HTTPResult(status: 401, data: Data(#"{"error":{"code":"expired_access","message":"Refresh access."}}"#.utf8))
+        }
         if revoked && (request.value(forHTTPHeaderField: "Authorization") != nil || request.url?.path.hasSuffix("refresh") == true) {
             return HTTPResult(status: 401, data: Data(#"{"error":{"code":"invalid_refresh","message":"Sign in again."}}"#.utf8))
         }

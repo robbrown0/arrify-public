@@ -44,6 +44,13 @@ import AVKit
     }
     func authenticationEvent(_ event: String) async {
         PlaybackDiagnostics.event("auth-" + event)
+        if event == "refresh-ready", signedIn {
+            Task { [weak self] in
+                guard let self, self.signedIn else { return }
+                await self.playback.reconcile(report: false)
+            }
+            return
+        }
         guard event == "sign-in-required" else { return }
         playback.stop(); library.clear(); favorites.clear(); artwork.clear()
         signedIn = false; error = "Your session has ended. Please sign in again."
