@@ -64,6 +64,7 @@ public actor APIClient {
         return result
     }
     public func restore() async throws -> String? {
+        if let credential { return credential.endpoint }
         let epoch = generation
         guard let saved = try await store.load() else { return nil }
         _ = try Endpoint(saved.endpoint)
