@@ -24,7 +24,11 @@ final class NowPlayingArtworkTests: XCTestCase {
         XCTAssertTrue(model.signedIn)
         XCTAssertNil(model.error)
         XCTAssertNotNil(model.playback.state)
+        XCTAssertEqual(model.playback.state?.ownerDeviceId, "other-device")
+        XCTAssertEqual(model.playback.state?.currentTrackId, 1)
         XCTAssertFalse(model.playback.ownsOutput)
+        await model.playback.send("takeover")
+        XCTAssertTrue(model.playback.ownsOutput)
         model.playback.stop()
     }
 
@@ -896,11 +900,22 @@ private actor FailedPageTransport: HTTPTransport {
 private actor AuthRevocationTransport: HTTPTransport {
     let fixture = UITestTransport()
     var revoked = false
+    var remote = true
     func setRevoked(_ value: Bool) { revoked = value }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         if revoked && (request.value(forHTTPHeaderField: "Authorization") != nil || request.url?.path.hasSuffix("refresh") == true) {
             return HTTPResult(status: 401, data: Data(#"{"error":{"code":"invalid_refresh","message":"Sign in again."}}"#.utf8))
         }
-        return try await fixture.send(request)
+        let response = try await fixture.send(request)
+        if request.url?.path == "/api/v1/native/playback" {
+            if request.httpMethod == "POST" { remote = false }
+            if remote {
+                var state = try JSONSerialization.jsonObject(with: response.data) as! [String: Any]
+                state["owner_device_id"] = "other-device"; state["owner_active"] = true
+                state["current_track_id"] = 1; state["playing"] = true; state["observed"] = "playing"
+                return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: state))
+            }
+        }
+        return response
     }
 }

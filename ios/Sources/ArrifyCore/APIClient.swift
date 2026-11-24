@@ -198,6 +198,7 @@ public actor APIClient {
         let epoch = generation
         var saved = try await access()
         var response = try await sendAuthorized(path, method: method, body: body, saved: saved)
+        guard epoch == generation else { throw CancellationError() }
         if response.status == 401 {
             saved = try await access(force: credential?.tokens.accessToken == saved.tokens.accessToken)
             response = try await sendAuthorized(path, method: method, body: body, saved: saved)
