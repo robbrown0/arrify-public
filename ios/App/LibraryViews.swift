@@ -449,6 +449,34 @@ struct NativeListScrollObserver: UIViewRepresentable {
     }
 }
 
+/// Keep geometry tied to the page that produced it. List may remove the old
+/// footer after reporting the new footer, and may report visibility repeatedly
+/// before a SwiftUI task starts. Neither event may erase or cancel pending work.
+struct CatalogPageBoundary {
+    private(set) var offset: Int?
+    private(set) var frame = CGRect.zero
+    private(set) var inFlight = false
+
+    mutating func update(offset: Int, frame: CGRect, currentOffset: Int?) {
+        guard offset == currentOffset else { return }
+        self.offset = offset
+        self.frame = frame
+    }
+    mutating func remove(offset: Int) {
+        guard self.offset == offset else { return }
+        self.offset = nil
+        frame = .zero
+    }
+    mutating func begin(currentOffset: Int?, viewport: CGRect, loading: Bool, hasError: Bool) -> Bool {
+        guard !inFlight, !loading, !hasError, let currentOffset,
+              offset == currentOffset, !frame.isEmpty, !viewport.isEmpty,
+              viewport.intersects(frame) else { return false }
+        inFlight = true
+        return true
+    }
+    mutating func finish() { inFlight = false }
+}
+
 /// User-driven scrolling always wins over playback following. Only the active
 /// collection (or the unfiltered Songs view) follows, never a different playlist.
 struct FollowingSongList<Content: View>: View {
@@ -466,13 +494,13 @@ struct FollowingSongList<Content: View>: View {
     @State private var previousRequest = 0
     @State private var pagingPrevious = false
     @State private var viewport = CGRect.zero
-    @State private var nextVisible = false
+    @State private var nextBoundary = CatalogPageBoundary()
     @State private var nextRequest = 0
     private var currentID: Int? { model.playback.state?.currentTrackId }
     var body: some View {
         ScrollViewReader { proxy in
             positionedList(observedList(pagedList), proxy: proxy)
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { viewport = $0 }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { viewport = $0; requestNext() }
         }
     }
     private var songList: some View {
@@ -490,10 +518,11 @@ struct FollowingSongList<Content: View>: View {
             if let offset = browser.nextOffset, browser.error == nil {
                 ProgressView().frame(maxWidth: .infinity)
                     .accessibilityLabel("Loading more items")
-                    .onGeometryChange(for: Bool.self) { geometry in
-                        viewport.height > 0 && viewport.intersects(geometry.frame(in: .global))
-                    } action: { visible in nextVisible = visible; if visible { requestNext() } }
-                    .onDisappear { nextVisible = false }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                        nextBoundary.update(offset: offset, frame: frame, currentOffset: browser.nextOffset)
+                        requestNext()
+                    }
+                    .onDisappear { nextBoundary.remove(offset: offset) }
                     .id("next-page-\(offset)")
             }
             if browser.error != nil {
@@ -520,8 +549,9 @@ struct FollowingSongList<Content: View>: View {
                 await browser.load(query: query, previous: true)
             }
             .task(id: nextRequest) {
-                guard nextRequest > 0, nextVisible, !browser.loading, browser.error == nil else { return }
-                nextVisible = false
+                guard nextRequest > 0, nextBoundary.inFlight else { return }
+                defer { nextBoundary.finish(); requestNext() }
+                guard !Task.isCancelled else { return }
                 await browser.load(query: query, more: true)
             }
             .onChange(of: browser.loading) { if !browser.loading { requestPrevious(); requestNext() } }
@@ -559,7 +589,8 @@ struct FollowingSongList<Content: View>: View {
             }
     }
     private func requestNext() {
-        guard nextVisible, !browser.loading, browser.error == nil, browser.nextOffset != nil else { return }
+        guard nextBoundary.begin(currentOffset: browser.nextOffset, viewport: viewport,
+                                 loading: browser.loading, hasError: browser.error != nil) else { return }
         nextRequest += 1
     }
     private func cancelPrevious() {

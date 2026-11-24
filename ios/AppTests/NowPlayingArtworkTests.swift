@@ -946,3 +946,49 @@ private actor AuthRevocationTransport: HTTPTransport {
         return response
     }
 }
+
+
+extension NowPlayingArtworkTests {
+    @MainActor func testPageBoundaryRetainsNewPageWhenOldFooterDisappears() {
+        var boundary = CatalogPageBoundary()
+        let viewport = CGRect(x: 0, y: 0, width: 400, height: 700)
+        let visible = CGRect(x: 0, y: 640, width: 400, height: 40)
+        boundary.update(offset: 50, frame: visible, currentOffset: 50)
+        XCTAssertTrue(boundary.begin(currentOffset: 50, viewport: viewport, loading: false, hasError: false))
+        // The new page can be laid out before the old footer disappears and
+        // before the previous request finishes unwinding.
+        boundary.update(offset: 100, frame: visible, currentOffset: 100)
+        boundary.remove(offset: 50)
+        boundary.update(offset: 50, frame: .zero, currentOffset: 100)
+        XCTAssertFalse(boundary.begin(currentOffset: 100, viewport: viewport, loading: false, hasError: false))
+        boundary.finish()
+        XCTAssertTrue(boundary.begin(currentOffset: 100, viewport: viewport, loading: false, hasError: false))
+    }
+    @MainActor func testPageBoundaryCoalescesEventsAndRecoversWithoutAnotherVisibilityChange() {
+        var boundary = CatalogPageBoundary()
+        let viewport = CGRect(x: 0, y: 0, width: 400, height: 700)
+        let visible = CGRect(x: 0, y: 640, width: 400, height: 40)
+        boundary.update(offset: 50, frame: visible, currentOffset: 50)
+        // Geometry arriving during another load must be retained for completion.
+        XCTAssertFalse(boundary.begin(currentOffset: 50, viewport: viewport, loading: true, hasError: false))
+        XCTAssertTrue(boundary.begin(currentOffset: 50, viewport: viewport, loading: false, hasError: false))
+        for _ in 0..<3 {
+            boundary.update(offset: 50, frame: visible, currentOffset: 50)
+            XCTAssertFalse(boundary.begin(currentOffset: 50, viewport: viewport, loading: false, hasError: false))
+        }
+        boundary.finish()
+        XCTAssertFalse(boundary.begin(currentOffset: 50, viewport: viewport, loading: false, hasError: true), "A failed page must wait for explicit Retry")
+        XCTAssertTrue(boundary.begin(currentOffset: 50, viewport: viewport, loading: false, hasError: false), "A cancelled load must remain recoverable without scrolling away and back")
+    }
+    @MainActor func testPageBoundaryDoesNotLoadPrefetchedOrStaleFooter() {
+        var boundary = CatalogPageBoundary()
+        let viewport = CGRect(x: 0, y: 0, width: 400, height: 700)
+        boundary.update(offset: 50, frame: CGRect(x: 0, y: 900, width: 400, height: 40), currentOffset: 50)
+        XCTAssertFalse(boundary.begin(currentOffset: 50, viewport: viewport, loading: false, hasError: false))
+        boundary.update(offset: 50, frame: CGRect(x: 0, y: 640, width: 400, height: 40), currentOffset: 50)
+        XCTAssertFalse(boundary.begin(currentOffset: 100, viewport: viewport, loading: false, hasError: false))
+        XCTAssertFalse(boundary.begin(currentOffset: nil, viewport: viewport, loading: false, hasError: false))
+        boundary.remove(offset: 50)
+        XCTAssertFalse(boundary.begin(currentOffset: 50, viewport: viewport, loading: false, hasError: false))
+    }
+}
