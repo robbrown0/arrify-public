@@ -62,6 +62,8 @@ final class ServerRouterTests: XCTestCase {
         let restored = APIClient(transport: transport, store: store)
         let address = try await restored.restore()
         XCTAssertEqual(address, "https://public.test")
+        // Restore is offline-safe; routing is verified on the first actual request.
+        _ = try await restored.catalog(query: "")
         let status = await restored.connection()
         XCTAssertTrue(status.home)
     }

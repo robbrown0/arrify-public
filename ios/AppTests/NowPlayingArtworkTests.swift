@@ -15,12 +15,14 @@ final class NowPlayingArtworkTests: XCTestCase {
         XCTAssertTrue(model.signedIn)
         await transport.setRevoked(true)
         _ = try? await api.library()
+        for _ in 0..<100 where model.signedIn { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertFalse(model.signedIn)
         XCTAssertNotNil(model.error)
         XCTAssertNil(model.playback.state)
         await transport.setRevoked(false)
         await model.login(username: "fixture", password: "fixture")
         await model.playback.reconcile()
+        for _ in 0..<100 where model.playback.state == nil { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertTrue(model.signedIn)
         XCTAssertNil(model.error)
         XCTAssertNotNil(model.playback.state)
