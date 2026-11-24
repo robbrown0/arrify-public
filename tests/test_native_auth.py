@@ -27,21 +27,67 @@ class NativeAuthTests(unittest.TestCase):
         first = self.login()
         second = self.service.refresh(first['refresh_token'])
         self.assertNotEqual(first['refresh_token'], second['refresh_token'])
-        self.assertEqual(second['expires_in'], 900)
+        self.assertEqual(second['expires_in'], 3600)
         self.assertEqual(self.a.identity(second['access_token'], 'native')['username'], 'listener')
         with self.assertRaises(NativeError): self.service.refresh(first['refresh_token'])
         with self.assertRaises(NativeError): self.service.refresh(second['refresh_token'])
         for item in (first, second):
             with self.assertRaises(PermissionError): self.a.identity(item['access_token'], 'native')
 
-    def test_expired_access_can_renew_but_absolute_refresh_expiry_cannot(self):
+    def test_expired_access_can_renew_but_inactive_session_cannot(self):
         first = self.login()
-        with patch('time.time', return_value=__import__('time').time() + 901):
+        with patch('time.time', return_value=__import__('time').time() + 3601):
             with self.assertRaises(PermissionError): self.a.identity(first['access_token'], 'native')
             second = self.service.refresh(first['refresh_token'])
             self.assertLess(second['refresh_expires_in'], first['refresh_expires_in'])
         with patch('time.time', return_value=__import__('time').time() + 31 * 86400):
             with self.assertRaises(NativeError): self.service.refresh(second['refresh_token'])
+
+    def test_recovery_survives_service_restart_without_storing_secrets(self):
+        first = self.login(); attempt = 'a' * 32
+        second = self.service.refresh(first['refresh_token'], attempt)
+        restarted = NativeSessions(self.a)
+        recovered = restarted.refresh(first['refresh_token'], attempt)
+        self.assertEqual(second, recovered)
+        dump = '\n'.join(self.a.db.iterdump())
+        for secret in (first['refresh_token'], second['access_token'], second['refresh_token'], attempt):
+            self.assertNotIn(secret, dump)
+        restarted.refresh(second['refresh_token'], 'b' * 32)
+        with self.assertRaises(NativeError): restarted.refresh(first['refresh_token'], attempt)
+
+    def test_same_attempt_concurrency_recovers_but_different_attempt_revokes(self):
+        first = self.login()
+        with concurrent.futures.ThreadPoolExecutor(2) as pool:
+            results = list(pool.map(lambda _: self.service.refresh(first['refresh_token'], 'a' * 32), range(2)))
+        self.assertEqual(results[0], results[1])
+        self.a.identity(results[0]['access_token'], 'native')
+        with self.assertRaises(NativeError): self.service.refresh(first['refresh_token'], 'b' * 32)
+        with self.assertRaises(PermissionError): self.a.identity(results[0]['access_token'], 'native')
+
+    def test_recovery_is_bounded_and_does_not_extend_access_expiration(self):
+        first = self.login(); now = __import__('time').time()
+        second = self.service.refresh(first['refresh_token'], 'a' * 32)
+        with patch('time.time', return_value=now + 4000):
+            recovered = self.service.refresh(first['refresh_token'], 'a' * 32)
+            self.assertEqual(recovered['expires_in'], 0)
+            self.assertEqual(recovered['refresh_token'], second['refresh_token'])
+        with patch('time.time', return_value=now + 86401):
+            with self.assertRaises(NativeError): self.service.refresh(first['refresh_token'], 'a' * 32)
+
+    def test_foreground_activity_slides_past_90_days_background_refresh_does_not(self):
+        first = self.login(); now = __import__('time').time(); current = first
+        for day in range(1, 101):
+            with patch('time.time', return_value=now + day * 86400):
+                current = self.service.refresh(current['refresh_token'])
+                self.service.activity(current['access_token'])
+        with patch('time.time', return_value=now + 131 * 86400):
+            with self.assertRaises(NativeError): self.service.refresh(current['refresh_token'])
+        other = self.login()
+        for day in range(1, 30):
+            with patch('time.time', return_value=now + day * 86400):
+                other = self.service.refresh(other['refresh_token'])
+        with patch('time.time', return_value=now + 31 * 86400):
+            with self.assertRaises(NativeError): self.service.refresh(other['refresh_token'])
 
     def test_account_revocation_and_session_isolation(self):
         first, second = self.login(), self.login()

@@ -6,7 +6,8 @@ import FoundationNetworking
 public struct HTTPResult: Sendable {
     public let status: Int
     public let data: Data
-    public init(status: Int, data: Data) { self.status = status; self.data = data }
+    public let retryAfterSeconds: Double?
+    public init(status: Int, data: Data, retryAfterSeconds: Double? = nil) { self.status = status; self.data = data; self.retryAfterSeconds = retryAfterSeconds }
 }
 public protocol HTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> HTTPResult
@@ -29,7 +30,7 @@ public final class SessionTransport: HTTPTransport, Sendable {
     public func send(_ request: URLRequest) async throws -> HTTPResult {
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        return HTTPResult(status: response.statusCode, data: data)
+        return HTTPResult(status: response.statusCode, data: data, retryAfterSeconds: response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init))
     }
     public func listeningEvents(_ request: URLRequest, changed: @escaping @Sendable () async -> Void) async throws {
         #if canImport(FoundationNetworking)

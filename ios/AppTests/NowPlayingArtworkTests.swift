@@ -6,6 +6,53 @@ import ArrifyCore
 @testable import Arrify
 
 final class NowPlayingArtworkTests: XCTestCase {
+    @MainActor func testRevokedSessionLeavesAppAndLoginRestoresOtherDeviceState() async throws {
+        let transport = AuthRevocationTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        let model = AppModel(api: api)
+        await model.restore()
+        await model.login(username: "fixture", password: "fixture")
+        XCTAssertTrue(model.signedIn)
+        await transport.setRevoked(true)
+        _ = try? await api.library()
+        for _ in 0..<100 where model.signedIn { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertFalse(model.signedIn)
+        XCTAssertNotNil(model.error)
+        XCTAssertNil(model.playback.state)
+        await transport.setRevoked(false)
+        await model.login(username: "fixture", password: "fixture")
+        await model.playback.reconcile()
+        for _ in 0..<100 where model.playback.state == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(model.signedIn)
+        XCTAssertNil(model.error)
+        XCTAssertNotNil(model.playback.state)
+        XCTAssertEqual(model.playback.state?.ownerDeviceId, "other-device")
+        XCTAssertEqual(model.playback.state?.currentTrackId, 1)
+        XCTAssertFalse(model.playback.ownsOutput)
+        await model.playback.send("takeover")
+        XCTAssertTrue(model.playback.ownsOutput)
+        model.playback.stop()
+    }
+
+    @MainActor func testLibraryRefreshRecoversPlaybackOwnershipWithoutWaitingForPoll() async throws {
+        let transport = AuthRevocationTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        let model = AppModel(api: api)
+        await model.restore()
+        await model.login(username: "fixture", password: "fixture")
+        model.playback.stop() // Isolate recovery from the periodic playback poll.
+        await transport.expireNextLibraryAccess()
+        _ = try await api.library()
+        for _ in 0..<100 where model.playback.state == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(model.signedIn)
+        XCTAssertEqual(model.playback.state?.ownerDeviceId, "other-device")
+        XCTAssertEqual(model.playback.state?.currentTrackId, 1)
+        XCTAssertFalse(model.playback.ownsOutput)
+        await model.playback.send("takeover")
+        XCTAssertTrue(model.playback.ownsOutput)
+        model.playback.stop()
+    }
+
     func testCatalogSectionTitlesFollowUnicodeCasefoldOrder() {
         let expected: [(String, String)] = [
             ("Sail", "S"), ("ßeta", "S"), ("Sun", "S"),
@@ -868,5 +915,34 @@ private actor FailedPageTransport: HTTPTransport {
             : ["id": String(offset + 1), "kind": kind, "name": "Item", "subtitle": "", "section": "", "track_count": 1]
         let page: [String: Any] = ["items": [row], "total": 2, "offset": offset, "revision": "fixture", "next_offset": offset == 0 ? 1 as Any : NSNull()]
         return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: page))
+    }
+}
+
+private actor AuthRevocationTransport: HTTPTransport {
+    let fixture = UITestTransport()
+    var revoked = false
+    var remote = true
+    var expireLibrary = false
+    func setRevoked(_ value: Bool) { revoked = value }
+    func expireNextLibraryAccess() { expireLibrary = true }
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        if expireLibrary && request.url?.path == "/api/v1/native/library" {
+            expireLibrary = false
+            return HTTPResult(status: 401, data: Data(#"{"error":{"code":"expired_access","message":"Refresh access."}}"#.utf8))
+        }
+        if revoked && (request.value(forHTTPHeaderField: "Authorization") != nil || request.url?.path.hasSuffix("refresh") == true) {
+            return HTTPResult(status: 401, data: Data(#"{"error":{"code":"invalid_refresh","message":"Sign in again."}}"#.utf8))
+        }
+        let response = try await fixture.send(request)
+        if request.url?.path == "/api/v1/native/playback" {
+            if request.httpMethod == "POST" { remote = false }
+            if remote {
+                var state = try JSONSerialization.jsonObject(with: response.data) as! [String: Any]
+                state["owner_device_id"] = "other-device"; state["owner_active"] = true
+                state["current_track_id"] = 1; state["playing"] = true; state["observed"] = "playing"
+                return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: state))
+            }
+        }
+        return response
     }
 }

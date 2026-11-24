@@ -98,8 +98,8 @@ actor UITestTransport: HTTPTransport {
         } else if path.hasSuffix("/local-presence") {
             return HTTPResult(status: 403, data: Data(#"{"error":{"code":"local_network_required","message":"The playing device is not available for local verification."}}"#.utf8))
         } else if path.hasSuffix("capabilities") {
-            value = #"{"server_id":"fixture","features":["rotating_refresh","native_media_manifest_v1","native_catalog_v1","native_playback_v1","native_library_v1"]}"#
-        } else if path.hasSuffix("sessions") {
+            value = #"{"server_id":"fixture","features":["rotating_refresh","refresh_recovery_v1","native_media_manifest_v1","native_catalog_v1","native_playback_v1","native_library_v1"]}"#
+        } else if path.hasSuffix("sessions") || path.hasSuffix("refresh") {
             value = #"{"access_token":"fixture","refresh_token":"fixture","expires_in":900,"refresh_expires_in":3600,"session_id":"fixture"}"#
         } else if path.hasSuffix("/favorites") {
             if request.httpMethod == "POST", let body = request.httpBody,

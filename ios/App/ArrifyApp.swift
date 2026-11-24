@@ -15,7 +15,10 @@ import AVKit
     var homeEndpoint = ""
     var error: String?
     var accountDeleted = false
-    init() {
+    init(api suppliedAPI: APIClient? = nil) {
+        if let suppliedAPI { api = suppliedAPI }
+        else if let existing = RemoteControlRuntime.api { api = existing }
+        else {
         #if DEBUG
         if ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] == "1" {
             api = APIClient(transport: UITestTransport(), store: UITestStore())
@@ -23,6 +26,7 @@ import AVKit
         #else
         api = APIClient(store: KeychainStore())
         #endif
+        }
         #if DEBUG
         if ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] == "1" {
             playback = PlaybackCoordinator(api: api, audioSession: UITestAudioSession())
@@ -38,7 +42,24 @@ import AVKit
         }
         RemoteControlRuntime.api = api
     }
+    func authenticationEvent(_ event: String) async {
+        PlaybackDiagnostics.event("auth-" + event)
+        if event == "refresh-ready", signedIn {
+            Task { [weak self] in
+                guard let self, self.signedIn else { return }
+                await self.playback.reconcile(report: false)
+            }
+            return
+        }
+        guard event == "sign-in-required" else { return }
+        playback.stop(); library.clear(); favorites.clear(); artwork.clear()
+        signedIn = false; error = "Your session has ended. Please sign in again."
+        await playback.remoteActivity.stop()
+    }
     func restore() async {
+        await api.setAuthEvents { [weak self] event in
+            await self?.authenticationEvent(event)
+        }
         defer {
             if !signedIn, ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] != "1",
                let addresses = SavedServerAddresses.value {
@@ -48,13 +69,13 @@ import AVKit
             restoring = false
         }
         do {
-            if let saved = try await api.restore() { endpoint = saved; homeEndpoint = await api.connectionAddresses()?.homeAddress ?? ""; signedIn = true; await playback.remoteActivity.restoreForSession(); playback.start() }
+            if let saved = try await api.restore() { endpoint = saved; homeEndpoint = await api.connectionAddresses()?.homeAddress ?? ""; signedIn = true; restoring = false; await playback.remoteActivity.restoreForSession(); if signedIn { playback.start() } }
         } catch { self.error = error.localizedDescription }
     }
     func login(username: String, password: String) async {
         do {
             try await api.login(endpoint: endpoint, homeEndpoint: homeEndpoint, username: username, password: password, deviceName: UIDevice.current.model)
-            signedIn = true; error = nil; await playback.remoteActivity.restoreForSession(); playback.start()
+            signedIn = true; error = nil; await playback.remoteActivity.restoreForSession(); if signedIn { playback.start() }
         } catch { self.error = error.localizedDescription }
     }
     func refreshBranding() async {
@@ -92,9 +113,11 @@ import AVKit
             .task {
                 PlaybackDiagnostics.event("launch build=" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"))
                 PlaybackDiagnostics.configure(active: scenePhase == .active)
+                await model.api.setForeground(scenePhase == .active)
                 await model.restore()
             }
             .onChange(of: scenePhase) {
+                Task { await model.api.setForeground(scenePhase == .active) }
                 PlaybackDiagnostics.event("scene=\(scenePhase)")
                 PlaybackDiagnostics.configure(active: scenePhase == .active)
             }
