@@ -25,14 +25,15 @@ public actor APIClient {
     private var foreground = false
     private var refreshFailures = 0
     private var retryAfter = Date.distantPast
+    private var serverRetryAfter = Date.distantPast
     private var authEvent: (@Sendable (String) async -> Void)?
     public func setAuthEvents(_ handler: @escaping @Sendable (String) async -> Void) { authEvent = handler }
     public func setForeground(_ active: Bool) { foreground = active }
-    public func hasCredential() -> Bool { credential != nil }
     private func invalidateSession() async {
-        generation = UUID(); refreshTask?.cancel()
+        generation = UUID(); let epoch = generation; refreshTask?.cancel()
         credential = nil; refreshTask = nil; retryAfter = .distantPast
         try? await store.clear()
+        guard epoch == generation else { return }
         await authEvent?("sign-in-required")
     }
     public init(transport: any HTTPTransport = SessionTransport(), store: any CredentialStore) {
@@ -91,13 +92,13 @@ public actor APIClient {
         value.artworkAccount = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         try await store.save(value)
         guard generation == epoch else { throw CancellationError() }
-        credential = value; refreshFailures = 0; retryAfter = .distantPast
+        credential = value; refreshFailures = 0; retryAfter = .distantPast; serverRetryAfter = .distantPast
     }
     private func access(force: Bool = false) async throws -> Credential {
         if let task = refreshTask { return try await task.value }
         guard var saved = credential else { throw APIError.signInRequired }
         if !force && saved.accessExpires.timeIntervalSinceNow > 60 { return saved }
-        guard Date() >= retryAfter else { throw URLError(.notConnectedToInternet) }
+        guard Date() >= max(retryAfter, serverRetryAfter) else { throw URLError(.notConnectedToInternet) }
         let epoch = generation
         let task = Task<Credential, Error> {
             let endpoint: Endpoint
@@ -119,7 +120,7 @@ public actor APIClient {
             await authEvent?("refresh-start")
             let response = try await transport.send(Self.request(endpoint: endpoint, path: "/api/v1/native/refresh", method: "POST", body: body))
             if response.status == 429, let delay = response.retryAfterSeconds {
-                retryAfter = Date().addingTimeInterval(min(3600, max(0, delay)))
+                serverRetryAfter = Date().addingTimeInterval(min(3600, max(0, delay)))
             }
             let pair = try Self.decode(response, as: TokenPair.self)
             var renewed = Credential(endpoint: saved.endpoint, serverId: saved.serverId, tokens: pair, homeEndpoint: saved.homeEndpoint, serverPublicKey: saved.serverPublicKey)
@@ -400,8 +401,7 @@ public actor APIClient {
             catch APIError.rejected(let status, _, _) where status == 401 {
                 guard epoch == generation else { throw CancellationError() }
                 guard attempt == 0 else {
-                    if status == 401 { await invalidateSession(); throw APIError.signInRequired }
-                    throw APIError.rejected(status: status, code: "events_unavailable", message: "Live updates unavailable.")
+                    await invalidateSession(); throw APIError.signInRequired
                 }
                 saved = try await access(force: credential?.tokens.accessToken == saved.tokens.accessToken)
             }
