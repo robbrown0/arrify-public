@@ -230,6 +230,8 @@ extension ContractTests {
         let restored = APIClient(transport: transport, store: store)
         let endpoint = try await restored.restore()
         XCTAssertEqual(endpoint, "https://example.com")
+        let scope = try await restored.sessionScope()
+        XCTAssertEqual(scope, "test:test")
         do { _ = try await restored.catalog(query: ""); XCTFail("Expected offline") } catch {}
         let saved = try await store.load()
         XCTAssertNotNil(saved)

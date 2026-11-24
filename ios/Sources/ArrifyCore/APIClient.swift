@@ -274,7 +274,7 @@ public actor APIClient {
         return try await call("/api/v1/native/favorites", method: "POST", body: Self.encoder().encode(Input(trackId: id, liked: liked)))
     }
     public func sessionScope() async throws -> String {
-        let saved = try await access()
+        guard let saved = credential else { throw APIError.signInRequired }
         return saved.serverId + ":" + saved.tokens.sessionId
     }
     public func liveActivityControlsAvailable() async throws -> Bool {
