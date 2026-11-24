@@ -397,7 +397,7 @@ public actor APIClient {
             var request = try Self.request(endpoint: try await router.selected(), path: "/api/v1/listening/events", token: saved.tokens.accessToken)
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             do { try await transport.listeningEvents(request, changed: changed); return }
-            catch APIError.rejected(let status, _, _) where status == 401 || status == 403 {
+            catch APIError.rejected(let status, _, _) where status == 401 {
                 guard epoch == generation else { throw CancellationError() }
                 guard attempt == 0 else {
                     if status == 401 { await invalidateSession(); throw APIError.signInRequired }

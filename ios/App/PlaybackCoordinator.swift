@@ -441,14 +441,16 @@ import Network
                     failures = 0
                 } catch { failures = min(failures + 1, 5) }
                 self?.liveConnected = false
-                do { try await Task.sleep(for: .seconds(min(30, 1 << failures))) } catch { return }
+                do { try await Task.sleep(for: .seconds(Double(min(30, 1 << failures)) * Double.random(in: 0.75...1.25))) } catch { return }
             }
         }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.reconcile()
-                do { try await Task.sleep(for: .seconds(self.liveConnected ? 10 : (UIApplication.shared.applicationState == .active ? 5 : 15))) } catch { return }
+                let normalDelay = self.liveConnected ? 10.0 : (UIApplication.shared.applicationState == .active ? 5.0 : 15.0)
+                let delay = self.connectionFailures == 0 ? normalDelay : min(60.0, normalDelay * pow(2.0, Double(min(self.connectionFailures, 4)))) * Double.random(in: 0.75...1.25)
+                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
             }
         }
     }
