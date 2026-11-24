@@ -151,7 +151,7 @@ def main():
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Same app code as internal build 38, uploaded as build 39 for external beta testing. Downloaded upcoming songs can start locally without waiting for server confirmation, with faster cached Next and improved recovery after connection loss. Chart refresh uses pull-to-refresh and refresh on entry; iPad album and artist destinations open full screen with Done. Please test song transitions, repeated skips, background and car playback, AirPlay, interruptions, and reconnection. Offline playback requires completed downloads; report any stalled cache downloads with Playback diagnostics.'}
+    attrs = {'whatsNew': 'Authentication reliability update: one-hour access tokens and a 30-day inactivity period renewed by foreground use, with no fixed absolute login cutoff. Temporary network failures preserve your login, and interrupted refreshes can recover across retries and app restarts. Expired or revoked sessions open Sign in automatically; signing in restores playback information and controls. Please test Wi-Fi/cellular changes, VPN interruptions, offline relaunch, and recovery while another device is playing. Fast cached song transitions are unchanged. A refresh interrupted for more than 24 hours may require signing in again.'}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:
