@@ -66,14 +66,18 @@ final class ContractTests: XCTestCase {
         let saved = try await store.load()
         XCTAssertEqual(saved?.tokens.refreshToken, "rotated")
     }
-    func testFailedRefreshRequiresSignInWithoutReplay() async throws {
+    func testFailedRefreshPreservesCredentialsAndBacksOff() async throws {
         let transport = FakeTransport(failRefresh: true)
-        let client = APIClient(transport: transport, store: MemoryStore())
+        let store = MemoryStore()
+        let client = APIClient(transport: transport, store: store)
         try await client.login(endpoint: "https://example.com", username: "test", password: "test", deviceName: "test")
         do { _ = try await client.catalog(query: ""); XCTFail("Expected refresh failure") } catch {}
         do { _ = try await client.catalog(query: ""); XCTFail("Expected sign-in requirement") } catch {}
         let count = await transport.refreshes
         XCTAssertEqual(count, 1)
+        let saved = try await store.load()
+        XCTAssertNotNil(saved)
+        XCTAssertNotNil(saved?.refreshAttemptId)
     }
 }
 actor MemoryStore: CredentialStore {
@@ -89,7 +93,7 @@ actor FakeTransport: HTTPTransport {
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
         if path.hasSuffix("capabilities") {
-            return result(#"{"server_id":"test","features":["rotating_refresh","native_media_manifest_v1","native_catalog_v1","native_playback_v1"]}"#)
+            return result(#"{"server_id":"test","features":["rotating_refresh","refresh_recovery_v1","native_media_manifest_v1","native_catalog_v1","native_playback_v1"]}"#)
         }
         if path.hasSuffix("sessions") {
             return result(#"{"access_token":"first","refresh_token":"first","expires_in":1,"refresh_expires_in":1000,"session_id":"test"}"#)
@@ -213,6 +217,93 @@ private actor DeletionTransport: HTTPTransport {
             deletion = request
             return HTTPResult(status: 200, data: Data(#"{"message":"Account deleted."}"#.utf8))
         }
+        return try await base.send(request)
+    }
+}
+
+extension ContractTests {
+    func testOfflineRestoreDoesNotContactNetworkOrDiscardSession() async throws {
+        let store = MemoryStore(); let transport = RecoveryTransport()
+        let first = APIClient(transport: transport, store: store)
+        try await first.login(endpoint: "https://example.com", username: "test", password: "test", deviceName: "test")
+        await transport.setOffline(true)
+        let restored = APIClient(transport: transport, store: store)
+        let endpoint = try await restored.restore()
+        XCTAssertEqual(endpoint, "https://example.com")
+        do { _ = try await restored.catalog(query: ""); XCTFail("Expected offline") } catch {}
+        let saved = try await store.load()
+        XCTAssertNotNil(saved)
+    }
+    func testLostRefreshResponseReusesDurableAttemptAfterRelaunch() async throws {
+        let store = MemoryStore(); let transport = RecoveryTransport()
+        let first = APIClient(transport: transport, store: store)
+        try await first.login(endpoint: "https://example.com", username: "test", password: "test", deviceName: "test")
+        do { _ = try await first.catalog(query: ""); XCTFail("Expected lost response") } catch {}
+        let pending = try await store.load()
+        XCTAssertNotNil(pending?.refreshAttemptId)
+        let restored = APIClient(transport: transport, store: store)
+        _ = try await restored.restore()
+        _ = try await restored.catalog(query: "")
+        let attempts = await transport.attempts
+        XCTAssertEqual(attempts.count, 2)
+        XCTAssertEqual(attempts.first, attempts.last)
+        let saved = try await store.load()
+        XCTAssertNil(saved?.refreshAttemptId)
+        XCTAssertEqual(saved?.tokens.refreshToken, "rotated")
+    }
+    func testDefinitiveRefreshRejectionClearsCredentialsAndNotifiesGlobally() async throws {
+        let store = MemoryStore(); let transport = RecoveryTransport()
+        await transport.setReject(true)
+        let events = AuthEvents()
+        let api = APIClient(transport: transport, store: store)
+        await api.setAuthEvents { event in await events.append(event) }
+        try await api.login(endpoint: "https://example.com", username: "test", password: "test", deviceName: "test")
+        do { _ = try await api.catalog(query: ""); XCTFail("Expected rejection") } catch {}
+        let saved = try await store.load(); let recorded = await events.values
+        XCTAssertNil(saved)
+        XCTAssertTrue(recorded.contains("sign-in-required"))
+    }
+    func testTemporaryServerFailurePreservesSessionAndForegroundMarker() async throws {
+        let store = MemoryStore(); let transport = RecoveryTransport()
+        await transport.setTemporary(true)
+        let api = APIClient(transport: transport, store: store)
+        try await api.login(endpoint: "https://example.com", username: "test", password: "test", deviceName: "test")
+        do { _ = try await api.catalog(query: ""); XCTFail("Expected unavailable") } catch {}
+        let saved = try await store.load(); XCTAssertNotNil(saved)
+        await transport.setTemporary(false)
+        await api.networkChanged()
+        _ = try await api.catalog(query: "")
+        var marker = await transport.foregroundMarker; XCTAssertNil(marker)
+        await api.setForeground(true)
+        _ = try await api.catalog(query: "")
+        marker = await transport.foregroundMarker; XCTAssertEqual(marker, "1")
+        await api.setForeground(false)
+        _ = try await api.catalog(query: "")
+        marker = await transport.foregroundMarker; XCTAssertNil(marker)
+    }
+}
+private actor AuthEvents {
+    var values: [String] = []
+    func append(_ event: String) { values.append(event) }
+}
+private actor RecoveryTransport: HTTPTransport {
+    let base = FakeTransport()
+    var offline = false; var reject = false; var temporary = false
+    var attempts: [String] = []
+    var foregroundMarker: String?
+    func setOffline(_ value: Bool) { offline = value }
+    func setReject(_ value: Bool) { reject = value }
+    func setTemporary(_ value: Bool) { temporary = value }
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        if offline { throw URLError(.notConnectedToInternet) }
+        if request.url?.path.hasSuffix("refresh") == true {
+            let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: String]
+            attempts.append(body["attempt_id"]!)
+            if reject { return HTTPResult(status: 401, data: Data(#"{"error":{"code":"invalid_refresh","message":"Sign in again."}}"#.utf8)) }
+            if temporary { return HTTPResult(status: 503, data: Data()) }
+            if attempts.count == 1 { throw URLError(.networkConnectionLost) }
+        }
+        if request.url?.path.hasSuffix("catalog") == true { foregroundMarker = request.value(forHTTPHeaderField: "X-Arrify-Foreground") }
         return try await base.send(request)
     }
 }

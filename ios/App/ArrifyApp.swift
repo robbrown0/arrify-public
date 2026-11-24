@@ -15,7 +15,8 @@ import AVKit
     var homeEndpoint = ""
     var error: String?
     var accountDeleted = false
-    init() {
+    init(api suppliedAPI: APIClient? = nil) {
+        if let suppliedAPI { api = suppliedAPI } else {
         #if DEBUG
         if ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] == "1" {
             api = APIClient(transport: UITestTransport(), store: UITestStore())
@@ -23,6 +24,7 @@ import AVKit
         #else
         api = APIClient(store: KeychainStore())
         #endif
+        }
         #if DEBUG
         if ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] == "1" {
             playback = PlaybackCoordinator(api: api, audioSession: UITestAudioSession())
@@ -38,7 +40,16 @@ import AVKit
         }
         RemoteControlRuntime.api = api
     }
+    func authenticationEvent(_ event: String) {
+        PlaybackDiagnostics.event("auth-" + event)
+        guard event == "sign-in-required" else { return }
+        playback.stop(); library.clear(); favorites.clear(); artwork.clear()
+        signedIn = false; error = "Your session has ended. Please sign in again."
+    }
     func restore() async {
+        await api.setAuthEvents { [weak self] event in
+            await self?.authenticationEvent(event)
+        }
         defer {
             if !signedIn, ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] != "1",
                let addresses = SavedServerAddresses.value {
@@ -92,9 +103,11 @@ import AVKit
             .task {
                 PlaybackDiagnostics.event("launch build=" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"))
                 PlaybackDiagnostics.configure(active: scenePhase == .active)
+                await model.api.setForeground(scenePhase == .active)
                 await model.restore()
             }
             .onChange(of: scenePhase) {
+                Task { await model.api.setForeground(scenePhase == .active) }
                 PlaybackDiagnostics.event("scene=\(scenePhase)")
                 PlaybackDiagnostics.configure(active: scenePhase == .active)
             }

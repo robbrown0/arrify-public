@@ -146,6 +146,9 @@ class Handler(BaseHTTPRequestHandler):
     def identity(self,write=False):
         token,kind=self.token()
         user=self.server.accounts.identity(token,kind)
+        if kind=='native' and self.headers.get('X-Arrify-Foreground')=='1':
+            from .native_auth import NativeSessions
+            NativeSessions(self.server.accounts).activity(token)
         if write and kind=='web':
             if not self.valid_origin() or not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),self.server.accounts.csrf(token)):
                 raise Error(403,'Invalid request origin or CSRF token.')

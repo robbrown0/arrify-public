@@ -22,6 +22,19 @@ public actor APIClient {
     private var credential: Credential?
     private var refreshTask: Task<Credential, Error>?
     private var generation = UUID()
+    private var foreground = false
+    private var refreshFailures = 0
+    private var retryAfter = Date.distantPast
+    private var authEvent: (@Sendable (String) async -> Void)?
+    public func setAuthEvents(_ handler: @escaping @Sendable (String) async -> Void) { authEvent = handler }
+    public func setForeground(_ active: Bool) { foreground = active }
+    public func hasCredential() -> Bool { credential != nil }
+    private func invalidateSession() async {
+        generation = UUID(); refreshTask?.cancel()
+        credential = nil; refreshTask = nil; retryAfter = .distantPast
+        try? await store.clear()
+        await authEvent?("sign-in-required")
+    }
     public init(transport: any HTTPTransport = SessionTransport(), store: any CredentialStore) {
         self.transport = transport; self.store = store; router = ServerRouter(transport: transport)
     }
@@ -51,20 +64,14 @@ public actor APIClient {
     }
     public func restore() async throws -> String? {
         let epoch = generation
-        guard var saved = try await store.load() else { return nil }
-        let endpoint = try Endpoint(saved.endpoint)
-        if saved.serverPublicKey == nil {
-            let caps = try await capabilities(endpoint)
-            guard caps.serverId == saved.serverId else { throw APIError.serverChanged }
-            saved.serverPublicKey = caps.serverPublicKey
-            try await store.save(saved)
-        }
+        guard let saved = try await store.load() else { return nil }
+        _ = try Endpoint(saved.endpoint)
         guard epoch == generation else { throw CancellationError() }
         try await configure(saved)
-        _ = try await router.selected()
         guard epoch == generation else { throw CancellationError() }
         credential = saved
-        _ = try await access()
+        // Network validation is deferred: persisted credentials also open offline.
+        // The router still verifies server identity before sending any credentials.
         return saved.endpoint
     }
     public func login(endpoint text: String, homeEndpoint homeText: String? = nil, username: String, password: String, deviceName: String) async throws {
@@ -84,20 +91,36 @@ public actor APIClient {
         value.artworkAccount = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         try await store.save(value)
         guard generation == epoch else { throw CancellationError() }
-        credential = value
+        credential = value; refreshFailures = 0; retryAfter = .distantPast
     }
     private func access(force: Bool = false) async throws -> Credential {
         if let task = refreshTask { return try await task.value }
-        guard let saved = credential else { throw APIError.signInRequired }
+        guard var saved = credential else { throw APIError.signInRequired }
         if !force && saved.accessExpires.timeIntervalSinceNow > 60 { return saved }
+        guard Date() >= retryAfter else { throw URLError(.notConnectedToInternet) }
         let epoch = generation
         let task = Task<Credential, Error> {
             let endpoint: Endpoint
             do { endpoint = try await router.selected() }
             catch { throw RouteUnavailable(cause: error) }
-            struct Refresh: Encodable { let refreshToken: String }
-            let body = try Self.encoder().encode(Refresh(refreshToken: saved.tokens.refreshToken))
+            guard generation == epoch else { throw CancellationError() }
+            let caps = try await capabilities(endpoint)
+            guard generation == epoch else { throw CancellationError() }
+            guard caps.serverId == saved.serverId else { throw APIError.serverChanged }
+            guard caps.features.contains("refresh_recovery_v1") else { throw APIError.unsupportedServer }
+            if saved.refreshAttemptId == nil {
+                saved.refreshAttemptId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+                try await store.save(saved) // Durable before the request can consume the token.
+                guard generation == epoch else { throw CancellationError() }
+                credential = saved
+            }
+            struct Refresh: Encodable { let refreshToken: String; let attemptId: String }
+            let body = try Self.encoder().encode(Refresh(refreshToken: saved.tokens.refreshToken, attemptId: saved.refreshAttemptId!))
+            await authEvent?("refresh-start")
             let response = try await transport.send(Self.request(endpoint: endpoint, path: "/api/v1/native/refresh", method: "POST", body: body))
+            if response.status == 429, let delay = response.retryAfterSeconds {
+                retryAfter = Date().addingTimeInterval(min(3600, max(0, delay)))
+            }
             let pair = try Self.decode(response, as: TokenPair.self)
             var renewed = Credential(endpoint: saved.endpoint, serverId: saved.serverId, tokens: pair, homeEndpoint: saved.homeEndpoint, serverPublicKey: saved.serverPublicKey)
             guard generation == epoch else { throw CancellationError() }
@@ -110,25 +133,33 @@ public actor APIClient {
         refreshTask = task
         do {
             let value = try await task.value
-            if generation == epoch { refreshTask = nil }
+            if generation == epoch { refreshTask = nil; refreshFailures = 0; retryAfter = .distantPast }
+            await authEvent?("refresh-ready")
+            if value.accessExpires <= Date() { return try await access() }
             return value
         } catch {
-            if let unavailable = error as? RouteUnavailable {
-                if generation == epoch { refreshTask = nil }
-                throw unavailable.cause
+            guard generation == epoch else { throw CancellationError() }
+            refreshTask = nil
+            if case APIError.rejected(let status, let code, _) = error,
+               status == 401 && code == "invalid_refresh" {
+                await invalidateSession()
+                throw APIError.signInRequired
             }
-            if generation == epoch {
-                credential = nil; refreshTask = nil
-                try? await store.clear()
-            }
-            // A refresh response may have been lost after rotation. Never replay it.
-            throw APIError.signInRequired
+            refreshFailures = min(refreshFailures + 1, 8)
+            let delay = min(60.0, pow(2.0, Double(refreshFailures))) * Double.random(in: 0.75...1.25)
+            retryAfter = max(retryAfter, Date().addingTimeInterval(delay))
+            let cause = (error as? RouteUnavailable)?.cause ?? error
+            let category = cause is URLError ? "network" : "server-or-storage"
+            await authEvent?("refresh-deferred-" + category)
+            throw (error as? RouteUnavailable)?.cause ?? error
         }
     }
     private func measuredSend(_ path: String, method: String, body: Data?, saved: Credential, endpoint: Endpoint) async throws -> HTTPResult {
         let started = Date()
         do {
-            let result = try await transport.send(Self.request(endpoint: endpoint, path: path, method: method, body: body, token: saved.tokens.accessToken))
+            var request = try Self.request(endpoint: endpoint, path: path, method: method, body: body, token: saved.tokens.accessToken)
+            if foreground { request.setValue("1", forHTTPHeaderField: "X-Arrify-Foreground") }
+            let result = try await transport.send(request)
             await router.observed(endpoint, seconds: Date().timeIntervalSince(started), statusCode: result.status)
             return result
         } catch {
@@ -164,11 +195,17 @@ public actor APIClient {
         return result
     }
     private func authorizedResponse(_ path: String, method: String = "GET", body: Data? = nil) async throws -> HTTPResult {
+        let epoch = generation
         var saved = try await access()
         var response = try await sendAuthorized(path, method: method, body: body, saved: saved)
         if response.status == 401 {
             saved = try await access(force: credential?.tokens.accessToken == saved.tokens.accessToken)
             response = try await sendAuthorized(path, method: method, body: body, saved: saved)
+        }
+        guard epoch == generation else { throw CancellationError() }
+        if response.status == 401 {
+            await invalidateSession()
+            throw APIError.signInRequired
         }
         return response
     }
@@ -190,7 +227,7 @@ public actor APIClient {
     public func connectionAddresses() -> (publicAddress: String, homeAddress: String?)? {
         credential.map { ($0.endpoint, $0.homeEndpoint) }
     }
-    public func networkChanged() async { await router.invalidate() }
+    public func networkChanged() async { retryAfter = .distantPast; await router.invalidate() }
     public func updateAddresses(publicAddress: String, homeAddress: String?) async throws {
         if let task = refreshTask { _ = try await task.value }
         guard var saved = credential else { throw APIError.signInRequired }
@@ -353,13 +390,18 @@ public actor APIClient {
         return try await call(path)
     }
     public func listeningEvents(changed: @escaping @Sendable () async -> Void) async throws {
+        let epoch = generation
         var saved = try await access()
         for attempt in 0..<2 {
             var request = try Self.request(endpoint: try await router.selected(), path: "/api/v1/listening/events", token: saved.tokens.accessToken)
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             do { try await transport.listeningEvents(request, changed: changed); return }
             catch APIError.rejected(let status, _, _) where status == 401 || status == 403 {
-                guard attempt == 0 else { throw APIError.signInRequired }
+                guard epoch == generation else { throw CancellationError() }
+                guard attempt == 0 else {
+                    if status == 401 { await invalidateSession(); throw APIError.signInRequired }
+                    throw APIError.rejected(status: status, code: "events_unavailable", message: "Live updates unavailable.")
+                }
                 saved = try await access(force: credential?.tokens.accessToken == saved.tokens.accessToken)
             }
         }

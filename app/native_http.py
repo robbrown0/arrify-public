@@ -62,7 +62,7 @@ def dispatch(handler, path, data=None):
                 headers['Retry-After'] = '900'
                 raise NativeError(429, 'rate_limited', 'Too many attempts. Try again later.') from None
             if path.endswith('refresh'):
-                result = service.refresh(data.get('refresh_token'))
+                result = service.refresh(data.get('refresh_token'), data.get('attempt_id'))
             else:
                 try:
                     result = service.login(data)
@@ -79,6 +79,8 @@ def dispatch(handler, path, data=None):
                 user = a.identity(token, kind)
             except PermissionError:
                 raise NativeError(401, 'unauthenticated', 'Sign in again.') from None
+            if getattr(handler, 'headers', {}).get('X-Arrify-Foreground') == '1':
+                service.activity(token)
             if path == PREFIX + 'local-presence':
                 try:a.rate_limit(('native-presence', user['id']), 120, 60)
                 except ValueError:raise NativeError(429, 'rate_limited', 'Retry shortly.') from None

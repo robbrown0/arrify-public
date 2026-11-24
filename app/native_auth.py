@@ -1,9 +1,13 @@
 """First-party native sessions. This is not an OAuth authorization server."""
+import base64
+import hashlib
+import hmac
 import re
 import secrets
 import time
 
-ACCESS_SECONDS = 900
+ACCESS_SECONDS = 3600
+RECOVERY_SECONDS = 86400
 REFRESH_SECONDS = 30 * 86400
 
 
@@ -26,6 +30,10 @@ def migrate(db):
         CREATE TABLE IF NOT EXISTS native_access(
           digest TEXT PRIMARY KEY REFERENCES sessions(digest) ON DELETE CASCADE,
           family TEXT NOT NULL REFERENCES native_families(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS native_refresh_attempts(
+          digest TEXT PRIMARY KEY REFERENCES native_refresh(digest) ON DELETE CASCADE,
+          attempt TEXT NOT NULL, issued INTEGER NOT NULL, access_expires INTEGER NOT NULL,
+          successor TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS native_refresh_family ON native_refresh(family);
         CREATE INDEX IF NOT EXISTS native_access_family ON native_access(family);
         CREATE TRIGGER IF NOT EXISTS native_family_revoke BEFORE DELETE ON native_families
@@ -46,11 +54,11 @@ class NativeSessions:
         from .server_identity import identity as signing_identity
         return {'server_id': identity, 'server_public_key': signing_identity(self.a).public_key, 'api_version': '1', 'native_auth_version': 1,
                 'access_token_seconds': ACCESS_SECONDS, 'refresh_token_seconds': REFRESH_SECONDS,
-                'features': ['rotating_refresh', 'session_revocation']}
+                'features': ['rotating_refresh', 'session_revocation', 'refresh_recovery_v1']}
 
-    def issue(self, family, uid, expires):
+    def issue(self, family, uid, expires, pair=None):
         now = int(time.time())
-        access, refresh = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+        access, refresh = pair or (secrets.token_urlsafe(32), secrets.token_urlsafe(32))
         lifetime = min(ACCESS_SECONDS, expires - now)
         self.a.db.execute('INSERT INTO sessions VALUES(?,?,?,?)',
                           (self.a.digest(access), uid, now + lifetime, 'native'))
@@ -77,22 +85,57 @@ class NativeSessions:
                               (family, digest, user['id'], name.strip(), now, expires))
             return self.issue(family, user['id'], expires)
 
-    def refresh(self, token):
+    def activity(self, token):
+        """Only explicitly foreground authenticated requests extend inactivity."""
+        now = int(time.time())
+        with self.a.transaction():
+            row = self.a.db.execute("""SELECT f.* FROM native_access n JOIN native_families f ON f.id=n.family
+                JOIN sessions s ON s.digest=n.digest WHERE n.digest=? AND s.expires>? AND f.expires>?""",
+                (self.a.digest(token), now, now)).fetchone()
+            if row and row['expires'] < now + REFRESH_SECONDS - 300:
+                expires = now + REFRESH_SECONDS
+                self.a.db.execute('UPDATE native_families SET expires=? WHERE id=?', (expires, row['id']))
+                self.a.db.execute('UPDATE sessions SET expires=? WHERE digest=?', (expires, row['anchor']))
+
+    @staticmethod
+    def recovery_pair(token, attempt):
+        # Recover identical secrets without storing bearer tokens in the database.
+        return tuple(base64.urlsafe_b64encode(hmac.new(token.encode(),
+            ('arrify-refresh-v1:' + label + ':' + attempt).encode(), hashlib.sha256).digest()).decode().rstrip('=')
+            for label in ('access', 'refresh'))
+
+    def refresh(self, token, attempt=None):
         if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', token):
             raise NativeError(401, 'invalid_refresh', 'Sign in again.')
+        if attempt is not None and (not isinstance(attempt, str) or not re.fullmatch(r'[a-f0-9]{32}', attempt)):
+            raise NativeError(400, 'invalid_request', 'Invalid refresh attempt.')
         result = None
         with self.a.transaction():
             row = self.a.db.execute('''SELECT f.*,r.used,u.approved,u.frozen,u.deleted_at
                 FROM native_refresh r JOIN native_families f ON f.id=r.family
                 JOIN users u ON u.id=f.user_id WHERE r.digest=?''', (self.a.digest(token),)).fetchone()
             if row:
+                recovery = self.a.db.execute('SELECT * FROM native_refresh_attempts WHERE digest=?', (self.a.digest(token),)).fetchone()
+                successor = self.a.db.execute('SELECT used FROM native_refresh WHERE digest=?', (recovery['successor'],)).fetchone() if recovery else None
+                if (row['used'] and attempt and recovery and hmac.compare_digest(recovery['attempt'], self.a.digest(attempt))
+                        and int(time.time()) - recovery['issued'] <= RECOVERY_SECONDS
+                        and successor and not successor['used'] and row['expires'] > int(time.time())
+                        and row['approved'] and not row['frozen'] and not row['deleted_at']):
+                    access, refresh = self.recovery_pair(token, attempt)
+                    return {'access_token': access, 'refresh_token': refresh, 'token_type': 'Bearer',
+                            'expires_in': max(0, recovery['access_expires'] - int(time.time())),
+                            'refresh_expires_in': row['expires'] - int(time.time()), 'session_id': row['id']}
                 if row['used'] or row['expires'] <= int(time.time()) or not row['approved'] or row['frozen'] or row['deleted_at']:
                     # Commit replay revocation before raising outside transaction.
                     self.a.db.execute('DELETE FROM sessions WHERE digest=?', (row['anchor'],))
                 else:
                     self.a.db.execute('UPDATE native_refresh SET used=1 WHERE digest=?', (self.a.digest(token),))
                     self.a.db.execute('DELETE FROM sessions WHERE expires<=? AND kind=?', (int(time.time()), 'native'))
-                    result = self.issue(row['id'], row['user_id'], row['expires'])
+                    result = self.issue(row['id'], row['user_id'], row['expires'], self.recovery_pair(token, attempt) if attempt else None)
+                    if attempt:
+                        now = int(time.time())
+                        self.a.db.execute('INSERT INTO native_refresh_attempts VALUES(?,?,?,?,?)',
+                            (self.a.digest(token), self.a.digest(attempt), now, now + result['expires_in'], self.a.digest(result['refresh_token'])))
         if result is None:
             raise NativeError(401, 'invalid_refresh', 'Sign in again.')
         return result
