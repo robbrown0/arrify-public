@@ -420,15 +420,20 @@ import Network
     private func finishBackgroundTransition() {
         if transitionTask != .invalid { backgroundTasks.end(transitionTask); transitionTask = .invalid }
     }
+    var onNetworkAvailable: (() -> Void)?
+    @ObservationIgnored private var receivedNetworkPath = false
     func start() {
         guard pollTask == nil else { return }
+        receivedNetworkPath = false
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             let wifi = path.status == .satisfied && path.usesInterfaceType(.wifi)
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.remoteActivity.networkChanged(wifi: wifi)
-                await self.api.networkChanged()
+                if self.receivedNetworkPath { await self.api.networkChanged() }
+                self.receivedNetworkPath = true
+                if path.status == .satisfied { self.onNetworkAvailable?() }
                 await self.reconcile()
             }
         }
@@ -817,7 +822,11 @@ import Network
                 guard !Task.isCancelled, self.sessionGeneration == generation else { return }
                 if self.state?.currentTrackId == id {
                     self.metadataTask = nil
-                    if let metadata { self.track = metadata; self.receiverArtwork = nil; self.systemArtwork = nil }
+                    guard let metadata else { return }
+                    self.track = metadata
+                    // Never label the previous song’s cover with the new title while its image loads.
+                    self.artwork = nil; self.receiverArtwork = nil; self.systemArtwork = nil
+                    self.artworkRevision += 1
                     self.artworkTask = Task { [weak self] in
                         guard let self else { return }
                         let decoded = await self.artworkStore.image("/api/v1/artwork/\(id)", pixels: 2048)

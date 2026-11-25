@@ -40,8 +40,24 @@ import AVKit
         playback.onHistoryRecorded = { [weak library] in
             library?.scheduleRefresh()
         }
+        playback.onNetworkAvailable = { [weak self] in
+            Task { await self?.recoverReads() }
+        }
         RemoteControlRuntime.api = api
     }
+    func refreshHome() async {
+        async let home: Void = library.refresh()
+        async let savedSongs: Void = favorites.refresh()
+        _ = await (home, savedSongs)
+    }
+    func recoverReads() async {
+        guard signedIn else { return }
+        async let home: Void = recoverLibrary()
+        async let savedSongs: Void = recoverFavorites()
+        _ = await (home, savedSongs)
+    }
+    private func recoverLibrary() async { if library.needsRecovery, !library.loading { await library.refresh() } }
+    private func recoverFavorites() async { if favorites.needsRecovery, !favorites.refreshing { await favorites.refresh() } }
     func authenticationEvent(_ event: String) async {
         PlaybackDiagnostics.event("auth-" + event)
         if event == "refresh-ready", signedIn {
@@ -183,6 +199,7 @@ struct SignInView: View {
 
 struct MainView: View {
     @Bindable var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showPlayer = false
     @State private var selectedTab = "Home"
     @State private var keyboardVisible = false
@@ -195,7 +212,17 @@ struct MainView: View {
         }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
-        .task { await model.refreshBranding(); await model.favorites.refresh() }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(model: model) }
+        .task { await model.refreshBranding(); await model.favorites.refresh() }
+        .task(id: scenePhase == .active && (model.library.needsRecovery || model.favorites.needsRecovery)) {
+            guard scenePhase == .active else { return }
+            var attempt = 0
+            while model.signedIn, model.library.needsRecovery || model.favorites.needsRecovery {
+                do { try await Task.sleep(for: .seconds([10.0, 30.0, 60.0][min(attempt, 2)] * Double.random(in: 0.8...1.2))) }
+                catch { return }
+                guard !Task.isCancelled, scenePhase == .active else { return }
+                await model.recoverReads(); attempt += 1
+            }
+        }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(model: model) }
     }
     private var tabs: some View {
         TabView(selection: Binding(get: { selectedTab }, set: { value in

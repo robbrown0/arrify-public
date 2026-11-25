@@ -265,6 +265,48 @@ final class LaunchTests: XCTestCase {
         app.alerts["Account deleted"].buttons["OK"].tap()
         XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
     }
+    @MainActor func testHomeRecoversBriefFailureAndPlayerCanRetrySavedSongs() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
+        app.launchEnvironment["ARRIFY_UI_READ_RECOVERY"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["recentlyPlayedAll"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["retryHomeRefresh"].exists)
+        app.buttons["expandPlayer"].tap()
+        let retry = app.buttons["retrySavedSongsRefresh"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["Saved songs couldn’t be refreshed. Pull to retry."].exists)
+        retry.tap()
+        XCTAssertTrue(retry.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(app.sliders["Playback position"].exists)
+    }
+    @MainActor func testHomePullRefreshRecoversSavedSongsWithoutVisitingLikedSongs() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_REMOTE_OWNER"] = "1"
+        app.launchEnvironment["ARRIFY_UI_READ_RECOVERY"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["expandPlayer"].waitForExistence(timeout: 15))
+        app.buttons["expandPlayer"].tap()
+        XCTAssertTrue(app.buttons["retrySavedSongsRefresh"].waitForExistence(timeout: 15))
+        app.buttons["Close player"].tap()
+        let home = app.scrollViews["homeContent"]
+        XCTAssertTrue(home.waitForExistence(timeout: 10))
+        home.swipeDown()
+        XCTAssertTrue(app.buttons["recentlyPlayedAll"].waitForExistence(timeout: 10))
+        app.buttons["expandPlayer"].tap()
+        XCTAssertFalse(app.buttons["retrySavedSongsRefresh"].exists)
+        XCTAssertFalse(app.staticTexts["Saved songs couldn’t be refreshed."].exists)
+    }
     @MainActor func testHomeScrollPositionSurvivesFullScreenPlayerDismissal() {
         let app = XCUIApplication()
         // Larger text gives Home real overflow even on a 13-inch iPad.

@@ -3,23 +3,68 @@ import ArrifyCore
 import ImageIO
 import CryptoKit
 
+/// Retries only read operations. Mutations and rotating tokens retain their own replay rules.
+@MainActor enum ReadRecovery {
+    static func wait(_ seconds: Double) async throws { try await Task.sleep(for: .seconds(seconds)) }
+    static func delay(_ error: Error, attempt: Int) -> Double? {
+        guard attempt < 3 else { return nil }
+        if case APIError.retryDeferred(let until) = error {
+            let delay = max(0.05, until.timeIntervalSinceNow)
+            return delay <= 8 ? delay + 0.05 : nil
+        }
+        let transient: Bool
+        if let network = error as? URLError {
+            transient = [.notConnectedToInternet, .networkConnectionLost, .timedOut,
+                         .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed].contains(network.code)
+        } else if case APIError.rejected(let status, _, _) = error {
+            transient = [500, 502, 503, 504].contains(status)
+        } else { transient = false }
+        return transient ? [0.5, 1.5, 3.0][attempt] * Double.random(in: 0.8...1.2) : nil
+    }
+    static func load<Value: Sendable>(wait: @MainActor (Double) async throws -> Void,
+                                      valid: @MainActor () -> Bool,
+                                      operation: @MainActor () async throws -> Value) async throws -> Value {
+        for attempt in 0..<4 {
+            guard valid(), !Task.isCancelled else { throw CancellationError() }
+            do { return try await operation() }
+            catch {
+                guard valid(), !Task.isCancelled else { throw CancellationError() }
+                // A route change can replace an in-flight identity probe while the view stays active.
+                if error is CancellationError, attempt < 3 { try await wait(0.05); continue }
+                guard !RequestCancellation.matches(error) else { throw CancellationError() }
+                guard let delay = delay(error, attempt: attempt) else { throw error }
+                PlaybackDiagnostics.event("read-recovery-retry attempt=\(attempt + 1)")
+                try await wait(delay)
+            }
+        }
+        throw CancellationError()
+    }
+}
+
 @MainActor @Observable final class LibraryStore {
     let api: APIClient
     var overview: LibraryOverview?
     var loading = false
     var error: String?
     var updated: Date?
+    var needsRecovery = false
     private var generation = UUID()
-    init(api: APIClient) { self.api = api }
+    private let retryWait: @MainActor (Double) async throws -> Void
+    init(api: APIClient, retryWait: @escaping @MainActor (Double) async throws -> Void = ReadRecovery.wait) {
+        self.api = api; self.retryWait = retryWait
+    }
     func refresh() async {
-        let token = UUID(); generation = token; loading = true
+        let token = UUID(); generation = token; loading = true; error = nil
         defer { if generation == token { loading = false } }
         do {
-            let result = try await api.library()
+            let result = try await ReadRecovery.load(wait: retryWait, valid: { self.generation == token }) { try await self.api.library() }
             guard generation == token, !Task.isCancelled else { return }
-            overview = result; error = nil; updated = Date()
+            overview = result; error = nil; updated = Date(); needsRecovery = false
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
-            if generation == token { self.error = error.localizedDescription }
+            guard generation == token else { return }
+            needsRecovery = ReadRecovery.delay(error, attempt: 0) != nil
+            if case APIError.retryDeferred = error { needsRecovery = true }
+            self.error = needsRecovery ? "Home couldn’t be updated. We’ll keep trying to reconnect." : error.localizedDescription
         }
     }
     func scheduleRefresh() {
@@ -29,7 +74,7 @@ import CryptoKit
             await self.refresh()
         }
     }
-    func clear() { generation = UUID(); overview = nil; error = nil; updated = nil; loading = false }
+    func clear() { generation = UUID(); overview = nil; error = nil; updated = nil; loading = false; needsRecovery = false }
 }
 
 @MainActor @Observable final class LibraryBrowser {

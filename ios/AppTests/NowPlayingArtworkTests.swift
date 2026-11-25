@@ -226,6 +226,11 @@ private actor RestoredOwnerTransport: HTTPTransport {
     private var current = 1
     private(set) var waitingForMetadata = false
     private var metadataContinuation: CheckedContinuation<Void, Never>?
+    private var delayCover = false
+    private(set) var waitingForCover = false
+    private var coverContinuation: CheckedContinuation<Void, Never>?
+    func delayNextCover() { delayCover = true }
+    func releaseCover() { coverContinuation?.resume(); coverContinuation = nil }
     func advanceWithDelayedMetadata() { current = 2 }
     func releaseMetadata() { metadataContinuation?.resume(); metadataContinuation = nil }
     private(set) var commands: [String] = []
@@ -263,6 +268,11 @@ private actor RestoredOwnerTransport: HTTPTransport {
         }
         if path.hasSuffix("/tracks/1") {
             return HTTPResult(status: 200, data: Data(#"{"track":{"id":1,"title":"Test song","artist":"Test artist","album":"Test album"}}"#.utf8))
+        }
+        if path.hasSuffix("/artwork/2"), delayCover {
+            waitingForCover = true
+            await withCheckedContinuation { coverContinuation = $0 }
+            return HTTPResult(status: 404, data: Data())
         }
         if path.hasSuffix("/artwork/1") {
             artworkRequests += 1
@@ -417,6 +427,35 @@ private actor TransitionTransport: HTTPTransport {
 
 
 extension NowPlayingArtworkTests {
+    @MainActor func testRemoteNewTitleDoesNotKeepPreviousArtworkWhileCoverLoads() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let coordinator = PlaybackCoordinator(api: api, audioSession: TestAudioSession())
+        await transport.setOwner("another-device")
+        await coordinator.reconcile()
+        for _ in 0..<200 where coordinator.artwork == nil { try await Task.sleep(for: .milliseconds(25)) }
+        XCTAssertNotNil(coordinator.artwork)
+        await transport.advanceWithDelayedMetadata()
+        await coordinator.reconcile()
+        for _ in 0..<200 {
+            if await transport.waitingForMetadata { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        await transport.delayNextCover()
+        await transport.releaseMetadata()
+        for _ in 0..<200 where coordinator.track?.id != 2 { try await Task.sleep(for: .milliseconds(25)) }
+        for _ in 0..<200 {
+            if await transport.waitingForCover { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        let waiting = await transport.waitingForCover
+        XCTAssertTrue(waiting)
+        XCTAssertEqual(coordinator.track?.id, 2)
+        XCTAssertNil(coordinator.artwork, "Old artwork must disappear as soon as the new title is published")
+        await transport.releaseCover()
+        coordinator.stop()
+    }
     @MainActor func testRemoteTrackChangeKeepsPlayerMountedWhileMetadataLoads() async throws {
         let transport = RestoredOwnerTransport()
         let api = APIClient(transport: transport, store: UITestStore())
@@ -624,6 +663,105 @@ extension NowPlayingArtworkTests {
         XCTAssertNil(expired)
         await disk.clear()
     }
+    @MainActor func testHomeRecoversTransientFailureBeforeShowingError() async throws {
+        let transport = CancelledNavigationTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        var waits = 0
+        let library = LibraryStore(api: api, retryWait: { _ in
+            waits += 1
+            await transport.fail(with: nil)
+        })
+        await transport.fail(with: .notConnectedToInternet)
+        await library.refresh()
+        XCTAssertEqual(waits, 1)
+        XCTAssertNotNil(library.overview)
+        XCTAssertNil(library.error)
+        XCTAssertFalse(library.loading)
+    }
+    @MainActor func testHomeBoundsRetriesAndPreservesLoadedContent() async throws {
+        let transport = CancelledNavigationTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        var waits = 0
+        let library = LibraryStore(api: api, retryWait: { _ in waits += 1 })
+        await library.refresh()
+        let updated = library.updated
+        await transport.fail(with: .notConnectedToInternet)
+        await library.refresh()
+        XCTAssertEqual(waits, 3)
+        XCTAssertNotNil(library.overview)
+        XCTAssertEqual(library.updated, updated)
+        XCTAssertFalse(library.error?.contains("NSURLErrorDomain") ?? true)
+        XCTAssertNotNil(library.error)
+        XCTAssertFalse(library.loading)
+        await transport.fail(with: nil)
+        await library.refresh()
+        XCTAssertNil(library.error)
+    }
+    @MainActor func testHomeClearDuringRetryCannotRestoreOldAccountContent() async throws {
+        let transport = CancelledNavigationTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        var library: LibraryStore!
+        library = LibraryStore(api: api, retryWait: { _ in
+            library.clear()
+            await transport.fail(with: nil)
+        })
+        await transport.fail(with: .notConnectedToInternet)
+        await library.refresh()
+        XCTAssertNil(library.overview)
+        XCTAssertNil(library.error)
+        XCTAssertFalse(library.loading)
+    }
+    @MainActor func testHomePullRefreshAlsoRecoversSavedSongs() async throws {
+        let transport = CancelledNavigationTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        let model = AppModel(api: api)
+        await model.login(username: "fixture", password: "fixture")
+        model.favorites.error = FavoritesStore.refreshError
+        model.favorites.needsRecovery = true
+        await model.refreshHome()
+        XCTAssertNotNil(model.library.overview)
+        XCTAssertNil(model.favorites.error)
+        XCTAssertFalse(model.favorites.needsRecovery)
+        model.playback.stop()
+    }
+    @MainActor func testSavedSongsRecoverSilentlyBeforeShowingWarning() async throws {
+        let transport = CancelledNavigationTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        var waits = 0
+        let favorites = FavoritesStore(api: api, retryWait: { _ in
+            waits += 1; await transport.fail(with: nil)
+        })
+        await transport.fail(with: .networkConnectionLost)
+        await favorites.refresh()
+        XCTAssertEqual(waits, 1); XCTAssertNil(favorites.error)
+        XCTAssertFalse(favorites.refreshing); XCTAssertFalse(favorites.needsRecovery)
+    }
+    @MainActor func testRecoverReadsRefreshesHomeAndFavoritesAfterNetworkReturns() async throws {
+        let api = APIClient(transport: UITestTransport(), store: UITestStore())
+        let model = AppModel(api: api)
+        await model.login(username: "fixture", password: "fixture")
+        model.library.needsRecovery = true; model.library.error = "Offline"
+        model.favorites.needsRecovery = true; model.favorites.error = FavoritesStore.refreshError
+        await model.recoverReads()
+        XCTAssertNotNil(model.library.overview); XCTAssertNil(model.library.error)
+        XCTAssertNil(model.favorites.error)
+        XCTAssertFalse(model.library.needsRecovery); XCTAssertFalse(model.favorites.needsRecovery)
+        model.playback.stop()
+    }
+    @MainActor func testReadRecoveryDoesNotRetryRevocationOrLongServerCooldown() async throws {
+        var waits = 0
+        do {
+            let _: Int = try await ReadRecovery.load(wait: { _ in waits += 1 }, valid: { true }) { throw APIError.signInRequired }
+            XCTFail("Expected sign-in requirement")
+        } catch APIError.signInRequired {}
+        XCTAssertEqual(waits, 0)
+        XCTAssertNil(ReadRecovery.delay(APIError.retryDeferred(until: Date().addingTimeInterval(900)), attempt: 0))
+        XCTAssertNotNil(ReadRecovery.delay(APIError.retryDeferred(until: Date().addingTimeInterval(2)), attempt: 0))
+    }
     @MainActor func testCancelledNavigationPreservesLibraryWithoutError() async throws {
         let transport = CancelledNavigationTransport()
         let api = APIClient(transport: transport, store: UITestStore())
@@ -659,9 +797,9 @@ extension NowPlayingArtworkTests {
 private actor CancelledNavigationTransport: HTTPTransport {
     private let fallback = UITestTransport()
     private var failure: URLError.Code?
-    func fail(with code: URLError.Code) { failure = code }
+    func fail(with code: URLError.Code?) { failure = code }
     func send(_ request: URLRequest) async throws -> HTTPResult {
-        if let failure, ["/api/v1/native/library", "/api/v1/native/catalog"].contains(request.url!.path) || (request.url!.path == "/api/v1/native/playback" && request.httpMethod == "POST") { throw URLError(failure) }
+        if let failure, ["/api/v1/native/library", "/api/v1/native/catalog", "/api/v1/native/favorites"].contains(request.url!.path) || (request.url!.path == "/api/v1/native/playback" && request.httpMethod == "POST") { throw URLError(failure) }
         return try await fallback.send(request)
     }
 }

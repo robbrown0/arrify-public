@@ -30,8 +30,16 @@ actor UITestTransport: HTTPTransport {
     private let station = #"{"id":"sirius-80son8","kind":"channels","name":"80s on 8","subtitle":"","section":"channels","artwork":null,"track_count":2}"#
     private let mix = #"{"id":"mood-feel-good","kind":"collections","name":"Feel Good Favorites","subtitle":"Familiar favorites","section":"moods","artwork":null,"track_count":2}"#
     private let songs = #"[{"id":1,"title":"Just Like a Pill","artist":"P!nk","album":"M!ssundaztood","artist_id":"bbbbbbbbbbbbbbbbbbbbbbbb","album_id":"aaaaaaaaaaaaaaaaaaaaaaaa","popularity":{"doubloons":2,"rising":true,"evidence":[{"source":"Fixture chart","url":"https://example.com/chart"}]}},{"id":2,"title":"Try","artist":"P!nk","album":"The Truth About Love"}]"#
+    private var recoveryFailures: [String: Int] = [:]
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
+        if ProcessInfo.processInfo.environment["ARRIFY_UI_READ_RECOVERY"] == "1", request.httpMethod == "GET",
+           ["/api/v1/native/library", "/api/v1/native/favorites"].contains(path) {
+            let failures = recoveryFailures[path, default: 0]
+            let limit = path.hasSuffix("favorites") ? 4 : 1
+            recoveryFailures[path] = failures + 1
+            if failures < limit { throw URLError(.notConnectedToInternet) }
+        }
         let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func parameter(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
         if ProcessInfo.processInfo.environment["ARRIFY_UI_CATALOG_PAGING"] == "1",
