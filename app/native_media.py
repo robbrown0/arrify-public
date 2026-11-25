@@ -12,6 +12,7 @@ from .native_auth import NativeError
 
 
 from .media_identity import source_revision
+from .media_type import original_mime
 from .native_library import track as track_metadata
 
 
@@ -129,7 +130,7 @@ class NativeMedia:
             try:
                 row, filename = self.s.library.music._track_file(tid)
                 revision = source_revision(filename)
-                mime = row['mime_type'] if profile == 'original' else 'audio/mp4' if profile == 'aac' else 'audio/mpeg'
+                mime = original_mime(filename, row['mime_type']) if profile == 'original' else 'audio/mp4' if profile == 'aac' else 'audio/mpeg'
                 state = 'ready' if profile == 'original' else self.prepare(filename, profile, data.get('retry') is True)
                 target = filename if profile == 'original' else self.s.render_cache.target(filename, profile, 0)
                 size = os.stat(target).st_size if state == 'ready' else None

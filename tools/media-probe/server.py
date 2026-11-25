@@ -1,10 +1,18 @@
 """Isolated, range-capable HTTP fixture. Only serves synthesized silence."""
 import base64
+import tempfile
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.media_type import audio_mime
 
 flac = base64.b64decode(Path(__file__).with_name('silence.flac.base64').read_text())
 mp3 = base64.b64decode(Path(__file__).with_name('silence.mp3.base64').read_text())
+temporary = tempfile.TemporaryFile()
+temporary.write(mp3)
+correct_type = audio_mime(temporary, 'audio/mp4')
+temporary.close()
 class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self): self.respond(False)
     def do_GET(self): self.respond(True)
@@ -19,7 +27,7 @@ class Handler(BaseHTTPRequestHandler):
         if first > last:
             self.send_response(416); self.send_header('Content-Range', f'bytes */{len(audio)}'); self.end_headers(); return
         self.send_response(206 if value else 200)
-        self.send_header('Content-Type', 'audio/mp4' if '/mp3-wrong' in self.path else 'audio/mpeg' if '/mp3' in self.path else 'audio/flac')
+        self.send_header('Content-Type', 'audio/mp4' if '/mp3-wrong' in self.path else correct_type if '/mp3' in self.path else 'audio/flac')
         self.send_header('Content-Length', str(last-first+1))
         self.send_header('Accept-Ranges', 'bytes')
         if value:self.send_header('Content-Range', f'bytes {first}-{last}/{len(audio)}')

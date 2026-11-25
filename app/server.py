@@ -30,6 +30,7 @@ from .connections import connected_users, ActiveStreams
 from .apple_music import AppleMusic
 from .spotify import Spotify
 from .native_media import NativeMedia
+from .media_type import audio_mime
 from . import native_http
 from . import spotify_http
 from .playlists import Playlists
@@ -730,7 +731,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         with open(filename,'rb') as audio:
             if 'native_grant' in q:self.server.native_media.identity(tid,q,file_stat=os.fstat(audio.fileno()))
-            return self.serve_audio(audio,row['mime_type'],authorized)
+            return self.serve_audio(audio,audio_mime(audio,row['mime_type']),authorized)
 
     def serve_audio(self,audio,mime,authorized,immutable=False):
         stat=os.fstat(audio.fileno());total=stat.st_size; start,end=0,total-1; status=200
