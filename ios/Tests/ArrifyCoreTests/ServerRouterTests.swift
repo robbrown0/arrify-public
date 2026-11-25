@@ -95,6 +95,59 @@ final class ServerRouterTests: XCTestCase {
             }
         }
     }
+    func testUnavailableHomeUsesPublicAndCoolsDownLocalProbes() async throws {
+        let transport = ProofTransport()
+        await transport.setHomeOffline(true)
+        let router = ServerRouter(transport: transport)
+        let publicAddress = try Endpoint("https://public.test")
+        await router.configure(primary: publicAddress, home: try Endpoint("https://home.test"), id: "test", key: transport.key.publicKey.derRepresentation.base64EncodedString())
+        let first = try await router.selected()
+        XCTAssertEqual(first.url.host, "public.test")
+        await router.failed(publicAddress)
+        _ = try await router.selected()
+        let probes = await transport.homeProofs
+        XCTAssertEqual(probes, 1, "Unavailable LAN probes should not delay every read")
+        await transport.setHomeOffline(false)
+        await router.invalidate()
+        let recovered = try await router.selected()
+        XCTAssertEqual(recovered.url.host, "home.test")
+    }
+    func testOfflineRelaunchRecoversThroughPublicWithoutLosingSession() async throws {
+        let transport = ProofTransport(), store = MemoryStore()
+        let first = APIClient(transport: transport, store: store)
+        try await first.login(endpoint: "https://public.test", homeEndpoint: "https://home.test", username: "test", password: "test", deviceName: "test")
+        await transport.setHomeOffline(true); await transport.setPublicOffline(true)
+        let restored = APIClient(transport: transport, store: store)
+        _ = try await restored.restore()
+        do { _ = try await restored.catalog(query: ""); XCTFail("Expected both addresses unavailable") } catch {}
+        let saved = try await store.load(); XCTAssertNotNil(saved)
+        await transport.setPublicOffline(false)
+        await restored.networkChanged()
+        _ = try await restored.catalog(query: "")
+        let status = await restored.connection()
+        XCTAssertTrue(status.connected); XCTAssertFalse(status.home)
+    }
+    func testRefreshFailureOnHomeRecoversOnPublicWithSameAttemptID() async throws {
+        let transport = ProofTransport(), store = MemoryStore()
+        let first = APIClient(transport: transport, store: store)
+        try await first.login(endpoint: "https://public.test", homeEndpoint: "https://home.test", username: "test", password: "test", deviceName: "test")
+        let stored = try await store.load()
+        let saved = try XCTUnwrap(stored)
+        await store.save(Credential(endpoint: saved.endpoint, serverId: saved.serverId, tokens: saved.tokens, now: Date().addingTimeInterval(-1000), homeEndpoint: saved.homeEndpoint, serverPublicKey: saved.serverPublicKey))
+        let restored = APIClient(transport: transport, store: store)
+        _ = try await restored.restore()
+        await transport.failAuthenticatedHome()
+        do { _ = try await restored.catalog(query: ""); XCTFail("Expected interrupted refresh") } catch {}
+        do { _ = try await restored.catalog(query: ""); XCTFail("Expected backoff") }
+        catch APIError.retryDeferred(let until) { XCTAssertGreaterThan(until, Date()) }
+        let attemptsBefore = await transport.refreshAttempts
+        XCTAssertEqual(attemptsBefore.count, 1)
+        try await Task.sleep(for: .seconds(2.6))
+        _ = try await restored.catalog(query: "")
+        let attempts = await transport.refreshAttempts
+        XCTAssertEqual(attempts.map { $0.0 }, ["home.test", "public.test"])
+        XCTAssertEqual(attempts[0].1, attempts[1].1, "Lost responses must retain the durable attempt identifier across origins")
+    }
     func testOldCredentialDecodesWithoutNewFields() throws {
         let saved = Credential(endpoint: "https://public.test", serverId: "test", tokens: TokenPair(accessToken: "a", refreshToken: "r", expiresIn: 900, refreshExpiresIn: 9000, sessionId: "s"))
         var fields = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any])
@@ -112,15 +165,22 @@ actor ProofTransport: HTTPTransport {
     let replayHome: Bool
     private var publicOffline = false
     private var failHome = false
+    private var homeOffline = false
+    var homeProofs = 0
+    var refreshAttempts: [(String, String)] = []
+    func setHomeOffline(_ offline: Bool) { homeOffline = offline }
+    func setPublicOffline(_ offline: Bool) { publicOffline = offline }
     func failAuthenticatedHome() { failHome = true }
     var credentialHosts: [String] = []
     init(wrongHome: Bool = false, replayHome: Bool = false) { self.wrongHome = wrongHome; self.replayHome = replayHome }
     func disablePublic() { publicOffline = true }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let host = request.url!.host!
+        if host == "home.test", request.url!.path.hasSuffix("server-proof") { homeProofs += 1 }
+        if homeOffline, host == "home.test" { throw URLError(.cannotConnectToHost) }
         if publicOffline, host == "public.test" { throw URLError(.notConnectedToInternet) }
         if request.url!.path.hasSuffix("capabilities") {
-            return try result(["server_id": "test", "server_public_key": key.publicKey.derRepresentation.base64EncodedString(), "features": ["rotating_refresh", "native_media_manifest_v1", "native_catalog_v1", "native_playback_v1"]])
+            return try result(["server_id": "test", "server_public_key": key.publicKey.derRepresentation.base64EncodedString(), "features": ["refresh_recovery_v1", "rotating_refresh", "native_media_manifest_v1", "native_catalog_v1", "native_playback_v1"]])
         }
         if request.url!.path.hasSuffix("server-proof") {
             XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
@@ -131,6 +191,10 @@ actor ProofTransport: HTTPTransport {
             return try result(["server_id": "test", "nonce": nonce, "signature": signature.derRepresentation.base64EncodedString()])
         }
         credentialHosts.append(host)
+        if request.url!.path.hasSuffix("refresh") {
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody!) as? [String: String])
+            refreshAttempts.append((host, body["attempt_id"]!))
+        }
         if failHome, host == "home.test" { throw URLError(.networkConnectionLost) }
         if request.url!.path.hasSuffix("catalog") { return try result(["revision": "v1", "items": []]) }
         return try result(["access_token": "access", "refresh_token": "refresh", "expires_in": 900, "refresh_expires_in": 9000, "session_id": "session"])

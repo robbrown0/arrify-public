@@ -119,7 +119,7 @@ struct NowPlayingView: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
             if let track = playback.track { FavoriteButton(favorites: favorites, track: track) }
             }
-            if let error = favorites.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            FavoritesRefreshStatus(favorites: favorites)
             if let message = playback.message {
                 HStack { Text(message).font(.caption); Button("Retry") { playback.retry() } }
             }

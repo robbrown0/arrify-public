@@ -960,11 +960,15 @@ struct HomeScreen: View {
                         rail("Personal playlists", items: overview.items.filter { $0.section == "personal" }, albums: false)
                     }
                     RefreshStatus(loading: model.library.loading, updated: model.library.updated, error: model.library.error)
+                    if model.library.error != nil {
+                        Button("Retry") { Task { await model.refreshHome() } }.accessibilityIdentifier("retryHomeRefresh")
+                    }
                 }.padding(24)
-            }.background(Color.black).navigationTitle("").navigationBarTitleDisplayMode(.inline)
+            }.accessibilityIdentifier("homeContent").scrollBounceBehavior(.always)
+                .background(Color.black).navigationTitle("").navigationBarTitleDisplayMode(.inline)
                 .task { await model.library.refresh() }
                 .onChange(of: scenePhase) { if scenePhase == .active { model.library.scheduleRefresh() } }
-                .refreshable { await model.library.refresh() }
+                .refreshable { await model.refreshHome() }
         }
     }
     private func recentSongs(_ tracks: [Track]) -> some View {

@@ -6,16 +6,30 @@ import ArrifyCore
     var ids: Set<Int> = []
     var pending: Set<Int> = []
     var error: String?
+    static let refreshError = "Saved songs couldn’t be refreshed."
+    var needsRecovery = false
+    var refreshing = false
+    private let retryWait: @MainActor (Double) async throws -> Void
     private var generation = UUID()
     private var revision = 0
-    init(api: APIClient) { self.api = api }
+    init(api: APIClient, retryWait: @escaping @MainActor (Double) async throws -> Void = ReadRecovery.wait) { self.api = api; self.retryWait = retryWait }
     func refresh() async {
+        guard !refreshing else { return }
         let token = generation, version = revision
+        refreshing = true
+        if error == Self.refreshError { error = nil }
+        defer { if token == generation { refreshing = false } }
         do {
-            let result = try await api.favorites()
+            let result = try await ReadRecovery.load(wait: retryWait, valid: { self.generation == token && self.revision == version }) { try await self.api.favorites() }
             guard token == generation, version == revision, !Task.isCancelled else { return }
-            ids = Set(result.trackIds); error = nil
-        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch { if token == generation { self.error = "Saved songs couldn’t be refreshed. Pull to retry." } }
+            ids = Set(result.trackIds); error = nil; needsRecovery = false
+        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
+            if token == generation, version == revision {
+                needsRecovery = ReadRecovery.delay(error, attempt: 0) != nil
+                if case APIError.retryDeferred = error { needsRecovery = true }
+                self.error = Self.refreshError
+            }
+        }
     }
     func toggle(_ id: Int) async {
         guard !pending.contains(id) else { return }
@@ -30,7 +44,31 @@ import ArrifyCore
             revision += 1; error = nil
         } catch { if token == generation { self.error = "Couldn’t save this change. Please try again." } }
     }
-    func clear() { generation = UUID(); revision += 1; ids = []; pending = []; error = nil }
+    func clear() { generation = UUID(); revision += 1; ids = []; pending = []; error = nil; needsRecovery = false; refreshing = false }
+}
+
+struct FavoritesRefreshStatus: View {
+    let favorites: FavoritesStore
+    @State private var retrying = false
+    var body: some View {
+        if let error = favorites.error {
+            VStack(spacing: 4) {
+                Text(error).font(.caption).foregroundStyle(.orange)
+                if error == FavoritesStore.refreshError {
+                    Button(retrying ? "Retrying…" : "Retry") {
+                        guard !retrying else { return }
+                        retrying = true
+                        Task {
+                            defer { retrying = false }
+                            await favorites.refresh()
+                        }
+                    }.disabled(retrying)
+                        .accessibilityLabel("Retry saved songs refresh")
+                        .accessibilityIdentifier("retrySavedSongsRefresh")
+                }
+            }
+        }
+    }
 }
 
 struct FavoriteButton: View {
@@ -63,7 +101,7 @@ struct LikedSongsView: View {
                     Button("Shuffle", systemImage: "shuffle") { Task { await model.playback.shuffleSource(source) } }
                 }.disabled(model.favorites.ids.isEmpty)
             }
-            if let error = model.favorites.error { Text(error).foregroundStyle(.orange) }
+            FavoritesRefreshStatus(favorites: model.favorites)
             RefreshStatus(loading: browser.loading, updated: browser.updated, error: browser.error)
             ForEach(browser.tracks) { track in
                 SongRow(track: track, model: model) {

@@ -99,38 +99,49 @@ public actor APIClient {
         if let task = refreshTask { return try await task.value }
         guard var saved = credential else { throw APIError.signInRequired }
         if !force && saved.accessExpires.timeIntervalSinceNow > 60 { return saved }
-        guard Date() >= max(retryAfter, serverRetryAfter) else { throw URLError(.notConnectedToInternet) }
+        let nextAttempt = max(retryAfter, serverRetryAfter)
+        guard Date() >= nextAttempt else { throw APIError.retryDeferred(until: nextAttempt) }
         let epoch = generation
         let task = Task<Credential, Error> {
             let endpoint: Endpoint
             do { endpoint = try await router.selected() }
             catch { throw RouteUnavailable(cause: error) }
             guard generation == epoch else { throw CancellationError() }
-            let caps = try await capabilities(endpoint)
-            guard generation == epoch else { throw CancellationError() }
-            guard caps.serverId == saved.serverId else { throw APIError.serverChanged }
-            guard caps.features.contains("refresh_recovery_v1") else { throw APIError.unsupportedServer }
-            if saved.refreshAttemptId == nil {
-                saved.refreshAttemptId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-                try await store.save(saved) // Durable before the request can consume the token.
+            do {
+                let caps = try await capabilities(endpoint)
                 guard generation == epoch else { throw CancellationError() }
-                credential = saved
+                guard caps.serverId == saved.serverId else { throw APIError.serverChanged }
+                guard caps.features.contains("refresh_recovery_v1") else { throw APIError.unsupportedServer }
+                if saved.refreshAttemptId == nil {
+                    saved.refreshAttemptId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+                    try await store.save(saved) // Durable before the request can consume the token.
+                    guard generation == epoch else { throw CancellationError() }
+                    credential = saved
+                }
+                struct Refresh: Encodable { let refreshToken: String; let attemptId: String }
+                let body = try Self.encoder().encode(Refresh(refreshToken: saved.tokens.refreshToken, attemptId: saved.refreshAttemptId!))
+                await authEvent?("refresh-start")
+                let response = try await transport.send(Self.request(endpoint: endpoint, path: "/api/v1/native/refresh", method: "POST", body: body))
+                if response.status == 429, let delay = response.retryAfterSeconds {
+                    serverRetryAfter = Date().addingTimeInterval(min(3600, max(0, delay)))
+                }
+                let pair = try Self.decode(response, as: TokenPair.self)
+                var renewed = Credential(endpoint: saved.endpoint, serverId: saved.serverId, tokens: pair, homeEndpoint: saved.homeEndpoint, serverPublicKey: saved.serverPublicKey)
+                guard generation == epoch else { throw CancellationError() }
+                renewed.artworkAccount = saved.artworkAccount
+                try await store.save(renewed)
+                guard generation == epoch else { throw CancellationError() }
+                credential = renewed
+                return renewed
+            } catch {
+                // A verified local server can disappear between the proof and refresh.
+                // Select public on the next durable refresh attempt, preserving its ID.
+                if !RequestCancellation.matches(error) {
+                    if error is URLError { await router.failed(endpoint) }
+                    else if case APIError.rejected(let status, _, _) = error, [502, 503, 504].contains(status) { await router.failed(endpoint) }
+                }
+                throw error
             }
-            struct Refresh: Encodable { let refreshToken: String; let attemptId: String }
-            let body = try Self.encoder().encode(Refresh(refreshToken: saved.tokens.refreshToken, attemptId: saved.refreshAttemptId!))
-            await authEvent?("refresh-start")
-            let response = try await transport.send(Self.request(endpoint: endpoint, path: "/api/v1/native/refresh", method: "POST", body: body))
-            if response.status == 429, let delay = response.retryAfterSeconds {
-                serverRetryAfter = Date().addingTimeInterval(min(3600, max(0, delay)))
-            }
-            let pair = try Self.decode(response, as: TokenPair.self)
-            var renewed = Credential(endpoint: saved.endpoint, serverId: saved.serverId, tokens: pair, homeEndpoint: saved.homeEndpoint, serverPublicKey: saved.serverPublicKey)
-            guard generation == epoch else { throw CancellationError() }
-            renewed.artworkAccount = saved.artworkAccount
-            try await store.save(renewed)
-            guard generation == epoch else { throw CancellationError() }
-            credential = renewed
-            return renewed
         }
         refreshTask = task
         do {

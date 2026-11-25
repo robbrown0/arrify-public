@@ -149,6 +149,7 @@ public struct Manifest: Codable, Sendable {
 }
 public enum APIError: Error, LocalizedError, Sendable {
     case invalidEndpoint, serverChanged, unsupportedServer, signInRequired, invalidResponse
+    case retryDeferred(until: Date)
     case rejected(status: Int, code: String, message: String)
     public var errorDescription: String? {
         switch self {
@@ -157,6 +158,7 @@ public enum APIError: Error, LocalizedError, Sendable {
         case .unsupportedServer: "This server needs the native playback update."
         case .signInRequired: "Please sign in again."
         case .invalidResponse: "The server returned an unexpected response."
+        case .retryDeferred: "Reconnecting to your server…"
         case let .rejected(_, _, message): message
         }
     }

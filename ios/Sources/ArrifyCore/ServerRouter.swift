@@ -78,6 +78,9 @@ actor ServerRouter {
                 catch APIError.serverChanged { notice = "Local network address did not verify as this server. Using public." }
                 catch APIError.unsupportedServer { notice = "Update your server to enable verified local network connections." }
                 catch { notice = "Local network address unavailable. Using public." }
+                // Avoid probing an unavailable LAN address again on every read.
+                guard token == generation, !Task.isCancelled else { throw CancellationError() }
+                homeRetry = Date().addingTimeInterval(30)
             } else if home != nil { notice = "Local network address unavailable. Using public." }
             try await Self.verify(primary, id: serverID, key: publicKey, transport: transport)
             guard token == generation, !Task.isCancelled else { throw CancellationError() }
