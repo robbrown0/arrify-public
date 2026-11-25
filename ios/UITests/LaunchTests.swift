@@ -305,8 +305,12 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(recent.waitForExistence(timeout: 10))
         let beforePull = recent.label
         // Start above the horizontal rails and pull beyond the native refresh threshold.
-        let start = home.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.07))
-        let end = home.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.65))
+        // ScrollView's accessibility frame extends under the status bar. Anchor
+        // the touch to visible content so this tests Home instead of system chrome.
+        let heading = app.staticTexts["On the record"]
+        XCTAssertTrue(heading.isHittable)
+        let start = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = start.withOffset(CGVector(dx: 0, dy: 300))
         start.press(forDuration: 0.1, thenDragTo: end)
         expectation(for: NSPredicate(format: "label != %@", beforePull), evaluatedWith: recent)
         waitForExpectations(timeout: 10)

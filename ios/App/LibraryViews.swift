@@ -937,38 +937,6 @@ struct SearchScreen: View {
 }
 
 /// Home shows account-scoped listening history and playlists.
-private struct HomePullRefresh: ViewModifier {
-    let action: @MainActor () async -> Void
-    @State private var armed = false
-    @State private var refreshing = false
-    func body(content: Content) -> some View {
-        content
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.contentInsets.top < -72
-            } action: { _, beyondThreshold in
-                if beyondThreshold { armed = true }
-            }
-            .onScrollPhaseChange { oldPhase, newPhase in
-                if newPhase == .tracking { armed = false }
-                guard oldPhase == .interacting, newPhase != .interacting else { return }
-                let shouldRefresh = armed; armed = false
-                guard shouldRefresh, !refreshing else { return }
-                refreshing = true
-                PlaybackDiagnostics.event("home-pull-refresh")
-                Task {
-                    await action()
-                    refreshing = false
-                }
-            }
-            .overlay(alignment: .top) {
-                if armed || refreshing {
-                    ProgressView().tint(.green).padding(.top, 8)
-                        .accessibilityLabel("Refreshing Home").allowsHitTesting(false)
-                }
-            }
-    }
-}
-
 struct HomeScreen: View {
     let model: AppModel
     @Environment(\.scenePhase) private var scenePhase
@@ -1000,7 +968,7 @@ struct HomeScreen: View {
                 .background(Color.black).navigationTitle("").navigationBarTitleDisplayMode(.inline)
                 .task { await model.library.refresh() }
                 .onChange(of: scenePhase) { if scenePhase == .active { model.library.scheduleRefresh() } }
-                .modifier(HomePullRefresh { await model.refreshHome() })
+                .refreshable { await model.refreshHome() }
         }
     }
     private func recentSongs(_ tracks: [Track]) -> some View {
