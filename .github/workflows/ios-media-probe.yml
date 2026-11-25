@@ -1,0 +1,22 @@
+name: Uncached media diagnostic
+on:
+  push:
+    branches: ['fix/uncached-media-open-42']
+    paths: ['tools/media-probe/**', '.github/workflows/ios-media-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  media:
+    runs-on: macos-26
+    timeout-minutes: 8
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Open actual FLAC over HTTP and from disk
+        run: |
+          python3 tools/media-probe/server.py &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID"' EXIT
+          swift tools/media-probe/open.swift
