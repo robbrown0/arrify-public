@@ -79,7 +79,7 @@ actor UITestTransport: HTTPTransport {
                 return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: ["track": ["id": currentTrack, "title": "Song \(currentTrack)", "artist": "Fixture artist", "album": "Album"]]))
             }
         }
-        let value: String
+        var value: String
         if path.hasSuffix("/native/account/delete") {
             let input = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
             if input?["password"] as? String != "fixture" {
