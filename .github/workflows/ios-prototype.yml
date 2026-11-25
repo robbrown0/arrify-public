@@ -11,6 +11,10 @@ on:
         description: Rerun iPad qualification after a simulator infrastructure failure
         type: boolean
         default: false
+      read_recovery_only:
+        description: Targeted Home refresh and saved-song recovery checks
+        type: boolean
+        default: false
       navigation_refresh_only:
         description: Targeted chart refresh, music destination, and catalog paging checks
         type: boolean
@@ -50,7 +54,7 @@ jobs:
         if: matrix.device == 'iPhone' || inputs.ipad_only || inputs.volume_alignment_only
         run: bash ios/tools/prepare_entitlements.sh build/device/Build/Products/Release-iphoneos/Arrify.app ios/App/Arrify.entitlements
       - name: Qualify playback app regressions
-        if: ${{ !inputs.volume_alignment_only && !inputs.navigation_refresh_only }}
+        if: ${{ !inputs.volume_alignment_only && !inputs.navigation_refresh_only && !inputs.read_recovery_only }}
         env:
           DEVICE_FAMILY: ${{ matrix.device }}
         run: |
@@ -61,11 +65,15 @@ jobs:
           DEVICE_FAMILY: ${{ matrix.device }}
           VOLUME_ONLY: ${{ inputs.volume_alignment_only }}
           NAVIGATION_ONLY: ${{ inputs.navigation_refresh_only }}
+          RECOVERY_ONLY: ${{ inputs.read_recovery_only }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
           ONLY_TESTS=(-only-testing:ArrifyUITests)
           if [ "$VOLUME_ONLY" = "true" ]; then
             ONLY_TESTS=(-only-testing:ArrifyAppTests/NowPlayingArtworkTests/testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testTabletVolumeUsesNativeHeightCenteredInControlRow -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible)
+          fi
+          if [ "$RECOVERY_ONLY" = "true" ]; then
+            ONLY_TESTS=(-only-testing:ArrifyUITests/LaunchTests/testHomePullRefreshRecoversSavedSongsWithoutVisitingLikedSongs -only-testing:ArrifyUITests/LaunchTests/testHomeRecoversBriefFailureAndPlayerCanRetrySavedSongs)
           fi
           if [ "$NAVIGATION_ONLY" = "true" ]; then
             ONLY_TESTS=(-only-testing:ArrifyUITests/LaunchTests/testBrowseCategoriesChartsAndRequests -only-testing:ArrifyUITests/LaunchTests/testEmptyPlayerAndSingleTapAlbumActions -only-testing:ArrifyUITests/LaunchTests/testArtistsSelectDistinctItemsAndVisiblePageRetry)

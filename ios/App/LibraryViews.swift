@@ -992,6 +992,7 @@ struct HomeScreen: View {
                                 if let status = model.playback.rowStatus(for: track.id) { TrackPlaybackLabel(status: status) }
                             }.frame(width: cardWidth, alignment: .leading)
                         }.buttonStyle(.plain).accessibilityLabel("Play recently played song \(track.title) by \(track.artist)")
+                            .accessibilityIdentifier("homeRecentTrack-\(track.id)")
                             .accessibilityValue(model.playback.rowStatus(for: track.id)?.rawValue ?? "")
                     }
                 }

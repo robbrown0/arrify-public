@@ -301,8 +301,16 @@ final class LaunchTests: XCTestCase {
         app.buttons["Close player"].tap()
         let home = app.scrollViews["homeContent"]
         XCTAssertTrue(home.waitForExistence(timeout: 10))
-        home.swipeDown()
-        XCTAssertTrue(app.buttons["recentlyPlayedAll"].waitForExistence(timeout: 10))
+        let recent = app.buttons["homeRecentTrack-1"]
+        XCTAssertTrue(recent.waitForExistence(timeout: 10))
+        let beforePull = recent.label
+        // Start above the horizontal rails and pull beyond the native refresh threshold.
+        let start = home.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.07))
+        let end = home.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.65))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        expectation(for: NSPredicate(format: "label != %@", beforePull), evaluatedWith: recent)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(app.buttons["recentlyPlayedAll"].exists)
         app.buttons["expandPlayer"].tap()
         XCTAssertFalse(app.buttons["retrySavedSongsRefresh"].exists)
         XCTAssertFalse(app.staticTexts["Saved songs couldn’t be refreshed."].exists)
