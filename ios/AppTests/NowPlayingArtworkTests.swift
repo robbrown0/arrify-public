@@ -1,6 +1,7 @@
 import XCTest
 import UIKit
 import ArrifyCore
+import CryptoKit
 @preconcurrency import AVFoundation
 @preconcurrency import MediaPlayer
 @testable import Arrify
@@ -1128,5 +1129,79 @@ extension NowPlayingArtworkTests {
         XCTAssertFalse(boundary.begin(currentOffset: nil, viewport: viewport, loading: false, hasError: false))
         boundary.remove(offset: 50)
         XCTAssertFalse(boundary.begin(currentOffset: 50, viewport: viewport, loading: false, hasError: false))
+    }
+}
+
+extension NowPlayingArtworkTests {
+    @MainActor func testCacheDownloadFallsBackToVerifiedPublicAndFillsSuccessors() async throws {
+        for statusFailure in [false, true] {
+            let probe = CacheRouteProbe(statusFailure: statusFailure)
+            let api = APIClient(transport: probe, store: UITestStore())
+            try await api.login(endpoint: "https://public.test", homeEndpoint: "https://home.test", username: "fixture", password: "fixture", deviceName: "Test")
+            let cache = AudioCache(download: { try await probe.download($0) })
+            let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+            let manifest = try decoder.decode(Manifest.self, from: Data(#"{"owner_epoch":1,"queue_revision":1,"retry_after_seconds":2,"items":[{"track_id":1,"source_revision":"v1","profile":"original","state":"ready","size_bytes":4,"mime_type":"audio/flac","url":"/api/v1/stream/1?native_grant=fixture"},{"track_id":2,"source_revision":"v1","profile":"original","state":"ready","size_bytes":4,"mime_type":"audio/flac","url":"/api/v1/stream/2?native_grant=fixture"}]}"#.utf8))
+            await cache.fill(manifest, api: api)
+            XCTAssertEqual(cache.items.map(\.state), ["ready", "ready"])
+            XCTAssertEqual(cache.downloadedBytes, 8)
+            let hosts = await probe.downloadHosts
+            XCTAssertEqual(hosts, ["home.test", "public.test", "public.test"])
+            let status = await api.connection()
+            XCTAssertTrue(status.connected); XCTAssertFalse(status.home)
+            cache.reset()
+        }
+    }
+    @MainActor func testCacheDownloadDoesNotFallBackToUnverifiedHome() async throws {
+        let probe = CacheRouteProbe(wrongHome: true)
+        let api = APIClient(transport: probe, store: UITestStore())
+        try await api.login(endpoint: "https://public.test", homeEndpoint: "https://home.test", username: "fixture", password: "fixture", deviceName: "Test")
+        let cache = AudioCache(download: { url in
+            await probe.recordDownload(url)
+            throw URLError(.networkConnectionLost)
+        })
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let manifest = try decoder.decode(Manifest.self, from: Data(#"{"owner_epoch":1,"queue_revision":1,"retry_after_seconds":2,"items":[{"track_id":1,"source_revision":"v1","profile":"original","state":"ready","size_bytes":4,"mime_type":"audio/flac","url":"/api/v1/stream/1?native_grant=fixture"}]}"#.utf8))
+        await cache.fill(manifest, api: api)
+        XCTAssertEqual(cache.downloadedBytes, 0)
+        XCTAssertEqual(cache.items.first?.state, "retrying")
+        let hosts = await probe.downloadHosts
+        XCTAssertEqual(hosts, ["public.test"])
+        cache.reset()
+    }
+}
+
+private actor CacheRouteProbe: HTTPTransport {
+    nonisolated let key = P256.Signing.PrivateKey()
+    private let fallback = UITestTransport()
+    private let statusFailure: Bool
+    private let wrongHome: Bool
+    private(set) var downloadHosts: [String] = []
+    init(statusFailure: Bool = false, wrongHome: Bool = false) {
+        self.statusFailure = statusFailure; self.wrongHome = wrongHome
+    }
+    func recordDownload(_ url: URL) { downloadHosts.append(url.host!) }
+    func download(_ url: URL) async throws -> (URL, URLResponse) {
+        recordDownload(url)
+        if url.host == "home.test", !statusFailure { throw URLError(.networkConnectionLost) }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data([1, 2, 3, 4]).write(to: file)
+        return (file, HTTPURLResponse(url: url, statusCode: url.host == "home.test" ? 503 : 200, httpVersion: nil, headerFields: nil)!)
+    }
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        if request.url!.path.hasSuffix("capabilities") {
+            return try result(["server_id": "fixture", "server_public_key": key.publicKey.derRepresentation.base64EncodedString(), "features": ["rotating_refresh", "refresh_recovery_v1", "native_media_manifest_v1", "native_catalog_v1", "native_playback_v1"]])
+        }
+        if request.url!.path.hasSuffix("server-proof") {
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            let input = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody!) as? [String: String])
+            let nonce = input["nonce"]!
+            let signer = wrongHome && request.url!.host == "home.test" ? P256.Signing.PrivateKey() : key
+            let signature = try signer.signature(for: Data("arrify-server-proof-v1\nfixture\n\(nonce)".utf8))
+            return try result(["server_id": "fixture", "nonce": nonce, "signature": signature.derRepresentation.base64EncodedString()])
+        }
+        return try await fallback.send(request)
+    }
+    private func result(_ value: [String: Any]) throws -> HTTPResult {
+        HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: value))
     }
 }

@@ -80,7 +80,7 @@ import ArrifyCore
                     do {
                         let remote = try await api.mediaURL(item)
                         PlaybackDiagnostics.event("cache-download-start bytes=\(size)")
-                        let (temporary, response) = try await self.download(remote)
+                        let (temporary, response) = try await self.downloadOnAvailableRoute(remote, api: api, generation: epoch)
                         defer { try? FileManager.default.removeItem(at: temporary) }
                         guard self.generation == epoch, !Task.isCancelled else { return }
                         guard let http = response as? HTTPURLResponse, http.statusCode == 200,
@@ -105,6 +105,24 @@ import ArrifyCore
             await downloads[cacheKey]?.value
             guard epoch == generation, fillGeneration == pass, !Task.isCancelled else { return }
             if file(for: item) != nil { await onReady?() }
+        }
+    }
+    private func downloadOnAvailableRoute(_ url: URL, api: APIClient, generation epoch: UUID) async throws -> (URL, URLResponse) {
+        do {
+            let result = try await download(url)
+            if let response = result.1 as? HTTPURLResponse, [502, 503, 504].contains(response.statusCode) {
+                try? FileManager.default.removeItem(at: result.0)
+                throw APIError.rejected(status: response.statusCode, code: "stream_unavailable", message: "Stream unavailable")
+            }
+            return result
+        } catch {
+            guard generation == epoch, !Task.isCancelled, !RequestCancellation.matches(error) else { throw CancellationError() }
+            // The download is an idempotent GET. Alternate origins still require the pinned server proof.
+            guard ReadRecovery.delay(error, attempt: 0) != nil,
+                  let alternate = try await api.alternateMediaURL(url) else { throw error }
+            guard generation == epoch, !Task.isCancelled else { throw CancellationError() }
+            PlaybackDiagnostics.event("cache-download-route-retry")
+            return try await download(alternate)
         }
     }
     private func update(_ id: Int, state: String, bytes: Int = 0) {

@@ -79,7 +79,7 @@ actor UITestTransport: HTTPTransport {
                 return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: ["track": ["id": currentTrack, "title": "Song \(currentTrack)", "artist": "Fixture artist", "album": "Album"]]))
             }
         }
-        let value: String
+        var value: String
         if path.hasSuffix("/native/account/delete") {
             let input = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
             if input?["password"] as? String != "fixture" {
@@ -126,6 +126,9 @@ actor UITestTransport: HTTPTransport {
             let featured = mix.replacingOccurrences(of: "mood-feel-good", with: "featured-drive").replacingOccurrences(of: "Feel Good Favorites", with: "Driving favourites").replacingOccurrences(of: "\"section\":\"moods\"", with: "\"section\":\"playlists\"")
             let personal = playlists.isEmpty ? "" : "," + String(data: try JSONSerialization.data(withJSONObject: playlists[0]), encoding: .utf8)!
             value = "{\"recent_tracks\":\(songs),\"home_albums\":[\(album)],\"items\":[\(stations),\(mix),\(featured)\(personal)],\"moods\":[{\"id\":\"feel-good\",\"name\":\"Feel Good\",\"description\":\"Sunshine, soul, and familiar favorites.\",\"color\":\"#244632\",\"slugs\":[\"mood-feel-good\"]}],\"tracks\":2,\"albums\":1,\"artists\":1}"
+            if ProcessInfo.processInfo.environment["ARRIFY_UI_READ_RECOVERY"] == "1" {
+                value = value.replacingOccurrences(of: "Just Like a Pill", with: "Home response \(recoveryFailures[path, default: 0])")
+            }
         } else if path.hasSuffix("/library/detail") {
             if parameter("kind") == "favorites" {
                 let items = (try JSONSerialization.jsonObject(with: Data(songs.utf8)) as! [[String: Any]]).filter { favoriteIds.contains($0["id"] as! Int) }
