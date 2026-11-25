@@ -417,6 +417,27 @@ private actor TransitionTransport: HTTPTransport {
 
 
 extension NowPlayingArtworkTests {
+    @MainActor func testRemoteNewTitleDoesNotKeepPreviousArtworkWhileCoverLoads() async throws {
+        let transport = RestoredOwnerTransport()
+        let api = APIClient(transport: transport, store: UITestStore())
+        try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
+        let coordinator = PlaybackCoordinator(api: api, audioSession: TestAudioSession())
+        await transport.setOwner("another-device")
+        await coordinator.reconcile()
+        for _ in 0..<200 where coordinator.artwork == nil { try await Task.sleep(for: .milliseconds(25)) }
+        XCTAssertNotNil(coordinator.artwork)
+        await transport.advanceWithDelayedMetadata()
+        await coordinator.reconcile()
+        for _ in 0..<200 {
+            if await transport.waitingForMetadata { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        await transport.releaseMetadata()
+        for _ in 0..<200 where coordinator.track?.id != 2 { try await Task.sleep(for: .milliseconds(25)) }
+        XCTAssertEqual(coordinator.track?.id, 2)
+        XCTAssertNil(coordinator.artwork, "Old artwork must disappear as soon as the new title is published")
+        coordinator.stop()
+    }
     @MainActor func testRemoteTrackChangeKeepsPlayerMountedWhileMetadataLoads() async throws {
         let transport = RestoredOwnerTransport()
         let api = APIClient(transport: transport, store: UITestStore())
