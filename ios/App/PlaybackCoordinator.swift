@@ -822,12 +822,11 @@ import Network
                 guard !Task.isCancelled, self.sessionGeneration == generation else { return }
                 if self.state?.currentTrackId == id {
                     self.metadataTask = nil
-                    if let metadata {
-                        self.track = metadata
-                        // Never label the previous song’s cover with the new title while its image loads.
-                        self.artwork = nil; self.receiverArtwork = nil; self.systemArtwork = nil
-                        self.artworkRevision += 1
-                    }
+                    guard let metadata else { return }
+                    self.track = metadata
+                    // Never label the previous song’s cover with the new title while its image loads.
+                    self.artwork = nil; self.receiverArtwork = nil; self.systemArtwork = nil
+                    self.artworkRevision += 1
                     self.artworkTask = Task { [weak self] in
                         guard let self else { return }
                         let decoded = await self.artworkStore.image("/api/v1/artwork/\(id)", pixels: 2048)

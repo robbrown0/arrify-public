@@ -226,6 +226,11 @@ private actor RestoredOwnerTransport: HTTPTransport {
     private var current = 1
     private(set) var waitingForMetadata = false
     private var metadataContinuation: CheckedContinuation<Void, Never>?
+    private var delayCover = false
+    private(set) var waitingForCover = false
+    private var coverContinuation: CheckedContinuation<Void, Never>?
+    func delayNextCover() { delayCover = true }
+    func releaseCover() { coverContinuation?.resume(); coverContinuation = nil }
     func advanceWithDelayedMetadata() { current = 2 }
     func releaseMetadata() { metadataContinuation?.resume(); metadataContinuation = nil }
     private(set) var commands: [String] = []
@@ -263,6 +268,11 @@ private actor RestoredOwnerTransport: HTTPTransport {
         }
         if path.hasSuffix("/tracks/1") {
             return HTTPResult(status: 200, data: Data(#"{"track":{"id":1,"title":"Test song","artist":"Test artist","album":"Test album"}}"#.utf8))
+        }
+        if path.hasSuffix("/artwork/2"), delayCover {
+            waitingForCover = true
+            await withCheckedContinuation { coverContinuation = $0 }
+            return HTTPResult(status: 404, data: Data())
         }
         if path.hasSuffix("/artwork/1") {
             artworkRequests += 1
@@ -432,10 +442,18 @@ extension NowPlayingArtworkTests {
             if await transport.waitingForMetadata { break }
             try await Task.sleep(for: .milliseconds(25))
         }
+        await transport.delayNextCover()
         await transport.releaseMetadata()
         for _ in 0..<200 where coordinator.track?.id != 2 { try await Task.sleep(for: .milliseconds(25)) }
+        for _ in 0..<200 {
+            if await transport.waitingForCover { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        let waiting = await transport.waitingForCover
+        XCTAssertTrue(waiting)
         XCTAssertEqual(coordinator.track?.id, 2)
         XCTAssertNil(coordinator.artwork, "Old artwork must disappear as soon as the new title is published")
+        await transport.releaseCover()
         coordinator.stop()
     }
     @MainActor func testRemoteTrackChangeKeepsPlayerMountedWhileMetadataLoads() async throws {
