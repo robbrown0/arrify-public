@@ -30,7 +30,7 @@ def audio_mime(audio, fallback):
             if (head[1] & 224 == 224 and head[1] & 24 != 8 and head[1] & 6 != 0
                     and head[2] >> 4 not in (0, 15) and head[2] & 12 != 12):
                 return 'audio/mpeg'
-            if head[1] & 246 == 240 and head[2] & 60 != 60: return 'audio/aac'
+            if head[1] & 246 == 240 and (head[2] >> 2) & 15 < 13: return 'audio/aac'
         return fallback
     finally:
         audio.seek(position)
