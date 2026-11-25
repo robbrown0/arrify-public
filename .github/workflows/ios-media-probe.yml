@@ -1,0 +1,38 @@
+name: Uncached media diagnostic
+on:
+  push:
+    branches: ['fix/uncached-media-open-42']
+    paths: ['tools/media-probe/**', 'app/media_type.py', '.github/workflows/ios-media-probe.yml']
+  pull_request:
+    paths: ['tools/media-probe/**', 'app/media_type.py', '.github/workflows/ios-media-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  media:
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ['macOS', 'iPhone', 'iPad']
+    runs-on: macos-26
+    timeout-minutes: 8
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Open original media over HTTP on the Apple media engine
+        env:
+          DEVICE_FAMILY: ${{ matrix.device }}
+        run: |
+          python3 tools/media-probe/server.py &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID"' EXIT
+          if [ "$DEVICE_FAMILY" = macOS ]; then
+            swift tools/media-probe/open.swift
+          else
+            DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
+            xcrun simctl boot "$DEVICE"
+            xcrun simctl bootstatus "$DEVICE" -b
+            xcrun --sdk iphonesimulator swiftc -target "$(uname -m)-apple-ios18.0-simulator" tools/media-probe/open.swift -o "$RUNNER_TEMP/media-probe"
+            xcrun simctl spawn "$DEVICE" "$RUNNER_TEMP/media-probe"
+          fi

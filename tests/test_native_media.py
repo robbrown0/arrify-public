@@ -1,10 +1,12 @@
 import http.client
+import base64
 import json
 import os
 from pathlib import Path
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 import test_stream_grants_http as fixtures
@@ -75,6 +77,25 @@ class NativeMediaHTTPTests(unittest.TestCase):
         grant = parse_qs(urlparse(url).query)['native_grant'][0]
         self.assertEqual(self.raw('/api/v1/me', Authorization='Bearer '+grant)[0], 403)
         self.assertEqual(self.raw(url.replace('/stream/1','/artwork/1'))[0], 403)
+
+    def test_mislabeled_mp3_manifest_stream_and_cache_metadata_agree(self):
+        # Actual playable MP3, deliberately imported under an MP4 filename/type.
+        sample = Path(__file__).resolve().parents[1] / 'tools/media-probe/silence.mp3.base64'
+        self.audio = Path(self.tmp.name) / 'incorrect.m4a'
+        self.audio.write_bytes(base64.b64decode(sample.read_text()))
+        self.lib.music = SimpleNamespace(_track_file=lambda tid: ({'mime_type':'audio/mp4'}, str(self.audio)))
+        status, manifest = self.manifest()
+        self.assertEqual(status, 200)
+        item = manifest['items'][0]
+        self.assertEqual(item['mime_type'], 'audio/mpeg')
+        self.assertEqual(item['size_bytes'], self.audio.stat().st_size)
+        for method, headers, expected in [('GET', {}, 200), ('HEAD', {}, 200), ('GET', {'Range':'bytes=0-1'}, 206)]:
+            status, body, response = self.raw(item['url'], method, **headers)
+            self.assertEqual(status, expected)
+            self.assertEqual(response['Content-Type'], 'audio/mpeg')
+            if headers: self.assertEqual(body, self.audio.read_bytes()[:2])
+        # Existing manifest links keep their authorization and also get the corrected header.
+        self.assertEqual(self.raw(item['url'].replace('/stream/1','/stream/99'))[0], 403)
 
     def test_access_expiry_and_rotation_keep_url_but_revoke_and_takeover_do_not(self):
         _, manifest = self.manifest(); url = manifest['items'][0]['url']
