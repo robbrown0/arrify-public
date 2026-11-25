@@ -85,6 +85,24 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertTrue(player.isPlaying)
     }
 
+    @MainActor func testNextRecoversTransientManifestFailureWithoutPreparationError() async throws {
+        let (player, transport) = try await fixture()
+        defer { player.stop() }
+        await transport.allowTransitionsImmediately()
+        await transport.failOneNextManifest()
+        await player.send("next")
+        for _ in 0..<400 where player.state?.currentTrackId != 2 || !player.isPlaying || player.busy {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(player.state?.currentTrackId, 2)
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertFalse(player.playbackFailed)
+        XCTAssertNil(player.message)
+        let recovered = await transport.transientManifestFailures
+        XCTAssertEqual(recovered, 1)
+        let nextRequests = await transport.nextRequests
+        XCTAssertEqual(nextRequests, 1, "Recover the preparation read without replaying Next")
+    }
     @MainActor func testCachedManualSkipIsImmediateAndPauseWinsWhileOffline() async throws {
         let (player, transport) = try await fixture(cachedNext: true)
         defer { player.stop() }
@@ -845,6 +863,9 @@ actor CallResumeTransitionTransport: HTTPTransport {
     private(set) var mediaWaiting = false
     func delayMedia() { delayOneMedia = true }
     func releaseMedia() { pendingMedia?.resume(); pendingMedia = nil }
+    private var failNextManifest = false
+    private(set) var transientManifestFailures = 0
+    func failOneNextManifest() { failNextManifest = true }
     private var failingMedia = false
     func failMedia(_ value: Bool) { failingMedia = value }
     private var failingTransitions = false
@@ -921,6 +942,10 @@ actor CallResumeTransitionTransport: HTTPTransport {
             return try state()
         }
         if path.hasSuffix("/manifest") {
+            if failNextManifest, current == 2 {
+                failNextManifest = false; transientManifestFailures += 1
+                throw URLError(.networkConnectionLost)
+            }
             if delayOneMedia {
                 delayOneMedia = false; mediaWaiting = true
                 await withCheckedContinuation { pendingMedia = $0 }

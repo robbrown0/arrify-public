@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
       read_recovery_only:
-        description: Targeted Home refresh and saved-song recovery checks
+        description: Playback app regressions plus Home and saved-song recovery UI checks
         type: boolean
         default: false
       navigation_refresh_only:
@@ -73,7 +73,7 @@ jobs:
             ONLY_TESTS=(-only-testing:ArrifyAppTests/NowPlayingArtworkTests/testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testTabletVolumeUsesNativeHeightCenteredInControlRow -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible)
           fi
           if [ "$RECOVERY_ONLY" = "true" ]; then
-            ONLY_TESTS=(-only-testing:ArrifyUITests/LaunchTests/testHomePullRefreshRecoversSavedSongsWithoutVisitingLikedSongs -only-testing:ArrifyUITests/LaunchTests/testHomeRecoversBriefFailureAndPlayerCanRetrySavedSongs)
+            ONLY_TESTS=(-only-testing:ArrifyAppTests -only-testing:ArrifyUITests/LaunchTests/testHomePullRefreshRecoversSavedSongsWithoutVisitingLikedSongs -only-testing:ArrifyUITests/LaunchTests/testHomeRecoversBriefFailureAndPlayerCanRetrySavedSongs)
           fi
           if [ "$NAVIGATION_ONLY" = "true" ]; then
             ONLY_TESTS=(-only-testing:ArrifyUITests/LaunchTests/testBrowseCategoriesChartsAndRequests -only-testing:ArrifyUITests/LaunchTests/testEmptyPlayerAndSingleTapAlbumActions -only-testing:ArrifyUITests/LaunchTests/testArtistsSelectDistinctItemsAndVisiblePageRetry)

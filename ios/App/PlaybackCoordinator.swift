@@ -1120,7 +1120,14 @@ import Network
             for attempt in 0..<8 {
                 try Task.checkCancellation()
                 PlaybackDiagnostics.event("preparation-manifest-start attempt=\(attempt + 1)")
-                let manifest = try await api.manifest(deviceId: deviceId, epoch: epoch, profile: requestedProfile, retry: attempt == 0 && explicitRetry)
+                var retryFailedTranscode = attempt == 0 && explicitRetry
+                let manifest: Manifest = try await ReadRecovery.load(wait: ReadRecovery.wait, valid: {
+                    self.preparationGeneration == preparationToken && self.desiredKey == key && self.ownsOutput
+                }) {
+                    // An explicit transcode retry is sent once; subsequent reads only observe it.
+                    let retry = retryFailedTranscode; retryFailedTranscode = false
+                    return try await self.api.manifest(deviceId: self.deviceId, epoch: epoch, profile: requestedProfile, retry: retry)
+                }
                 guard !Task.isCancelled, desiredKey == key, ownsOutput,
                       manifest.ownerEpoch == epoch else { return }
                 PlaybackDiagnostics.event("preparation-manifest-ready")
