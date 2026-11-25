@@ -3,11 +3,13 @@ import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-audio = base64.b64decode(Path(__file__).with_name('silence.flac.base64').read_text())
+flac = base64.b64decode(Path(__file__).with_name('silence.flac.base64').read_text())
+mp3 = base64.b64decode(Path(__file__).with_name('silence.mp3.base64').read_text())
 class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self): self.respond(False)
     def do_GET(self): self.respond(True)
     def respond(self, body):
+        audio = mp3 if '/mp3' in self.path else flac
         first, last = 0, len(audio)-1
         value = self.headers.get('Range')
         if value:
@@ -17,7 +19,7 @@ class Handler(BaseHTTPRequestHandler):
         if first > last:
             self.send_response(416); self.send_header('Content-Range', f'bytes */{len(audio)}'); self.end_headers(); return
         self.send_response(206 if value else 200)
-        self.send_header('Content-Type', 'audio/flac')
+        self.send_header('Content-Type', 'audio/mp4' if '/mp3-wrong' in self.path else 'audio/mpeg' if '/mp3' in self.path else 'audio/flac')
         self.send_header('Content-Length', str(last-first+1))
         self.send_header('Accept-Ranges', 'bytes')
         if value:self.send_header('Content-Range', f'bytes {first}-{last}/{len(audio)}')

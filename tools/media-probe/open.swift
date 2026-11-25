@@ -19,6 +19,8 @@ import AVFoundation
 }
 await probe("extensionless", url: URL(string: "http://127.0.0.1:18742/api/v1/stream/1?grant=fixture")!)
 await probe("extension", url: URL(string: "http://127.0.0.1:18742/api/v1/stream/1.flac?grant=fixture")!)
+await probe("mp3-wrong-mp4-type", url: URL(string: "http://127.0.0.1:18742/mp3-wrong?grant=fixture")!)
+await probe("mp3-correct-type", url: URL(string: "http://127.0.0.1:18742/mp3-correct?grant=fixture")!)
 let bytes = Data(base64Encoded: try String(contentsOfFile: "tools/media-probe/silence.flac.base64", encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines))!
 let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".flac")
 try bytes.write(to: file)
