@@ -116,6 +116,7 @@ class StreamGrantHTTPTests(unittest.TestCase):
         status,body,headers=self.raw('/api/v1/artwork/1',Cookie=self.hostcookie)
         self.assertEqual((status,body),(204,b''))
         self.assertEqual(headers['Cache-Control'],'private, no-store')
+        self.assertNotIn('Content-Length',headers)
         self.lib.supplemental_artwork=lambda *args,**kwargs:b'saved-supplemental-cover'
         self.assertEqual(self.raw('/api/v1/artwork/1',Cookie=self.hostcookie)[:2],(200,b'saved-supplemental-cover'))
         self.lib.supplemental_artwork=lambda *args,**kwargs:None

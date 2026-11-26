@@ -100,7 +100,7 @@ class Handler(BaseHTTPRequestHandler):
             diagnostics.artwork_response(int(artwork_match[1]),status,len(body),'grant' in parse_qs(urlparse(self.path).query),self.headers.get('User-Agent',''))
         self.send_response(status)
         self.send_header('Content-Type',mime)
-        self.send_header('Content-Length',str(len(body)))
+        if status!=204:self.send_header('Content-Length',str(len(body)))
         if not any(key.lower()=='cache-control' for key in (extra or {})):
             self.send_header('Cache-Control','no-store')
         self.send_header('X-Content-Type-Options','nosniff')
