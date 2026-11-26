@@ -5,37 +5,55 @@ import AVKit
 struct AudiobookShelf: View {
     let model: AppModel
     @Environment(\.scenePhase) private var scenePhase
-    private var shelf: AudiobookShelfStore { model.books.shelf }
+    @Bindable private var shelf: AudiobookShelfStore
+    init(model: AppModel) { self.model = model; _shelf = Bindable(wrappedValue:model.books.shelf) }
+    private var downloaded: Bool { shelf.filter == "downloads" }
+    private var showsLoading: Bool { !downloaded && (shelf.loading || !shelf.hasLoaded && shelf.message == nil) }
+    private var showsEmpty: Bool {
+        if downloaded { return displayed.isEmpty }
+        return shelf.hasLoaded && !shelf.loading && displayed.isEmpty && shelf.message == nil
+    }
+    private var taskKey: String { shelf.requestKey + ":" + String(scenePhase == .active) }
+    private var recoveryKey: String { taskKey + ":" + String(shelf.needsRecovery) }
     var body: some View {
-        @Bindable var shelf = model.books.shelf
         ScrollView {
             LazyVStack(alignment:.leading, spacing:20) {
                 Text("Your next good listen").font(.subheadline).foregroundStyle(.secondary)
                 ScrollView(.horizontal, showsIndicators:false) { filterButtons }
-                if shelf.libraries.count > 1 {
-                    Picker("Library", selection:$shelf.library) { ForEach(shelf.libraries) { Text($0.name).tag($0.id) } }.pickerStyle(.menu)
-                }
-                if let message = shelf.message, shelf.filter != "downloads" { Text(message).foregroundStyle(.secondary); Button("Try again") { Task { await shelf.retry() } } }
-                LazyVGrid(columns:[GridItem(.adaptive(minimum:145, maximum:230), alignment:.top)], alignment:.leading, spacing:24) {
-                    ForEach(displayed) { book in AudiobookShelfCard(model:model, book:book) }
-                }
-                if shelf.filter != "downloads" && (shelf.loading || !shelf.hasLoaded && shelf.message == nil) { ProgressView().frame(maxWidth:.infinity) }
-                if (shelf.filter == "downloads" || shelf.hasLoaded) && !shelf.loading && displayed.isEmpty && (shelf.filter == "downloads" || shelf.message == nil) {
-                    emptyShelf
-                }
-                if shelf.next != nil && shelf.filter != "downloads" { Button("More books") { Task { await shelf.load(more:true) } }.disabled(shelf.loading) }
+                libraryPicker
+                recoveryStatus
+                bookGrid
+                if showsLoading { ProgressView().frame(maxWidth:.infinity) }
+                if showsEmpty { emptyShelf }
+                if shelf.next != nil && !downloaded { Button("More books") { Task { await shelf.load(more:true) } }.disabled(shelf.loading) }
             }.padding(24)
         }.background(Color.black).navigationTitle("Audiobooks")
             .searchable(text:$shelf.query, prompt:"Books, authors, narrators")
             .toolbar { NavigationLink { AudiobookSettings(books:model.books) } label: { Image(systemName:"slider.horizontal.3") }.accessibilityLabel("Listening settings") }
-            .task(id:shelf.requestKey + ":" + String(scenePhase == .active)) {
+            .task(id:taskKey) {
                 guard scenePhase == .active else { return }
                 do { if !shelf.query.isEmpty { try await Task.sleep(for:.milliseconds(250)) }; await shelf.load() } catch {}
             }
             .refreshable { await shelf.load() }
-            .task(id:shelf.requestKey + ":" + String(shelf.needsRecovery && scenePhase == .active)) {
+            .task(id:recoveryKey) {
                 if scenePhase == .active && shelf.filter != "downloads" && shelf.needsRecovery { await shelf.reconnect() }
             }
+    }
+    @ViewBuilder private var libraryPicker: some View {
+        if shelf.libraries.count > 1 {
+            Picker("Library",selection:$shelf.library) { ForEach(shelf.libraries) { library in Text(library.name).tag(library.id) } }.pickerStyle(.menu)
+        }
+    }
+    @ViewBuilder private var recoveryStatus: some View {
+        if !downloaded, let message = shelf.message {
+            Text(message).foregroundStyle(.secondary)
+            Button("Try again") { Task { await shelf.retry() } }
+        }
+    }
+    private var bookGrid: some View {
+        LazyVGrid(columns:[GridItem(.adaptive(minimum:145,maximum:230),alignment:.top)],alignment:.leading,spacing:24) {
+            ForEach(displayed) { book in AudiobookShelfCard(model:model,book:book) }
+        }
     }
     private var filterButtons: some View {
         HStack { ForEach(["all", "started", "finished", "downloads"], id:\.self) { value in filterButton(value) } }
