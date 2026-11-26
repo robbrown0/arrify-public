@@ -207,7 +207,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed=urlparse(self.path); path=unquote(parsed.path); q=parse_qs(parsed.query)
         a,lib,player=self.server.accounts,self.server.library,self.server.player
         if native_http.dispatch(self,path):return
-        if audiobooks_http.dispatch(self,path):return
+        if path.startswith('/api/v1/audiobooks/') or path=='/api/v1/admin/audiobooks':
+            if audiobooks_http.dispatch(self,path):return
         if path=='/health': return self.json({'status':'ok','build':build_identity(),'catalog_tracks':len(lib.tracks),'refresh_error':lib.refresh_error,'last_refresh_success':lib.last_refresh_success,'active_streams':len(self.server.active_streams.snapshot()['items']), 'audiobook_playing':self.server.audiobooks.active_count() if getattr(self.server,'audiobooks',None) else 0})
         if path=='/api/v1/branding':return self.json(self.server.branding.status())
         if path=='/api/v1/branding/icon':return self.send(200,self.server.branding.image(),'image/png')
@@ -476,7 +477,8 @@ class Handler(BaseHTTPRequestHandler):
         from .account_email_http import dispatch as email_dispatch
         if email_dispatch(self,path,data):return
         if native_http.dispatch(self,path,data):return
-        if audiobooks_http.dispatch(self,path,data):return
+        if path.startswith('/api/v1/audiobooks/') or path=='/api/v1/admin/audiobooks':
+            if audiobooks_http.dispatch(self,path,data):return
         if party_http.public_post(self,path,data):return
         if path in ('/api/v1/auth/recovery-link','/api/v1/auth/recovery-check','/api/v1/auth/recover'):
             a.rate_limit(('recovery',self.client_address[0]),12,900)

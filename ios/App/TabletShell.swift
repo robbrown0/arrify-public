@@ -47,7 +47,7 @@ struct TabletShell: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 12) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField(searchKind == "all" ? "Search your music" : "Search \(searchKind == "tracks" ? "songs" : searchKind)", text: $query).focused($searching)
+                        TextField(searchKind == "all" ? (model.books.visible ? "Search music and audiobooks" : "Search your music") : "Search \(searchKind == "tracks" ? "songs" : searchKind)", text: $query).focused($searching)
                             .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
                             .accessibilityIdentifier("tabletSearch")
                             .simultaneousGesture(TapGesture().onEnded { searchRoot = UUID(); destination = "Search" })

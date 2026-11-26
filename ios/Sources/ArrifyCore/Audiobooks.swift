@@ -42,7 +42,7 @@ public struct Audiobook: Codable, Sendable, Identifiable {
     public var progress: AudiobookProgress?
     public var remaining: Double { max(0, duration - (progress?.currentTime ?? 0)) }
 }
-public struct AudiobookPreferences: Codable, Sendable {
+public struct AudiobookPreferences: Codable, Sendable, Equatable {
     public var visible = true
     public var continuous = false
     public var speed = 1.0

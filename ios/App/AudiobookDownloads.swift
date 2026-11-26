@@ -102,7 +102,7 @@ import CryptoKit
             let old = records[id]
             if old?.addresses != urls || old?.manifest.lease != manifest.lease {
                 // Resume data is opaque. A changed origin/grant starts a fresh transfer.
-                if let files = try? FileManager.default.contentsOfDirectory(at:root.appending(path:id), includingPropertiesForKeys:nil) {
+                if let transfer = old?.transferId, let files = try? FileManager.default.contentsOfDirectory(at:root.appending(path:id + "/" + transfer), includingPropertiesForKeys:nil) {
                     for file in files where file.pathExtension == "resume" { try? FileManager.default.removeItem(at:file) }
                 }
             }

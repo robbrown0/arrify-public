@@ -864,6 +864,7 @@ struct SearchScopePicker: View {
 struct AllSearchResults: View {
     let model: AppModel
     let query: String
+    @State private var bookResults: [Audiobook] = []
     @State private var songs: LibraryBrowser
     @State private var albums: LibraryBrowser
     @State private var artists: LibraryBrowser
@@ -887,22 +888,41 @@ struct AllSearchResults: View {
                 }
                 entitySection("Albums", browser: albums)
                 entitySection("Artists", browser: artists)
-                if !songs.loading && !albums.loading && !artists.loading && songs.total + albums.total + artists.total == 0 && songs.error == nil && albums.error == nil && artists.error == nil {
+                if !bookResults.isEmpty {
+                    Section("Audiobooks") {
+                        ForEach(bookResults) { book in
+                            NavigationLink { AudiobookDetail(model:model, initial:book) } label: {
+                                HStack(spacing:12) {
+                                    RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:56, height:56).clipShape(RoundedRectangle(cornerRadius:8))
+                                    VStack(alignment:.leading) { Text(book.title).font(.headline); Text(book.author).font(.subheadline).foregroundStyle(.secondary) }
+                                }.frame(minHeight:60)
+                            }
+                        }
+                    }
+                }
+                if !songs.loading && !albums.loading && !artists.loading && bookResults.isEmpty && songs.total + albums.total + artists.total == 0 && songs.error == nil && albums.error == nil && artists.error == nil {
                     ContentUnavailableView("No matches", systemImage: "magnifyingglass", description: Text("Try another name."))
                 }
             }
         }.scrollContentBackground(.hidden).background(Color.black)
             .navigationTitle("Search").navigationBarTitleDisplayMode(.inline)
             .task(id: query) {
-                songs.resetSearch(); albums.resetSearch(); artists.resetSearch()
+                songs.resetSearch(); albums.resetSearch(); artists.resetSearch(); bookResults = []
                 guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                 do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
                 songs.sort = "relevance"; albums.sort = "relevance"; artists.sort = "relevance"
                 async let s: Void = songs.load(query: query)
                 async let a: Void = albums.load(query: query)
                 async let r: Void = artists.load(query: query)
+                async let b: [Audiobook] = searchBooks()
                 _ = await (s, a, r)
+                let books = await b
+                if !Task.isCancelled { bookResults = books }
             }
+    }
+    private func searchBooks() async -> [Audiobook] {
+        guard model.books.visible else { return [] }
+        return (try? await model.api.audiobookLibrary(query:query).items) ?? []
     }
     private var songSource: LibrarySource {
         let options = ["q": query, "sort": "relevance"]

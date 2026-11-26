@@ -24,6 +24,10 @@ import CryptoKit
     private var heartbeat: Task<Void, Never>?
     private var pending: [String: Pending] = [:]
     private var journal: URL?
+    private var preferencesFile: URL?
+    private var preferencesPending = false
+    private var savingPreferences = false
+    private struct SavedPreferences: Codable { let value: AudiobookPreferences; let pending: Bool }
     private var part: AudiobookPart?
     private var currentURL: URL?
     private var wantsPlayback = false
@@ -61,7 +65,7 @@ import CryptoKit
     init(api: APIClient, music: PlaybackCoordinator, audioSession: (any PlaybackAudioSession)? = nil) {
         self.api = api; self.music = music; downloads = AudiobookDownloads(api:api)
         self.audioSession = audioSession ?? SystemPlaybackAudioSession()
-        observer = player.addPeriodicTimeObserver(forInterval:CMTime(seconds:.5, preferredTimescale:600), queue:.main) { @Sendable [weak self] time in
+        observer = player.addPeriodicTimeObserver(forInterval:CMTime(seconds:0.5, preferredTimescale:600), queue:.main) { @Sendable [weak self] time in
             let seconds = time.seconds
             MainActor.assumeIsolated { self?.tick(seconds) }
         }
@@ -103,6 +107,8 @@ import CryptoKit
             var url = directory; var values = URLResourceValues(); values.isExcludedFromBackup = true; try url.setResourceValues(values)
             guard ticket == accountGeneration else { return }
             journal = directory.appending(path:key + ".json")
+            preferencesFile = directory.appending(path:key + ".preferences")
+            if let preferencesFile, let data = try? Data(contentsOf:preferencesFile), let saved = try? JSONDecoder().decode(SavedPreferences.self, from:data) { preferences = saved.value; preferencesPending = saved.pending }
             if let journal, let data = try? Data(contentsOf:journal) { pending = (try? JSONDecoder().decode([String:Pending].self, from:data)) ?? [:] }
             await downloads.configure()
             guard ticket == accountGeneration else { return }
@@ -120,7 +126,10 @@ import CryptoKit
         do {
             let status = try await api.audiobookStatus()
             guard ticket == accountGeneration else { return }
-            enabled = status.enabled; preferences = status.preferences
+            enabled = status.enabled
+            if preferencesPending { await synchronizePreferences() }
+            else { preferences = status.preferences }
+            savePreferences()
             if enabled, let values = try? await api.continueAudiobooks(), ticket == accountGeneration { continueListening = values }
         } catch { /* Books are optional; keep already downloaded books available. */
             if !downloads.records.isEmpty { enabled = true }
@@ -317,7 +326,7 @@ import CryptoKit
             }
         }
     }
-    func networkAvailable() async { retryAt = .distantPast; await synchronize() }
+    func networkAvailable() async { retryAt = .distantPast; await synchronizePreferences(); await synchronize() }
     func observe(_ state: PlaybackState) {
         guard active else { return }
         if let epoch = manifest?.musicEpoch, state.ownerEpoch < epoch { return }
@@ -334,6 +343,7 @@ import CryptoKit
         active = false; presented = false; book = nil; manifest = nil; part = nil; enabled = false
         player.replaceCurrentItem(with:nil); downloads.clear(); pending = [:]; continueListening = []; queue = []; bookmarks = []
         if let journal { try? FileManager.default.removeItem(at:journal) }; journal = nil
+        if let preferencesFile { try? FileManager.default.removeItem(at:preferencesFile) }; preferencesFile = nil; preferencesPending = false
         conflict = false; message = nil; retryAt = .distantPast; failures = 0; syncing = false
     }
     func setSleep(_ choice: String) {
@@ -342,9 +352,25 @@ import CryptoKit
         else if let minutes = Double(choice), minutes > 0 { sleepDeadline = Date().addingTimeInterval(minutes*60) }
     }
     func updatePreferences(_ value: AudiobookPreferences) async {
-        let before = preferences; preferences = value; player.rate = playing ? Float(value.speed) : 0
-        do { preferences = try await api.audiobookPreferences(value); systemControls(); publish() }
-        catch { preferences = before; player.rate = playing ? Float(before.speed) : 0; message = "Connect to save your listening settings." }
+        preferences = value; preferencesPending = true; savePreferences()
+        player.rate = playing ? Float(value.speed) : 0; systemControls(); publish()
+        await synchronizePreferences()
+    }
+    private func synchronizePreferences() async {
+        guard preferencesPending, !savingPreferences else { return }; savingPreferences = true
+        let account = accountGeneration; defer { savingPreferences = false }
+        while preferencesPending {
+            let value = preferences
+            do {
+                let saved = try await api.audiobookPreferences(value)
+                guard account == accountGeneration else { return }
+                if preferences == value { preferences = saved; preferencesPending = false }
+                savePreferences()
+            } catch { if account == accountGeneration { message = "Listening settings are saved on this device and will sync when connected." }; return }
+        }
+    }
+    private func savePreferences() {
+        if let preferencesFile, let data = try? JSONEncoder().encode(SavedPreferences(value:preferences, pending:preferencesPending)) { try? data.write(to:preferencesFile, options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication]) }
     }
     func addBookmark() async {
         guard let book else { return }
