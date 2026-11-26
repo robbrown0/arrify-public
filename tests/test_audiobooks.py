@@ -269,6 +269,31 @@ class AudiobookTests(unittest.TestCase):
         self.assertEqual(self.books.remote_progress(1,'book-one')['currentTime'],25)
         self.assertEqual(self.books.public_state(1)['queue'],[])
 
+    def test_embedded_chapter_overrun_does_not_block_playback(self):
+        self.fixture.duration = 1765.219456
+        original = self.fixture.item
+        def overrun(book_id='book-one'):
+            item = original(book_id)
+            item['media']['chapters'] = [{'title':'ch2','start':0,'end':1769.259}]
+            return item
+        self.fixture.item = overrun
+        result = self.play()
+        self.assertEqual(result['book']['chapters'], [{'title':'ch2','start':0,'end':1765.219456}])
+        self.assertEqual(self.books.stream(result['lease'], 0)[2]['path'], '/api/items/book-one/file/123')
+        with self.assertRaises(BookError):
+            self.books.progress(1, {'lease':result['lease'], 'device_id':self.device,
+                                  'seq':1, 'position':1769.259, 'playing':False})
+
+    def test_invalid_optional_chapters_fall_back_to_audio_parts(self):
+        original = self.fixture.item
+        for markers in ([None, {'start':True,'end':20}, {'start':0,'end':float('nan')},
+                         {'start':0,'end':'120'}, {'start':130,'end':150}, {'start':50,'end':20}],
+                        [{'start':0,'end':float('inf')} ]):
+            with self.subTest(markers=markers):
+                item = original(); item['media']['chapters'] = markers
+                result = self.books.metadata(item, True)
+                self.assertEqual(result['chapters'], [{'title':'Part 1','start':0,'end':120}])
+
     def test_unsafe_provider_media_url_is_rejected(self):
         old = self.fixture.item
         def malicious(book_id='book-one'):
