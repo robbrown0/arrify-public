@@ -21,14 +21,26 @@ private final class RejectRedirects: NSObject, URLSessionTaskDelegate, Sendable 
 }
 public final class SessionTransport: HTTPTransport, Sendable {
     private let session: URLSession
+    private let images: URLSession
     public init() {
         let config = URLSessionConfiguration.ephemeral
         config.urlCache = nil; config.httpCookieStorage = nil; config.httpShouldSetCookies = false
         config.timeoutIntervalForRequest = 20; config.timeoutIntervalForResource = 30
         session = URLSession(configuration: config, delegate: RejectRedirects(), delegateQueue: nil)
+        let artwork = URLSessionConfiguration.ephemeral
+        artwork.urlCache = nil; artwork.httpCookieStorage = nil; artwork.httpShouldSetCookies = false
+        artwork.timeoutIntervalForRequest = 5; artwork.timeoutIntervalForResource = 8
+        artwork.httpMaximumConnectionsPerHost = 3
+        images = URLSession(configuration: artwork, delegate: RejectRedirects(), delegateQueue: nil)
+    }
+    static func isArtwork(_ path: String) -> Bool {
+        path.hasPrefix("/api/v1/artwork/") || path.hasPrefix("/api/v1/artist-artwork/") || path.hasPrefix("/api/v1/audiobooks/cover/") || path == "/api/v1/branding/icon"
     }
     public func send(_ request: URLRequest) async throws -> HTTPResult {
-        let (data, response) = try await session.data(for: request)
+        let artwork = Self.isArtwork(request.url?.path ?? "")
+        var request = request
+        if artwork { request.timeoutInterval = 5; request.networkServiceType = .background }
+        let (data, response) = try await (artwork ? images : session).data(for: request)
         guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         return HTTPResult(status: response.statusCode, data: data, retryAfterSeconds: response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init))
     }
@@ -60,7 +72,7 @@ public final class SessionTransport: HTTPTransport, Sendable {
         }
         #endif
     }
-    deinit { session.invalidateAndCancel() }
+    deinit { session.invalidateAndCancel(); images.invalidateAndCancel() }
 }
 public protocol CredentialStore: Sendable {
     func load() async throws -> Credential?

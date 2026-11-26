@@ -37,9 +37,14 @@ actor UITestTransport: HTTPTransport {
     private let mix = #"{"id":"mood-feel-good","kind":"collections","name":"Feel Good Favorites","subtitle":"Familiar favorites","section":"moods","artwork":null,"track_count":2}"#
     private let songs = #"[{"id":1,"title":"Just Like a Pill","artist":"P!nk","album":"M!ssundaztood","artist_id":"bbbbbbbbbbbbbbbbbbbbbbbb","album_id":"aaaaaaaaaaaaaaaaaaaaaaaa","popularity":{"doubloons":2,"rising":true,"evidence":[{"source":"Fixture chart","url":"https://example.com/chart"}]}},{"id":2,"title":"Try","artist":"P!nk","album":"The Truth About Love"}]"#
     private var recoveryFailures: [String: Int] = [:]
+    private var bookshelfReads = 0
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
         if path.hasPrefix("/api/v1/audiobooks/"), ProcessInfo.processInfo.environment["ARRIFY_UI_AUDIOBOOKS"] == "1" {
+            if path.hasSuffix("/library"), ProcessInfo.processInfo.environment["ARRIFY_UI_SHELF_RECOVERY"] == "1" {
+                bookshelfReads += 1
+                if bookshelfReads == 1 || (3...6).contains(bookshelfReads) { throw URLError(.timedOut) }
+            }
             let body = (try? JSONSerialization.jsonObject(with:request.httpBody ?? Data())) as? [String:Any] ?? [:]
             if path.hasSuffix("/preferences"), request.httpMethod == "POST" { bookPreferences.merge(body) { _,new in new } }
             if path.hasSuffix("/play") { bookDevice = body["device_id"] as? String ?? ""; owner = bookDevice; playing = false; bookEpoch += 1 }

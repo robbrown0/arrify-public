@@ -45,6 +45,7 @@ public actor APIClient {
         guard path.hasPrefix("/api/v1/"), let url = URL(string: path, relativeTo: endpoint.url)?.absoluteURL,
               url.host == endpoint.url.host, url.scheme == endpoint.url.scheme, url.port == endpoint.url.port else { throw APIError.invalidEndpoint }
         var request = URLRequest(url: url); request.httpMethod = method; request.httpBody = body
+        if method == "GET" { request.timeoutInterval = 8 }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -174,11 +175,13 @@ public actor APIClient {
             if foreground { request.setValue("1", forHTTPHeaderField: "X-Arrify-Foreground") }
             let result = try await transport.send(request)
             let providerFailure = Self.audiobookProviderFailure(path, result)
-            await router.observed(endpoint, seconds: providerFailure ? 0 : Date().timeIntervalSince(started), statusCode: providerFailure ? 200 : result.status)
+            if !SessionTransport.isArtwork(URL(string:path)?.path ?? path) {
+                await router.observed(endpoint, seconds: providerFailure ? 0 : Date().timeIntervalSince(started), statusCode: providerFailure ? 200 : result.status)
+            }
             return result
         } catch {
             guard !RequestCancellation.matches(error), !Task.isCancelled else { throw CancellationError() }
-            await router.failed(endpoint)
+            if !SessionTransport.isArtwork(URL(string:path)?.path ?? path) { await router.failed(endpoint) }
             throw error
         }
     }
@@ -194,7 +197,7 @@ public actor APIClient {
         } catch {
             guard !RequestCancellation.matches(error), !Task.isCancelled else { throw CancellationError() }
             // Mutations and rotating refresh tokens must never be replayed after an ambiguous failure.
-            guard method == "GET" else { throw error }
+            guard method == "GET", !SessionTransport.isArtwork(URL(string:path)?.path ?? path) else { throw error }
             let alternate = try await router.selected()
             guard alternate.url != endpoint.url else {
                 // Identity probe succeeded, but the actual API request did not.
@@ -203,7 +206,7 @@ public actor APIClient {
             }
             return try await measuredSend(path, method: "GET", body: nil, saved: saved, endpoint: alternate)
         }
-        if [502, 503, 504].contains(result.status) && !Self.audiobookProviderFailure(path, result) {
+        if [502, 503, 504].contains(result.status) && !SessionTransport.isArtwork(URL(string:path)?.path ?? path) && !Self.audiobookProviderFailure(path, result) {
             await router.failed(endpoint)
             if method == "GET", let alternate = try? await router.selected(), alternate.url != endpoint.url {
                 return try await measuredSend(path, method: "GET", body: nil, saved: saved, endpoint: alternate)
@@ -266,7 +269,8 @@ public actor APIClient {
         _ = try await router.selected()
     }
     private func call<T: Decodable & Sendable>(_ path: String, method: String = "GET", body: Data? = nil) async throws -> T {
-        try Self.decode(await authorizedResponse(path, method: method, body: body), as: T.self)
+        do { return try Self.decode(await authorizedResponse(path, method: method, body: body), as: T.self) }
+        catch is DecodingError { throw APIError.invalidResponse }
     }
     public func artwork(_ id: Int) async throws -> Data? {
         let response = try await authorizedResponse("/api/v1/artwork/\(id)")

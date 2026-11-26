@@ -273,8 +273,11 @@ class Catalog:
         self.db = connect(db_path, check_same_thread=False)
         self.audio_exclusions_file = Path(db_path).parent / 'audio-exclusions.json'
         self.db.executescript(SCHEMA)
-        self.base_sources = {name: os.path.realpath(path) for name, path in sources.items()}
-        self.extra_root = os.path.realpath(extra_root) if extra_root else None
+        # These are operator-configured mount roots. Do not touch a network
+        # filesystem merely to reopen the saved catalog while it is offline.
+        # Canonical containment is checked when an actual file is opened.
+        self.base_sources = {name: os.path.abspath(path) for name, path in sources.items()}
+        self.extra_root = os.path.abspath(extra_root) if extra_root else None
         self.lock = threading.RLock()
         self.scan_running = False
         self.metadata_running = False
@@ -468,8 +471,9 @@ class Catalog:
         if (not relative or candidate_path.is_absolute() or ".." in candidate_path.parts
                 or relative in (".", os.curdir)):
             raise CatalogError("source location must be a relative directory")
-        candidate = os.path.realpath(os.path.join(self.extra_root, relative))
-        if os.path.commonpath((self.extra_root, candidate)) != self.extra_root:
+        root = os.path.realpath(self.extra_root)
+        candidate = os.path.realpath(os.path.join(root, relative))
+        if os.path.commonpath((root, candidate)) != root:
             raise CatalogError("source location is outside the approved root")
         if require_directory and not os.path.isdir(candidate):
             raise CatalogError("source location is not available")
@@ -635,7 +639,9 @@ class Catalog:
                     continue
                 found: list[tuple[object, ...]] = []
                 try:
-                    for directory, names, files in os.walk(root, followlinks=False):
+                    def unavailable(error):
+                        raise error
+                    for directory, names, files in os.walk(root, followlinks=False, onerror=unavailable):
                         names[:] = [name for name in names
                                     if name.casefold() not in SKIP_DIRECTORIES
                                     and not os.path.islink(os.path.join(directory, name))]
@@ -648,7 +654,7 @@ class Catalog:
                                 continue
                             try:
                                 stat = os.stat(absolute, follow_symlinks=False)
-                            except OSError:
+                            except FileNotFoundError:
                                 continue
                             relative = os.path.relpath(absolute, root)
                             if relative.startswith(".." + os.sep) or relative == "..":
@@ -810,7 +816,7 @@ class Catalog:
         sources = self._all_sources()
         if row is None or str(row["source"]) not in sources:
             raise CatalogError("track unavailable")
-        root = sources[str(row["source"])]
+        root = os.path.realpath(sources[str(row["source"])])
         candidate = os.path.realpath(os.path.join(root, str(row["relative_path"])))
         if os.path.commonpath((root, candidate)) != root or os.path.islink(candidate):
             raise CatalogError("track unavailable")
@@ -862,7 +868,11 @@ class Catalog:
 
     def artwork(self, track_id: int) -> tuple[str, bytes, str]:
         """Return confirmed, embedded, folder, or branded fallback artwork."""
-        row, filename = self._track_file(track_id)
+        with self.lock:
+            row = self.db.execute("SELECT " + CATALOG_COLUMNS + CATALOG_JOIN +
+                                  "WHERE t.id=? AND t.available=1", (track_id,)).fetchone()
+        if row is None:
+            raise CatalogError("track unavailable")
         artwork_keys = self._artwork_keys(row)
         if artwork_keys:
             with self.lock:
@@ -881,12 +891,31 @@ class Catalog:
             if cached is not None:
                 self.artwork_cache[cache_key] = cached
                 return cached
+        _, filename = self._track_file(track_id)
         found = local_artwork(filename)
         value = found if found is not None else (
             "image/svg+xml", FALLBACK, "fallback",
         )
         self._cache_artwork(cache_key, value)
         return value
+
+    def bounded_artwork(self, track_id):
+        from .artwork_reads import ArtworkReads
+        with self.lock:
+            row = self.db.execute('SELECT source FROM tracks WHERE id=? AND available=1', (track_id,)).fetchone()
+            if row is None:
+                raise CatalogError('track unavailable')
+            if not hasattr(self, '_artwork_reads'):
+                self._artwork_reads = {}
+            # Each source has its own small budget: an offline share must not
+            # consume the workers needed by healthy local/NAS artwork.
+            source = str(row['source'])
+            if source not in self._artwork_reads:
+                self._artwork_reads[source] = ArtworkReads()
+            reads = self._artwork_reads[source]
+        # Capacity stays bounded even when a hard-mounted NAS never returns.
+        return reads.read(track_id, lambda: self.artwork(track_id),
+                          ('image/svg+xml', FALLBACK, 'fallback'))
 
 
     def artwork_version(self, track_id: int) -> str:

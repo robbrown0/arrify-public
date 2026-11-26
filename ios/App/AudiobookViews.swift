@@ -4,46 +4,45 @@ import AVKit
 
 struct AudiobookShelf: View {
     let model: AppModel
-    @State private var items: [Audiobook] = []
-    @State private var libraries: [AudiobookLibrary.Library] = []
-    @State private var library = ""
-    @State private var query = ""
-    @State private var filter = "all"
-    @State private var next: Int?
-    @State private var loading = false
-    @State private var message: String?
+    @Environment(\.scenePhase) private var scenePhase
+    private var shelf: AudiobookShelfStore { model.books.shelf }
     var body: some View {
+        @Bindable var shelf = model.books.shelf
         ScrollView {
             LazyVStack(alignment:.leading, spacing:20) {
                 Text("Your next good listen").font(.subheadline).foregroundStyle(.secondary)
                 ScrollView(.horizontal, showsIndicators:false) { filterButtons }
-                if libraries.count > 1 {
-                    Picker("Library", selection:$library) { ForEach(libraries) { Text($0.name).tag($0.id) } }.pickerStyle(.menu)
+                if shelf.libraries.count > 1 {
+                    Picker("Library", selection:$shelf.library) { ForEach(shelf.libraries) { Text($0.name).tag($0.id) } }.pickerStyle(.menu)
                 }
-                if let message { Text(message).foregroundStyle(.secondary); Button("Try again") { Task { await load() } } }
+                if let message = shelf.message, shelf.filter != "downloads" { Text(message).foregroundStyle(.secondary); Button("Try again") { Task { await shelf.retry() } } }
                 LazyVGrid(columns:[GridItem(.adaptive(minimum:145, maximum:230), alignment:.top)], alignment:.leading, spacing:24) {
                     ForEach(displayed) { book in AudiobookShelfCard(model:model, book:book) }
                 }
-                if loading { ProgressView().frame(maxWidth:.infinity) }
-                if !loading && displayed.isEmpty && message == nil {
+                if shelf.filter != "downloads" && (shelf.loading || !shelf.hasLoaded && shelf.message == nil) { ProgressView().frame(maxWidth:.infinity) }
+                if (shelf.filter == "downloads" || shelf.hasLoaded) && !shelf.loading && displayed.isEmpty && (shelf.filter == "downloads" || shelf.message == nil) {
                     emptyShelf
                 }
-                if next != nil && filter != "downloads" { Button("More books") { Task { await load(more:true) } }.disabled(loading) }
+                if shelf.next != nil && shelf.filter != "downloads" { Button("More books") { Task { await shelf.load(more:true) } }.disabled(shelf.loading) }
             }.padding(24)
         }.background(Color.black).navigationTitle("Audiobooks")
-            .searchable(text:$query, prompt:"Books, authors, narrators")
+            .searchable(text:$shelf.query, prompt:"Books, authors, narrators")
             .toolbar { NavigationLink { AudiobookSettings(books:model.books) } label: { Image(systemName:"slider.horizontal.3") }.accessibilityLabel("Listening settings") }
-            .task(id:query + ":" + filter + ":" + library) {
-                do { if !query.isEmpty { try await Task.sleep(for:.milliseconds(250)) }; await load() } catch {}
+            .task(id:shelf.requestKey + ":" + String(scenePhase == .active)) {
+                guard scenePhase == .active else { return }
+                do { if !shelf.query.isEmpty { try await Task.sleep(for:.milliseconds(250)) }; await shelf.load() } catch {}
             }
-            .refreshable { await load() }
+            .refreshable { await shelf.load() }
+            .task(id:shelf.requestKey + ":" + String(shelf.needsRecovery && scenePhase == .active)) {
+                if scenePhase == .active && shelf.filter != "downloads" && shelf.needsRecovery { await shelf.reconnect() }
+            }
     }
     private var filterButtons: some View {
         HStack { ForEach(["all", "started", "finished", "downloads"], id:\.self) { value in filterButton(value) } }
     }
     private var emptyShelf: some View {
-        let title: String = filter == "downloads" ? "Take a story with you" : "Your bookshelf"
-        let detail: String = filter == "downloads" ? "Download a book to listen without a connection." : "Your books will appear here when available."
+        let title: String = shelf.filter == "downloads" ? "Take a story with you" : "Your bookshelf"
+        let detail: String = shelf.filter == "downloads" ? "Download a book to listen without a connection." : "Your books will appear here when available."
         return VStack(spacing:12) {
             Image(systemName:"book.closed").font(.largeTitle).foregroundStyle(.secondary)
             Text(title).font(.title2.bold())
@@ -51,25 +50,15 @@ struct AudiobookShelf: View {
         }.frame(maxWidth:.infinity).padding(.vertical,32)
     }
     private func filterButton(_ value: String) -> some View {
-        let selected = filter == value
-        return Button(action:{ filter = value }) { Text(filterTitle(value)) }
+        let selected = shelf.filter == value
+        return Button(action:{ shelf.filter = value }) { Text(filterTitle(value)) }
             .buttonStyle(.bordered).tint(selected ? Color.green : Color.gray)
     }
     private var displayed: [Audiobook] {
-        if filter == "downloads" { return model.books.downloads.records.values.map { $0.manifest.book }.filter { query.isEmpty || ($0.title + " " + $0.author).localizedCaseInsensitiveContains(query) }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
-        return items
+        if shelf.filter == "downloads" { return model.books.downloads.records.values.map { $0.manifest.book }.filter { shelf.query.isEmpty || ($0.title + " " + $0.author).localizedCaseInsensitiveContains(shelf.query) }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
+        return shelf.items
     }
     private func filterTitle(_ value: String) -> String { ["all":"All books", "started":"In progress", "finished":"Finished", "downloads":"Downloaded"][value] ?? value }
-    private func load(more: Bool = false) async {
-        guard filter != "downloads" else { message = nil; return }
-        let search = query, selected = filter, currentLibrary = library
-        loading = true; defer { loading = false }
-        do {
-            let value = try await model.api.audiobookLibrary(query:search, library:currentLibrary, page:more ? next ?? 0 : 0, filter:selected)
-            guard !Task.isCancelled, search == query, selected == filter, currentLibrary == library else { return }
-            items = more ? items + value.items : value.items; libraries = value.libraries; next = value.nextPage; message = nil
-        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch { message = "Your bookshelf is reconnecting. Downloaded books are ready to listen." }
-    }
 }
 
 private struct AudiobookShelfCard: View {

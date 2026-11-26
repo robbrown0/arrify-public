@@ -3,6 +3,8 @@ import sqlite3
 import tempfile
 import unittest
 import wave
+import threading
+from unittest.mock import patch
 from pathlib import Path
 
 from app.catalog_engine import Catalog
@@ -47,6 +49,12 @@ class CatalogEngineTests(unittest.TestCase):
         tables = {r[0] for r in catalog.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         self.assertFalse(tables & {'playback_state', 'player_settings', 'track_spectra'})
 
+    def test_reopen_saved_catalog_does_not_resolve_network_mounts(self):
+        catalog=self.catalog();catalog.scan()
+        with patch('app.catalog_engine.os.path.realpath',side_effect=AssertionError('network path lookup during startup')):
+            reopened=self.catalog()
+        self.assertEqual(reopened.db.execute('SELECT count(*) FROM tracks WHERE available=1').fetchone()[0],1)
+
     def test_artwork_falls_back_and_confirmed_artwork_takes_priority(self):
         catalog = self.catalog()
         catalog.scan()
@@ -67,3 +75,50 @@ class CatalogEngineTests(unittest.TestCase):
         self.audio.write_bytes(b'changed')
         with self.assertRaisesRegex(CatalogError, 'catalog refresh required'):
             catalog._track_file(track_id)
+
+    def test_interrupted_directory_scan_keeps_the_last_catalog_snapshot(self):
+        catalog = self.catalog(); catalog.scan()
+        def failed_walk(root, **options):
+            options['onerror'](OSError('NAS disconnected'))
+            yield
+        with patch('app.catalog_engine.os.walk', side_effect=failed_walk):
+            result = catalog.scan()
+        self.assertTrue(result['errors'])
+        self.assertEqual(catalog.db.execute('SELECT count(*) FROM tracks WHERE available=1').fetchone()[0],1)
+
+    def test_partial_stat_failure_does_not_remove_a_source_catalog(self):
+        catalog = self.catalog(); catalog.scan()
+        original = __import__('os').stat
+        def failed_stat(path, *args, **kwargs):
+            if str(path) == str(self.audio): raise OSError('NAS disconnected')
+            return original(path, *args, **kwargs)
+        with patch('app.catalog_engine.os.stat',side_effect=failed_stat): result = catalog.scan()
+        self.assertTrue(result['errors'])
+        self.assertEqual(catalog.db.execute('SELECT count(*) FROM tracks WHERE available=1').fetchone()[0],1)
+
+    def test_confirmed_artwork_is_read_without_touching_a_nas_file(self):
+        catalog = self.catalog(); catalog.scan()
+        catalog.db.execute("UPDATE tracks SET artist='Artist',album='Album'")
+        key=catalog._artwork_key({'artist':'Artist','album':'Album'})
+        catalog.db.execute('INSERT INTO album_artwork VALUES(?,?,?,?,?,?,?,?,?,?)',
+                           (key,'Artist','Album','reviewed','','image/png',b'confirmed','hash',1,'admin'))
+        track=catalog.db.execute('SELECT id FROM tracks').fetchone()[0]
+        with patch.object(catalog,'_track_file',side_effect=AssertionError('must not touch NAS')):
+            self.assertEqual(catalog.artwork(track),('image/png',b'confirmed','confirmed'))
+
+    def test_stalled_source_does_not_block_other_source_artwork(self):
+        catalog=self.catalog();catalog.scan()
+        first=catalog.db.execute('SELECT id FROM tracks').fetchone()[0]
+        catalog.db.execute("INSERT INTO tracks(source,relative_path,title,artist,album,extension,mime_type,size,modified_ns,available) SELECT 'healthy',relative_path,title,artist,album,extension,mime_type,size,modified_ns,available FROM tracks WHERE id=?",(first,))
+        second=catalog.db.execute("SELECT id FROM tracks WHERE source='healthy'").fetchone()[0]
+        gate=threading.Event()
+        def artwork(track):
+            if track==first:gate.wait(3)
+            return ('image/png',b'cover','embedded')
+        try:
+            with patch.object(catalog,'artwork',side_effect=artwork):
+                self.assertEqual(catalog.bounded_artwork(first)[2],'fallback')
+                self.assertEqual(catalog.bounded_artwork(second),('image/png',b'cover','embedded'))
+        finally:
+            gate.set()
+            for reader in catalog._artwork_reads.values():reader.queue.join()

@@ -33,17 +33,20 @@ actor ServerRouter {
     private var status = ServerConnection()
     private var lastCheck = Date.distantPast
     private var homeRetry = Date.distantPast
+    private var proofCooldown: [URL:Date] = [:]
     private var selection: Task<Endpoint, Error>?
     private var generation = UUID()
     init(transport: any HTTPTransport) { self.transport = transport }
     func configure(primary: Endpoint, home: Endpoint?, id: String, key: String?) {
         generation = UUID(); selection?.cancel(); selection = nil
         self.primary = primary; self.home = home; serverID = id; publicKey = key
+        proofCooldown = [:]
         status = ServerConnection(address: primary.url.absoluteString); slowResponses = 0; lastCheck = .distantPast; homeRetry = .distantPast
     }
     func reset() {
         generation = UUID(); selection?.cancel(); selection = nil
         primary = nil; home = nil; status = ServerConnection(); lastCheck = .distantPast
+        proofCooldown = [:]
     }
     private var slowResponses = 0
     func observed(_ endpoint: Endpoint, seconds: TimeInterval, statusCode: Int) {
@@ -67,7 +70,7 @@ actor ServerRouter {
         let home = home; let serverID = serverID; let publicKey = publicKey; let retry = homeRetry
         let task = Task<Endpoint, Error> {
             var notice: String?
-            if let home, Date() >= retry {
+            if let home, Date() >= retry, Date() >= (proofCooldown[home.url] ?? .distantPast) {
                 do {
                     guard publicKey != nil else { throw APIError.unsupportedServer }
                     try await Self.verify(home, id: serverID, key: publicKey, transport: transport)
@@ -77,12 +80,15 @@ actor ServerRouter {
                 } catch is CancellationError { throw CancellationError() }
                 catch APIError.serverChanged { notice = "Local network address did not verify as this server. Using public." }
                 catch APIError.unsupportedServer { notice = "Update your server to enable verified local network connections." }
+                catch APIError.retryDeferred(let until) { proofCooldown[home.url] = until; notice = "Local server is busy. Using public." }
                 catch { notice = "Local network address unavailable. Using public." }
                 // Avoid probing an unavailable LAN address again on every read.
                 guard token == generation, !Task.isCancelled else { throw CancellationError() }
                 homeRetry = Date().addingTimeInterval(30)
             } else if home != nil { notice = "Local network address unavailable. Using public." }
-            try await Self.verify(primary, id: serverID, key: publicKey, transport: transport)
+            if let until = proofCooldown[primary.url], Date() < until { throw APIError.retryDeferred(until:until) }
+            do { try await Self.verify(primary, id:serverID, key:publicKey, transport:transport) }
+            catch APIError.retryDeferred(let until) { proofCooldown[primary.url] = until; throw APIError.retryDeferred(until:until) }
             guard token == generation, !Task.isCancelled else { throw CancellationError() }
             status = ServerConnection(address: primary.url.absoluteString, home: false, connected: true, homeNotice: notice)
             lastCheck = Date(); return primary
@@ -105,9 +111,17 @@ actor ServerRouter {
             request.httpMethod = "POST"; request.httpBody = try JSONSerialization.data(withJSONObject: ["nonce": nonce])
             request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.timeoutInterval = 2
             let result = try await transport.send(request)
-            guard result.status == 200, result.data.count < 4096 else { throw APIError.invalidResponse }
+            if result.status == 429 {
+                throw APIError.retryDeferred(until:Date().addingTimeInterval(min(3600,max(1,result.retryAfterSeconds ?? 1))))
+            }
+            guard result.status == 200 else {
+                throw APIError.rejected(status:result.status, code:"server_verification_unavailable", message:"Arrify is reconnecting to your server.")
+            }
+            guard result.data.count < 4096 else { throw APIError.invalidResponse }
             struct Proof: Decodable { let server_id: String; let nonce: String; let signature: String }
-            let proof = try JSONDecoder().decode(Proof.self, from: result.data)
+            let proof: Proof
+            do { proof = try JSONDecoder().decode(Proof.self, from:result.data) }
+            catch { throw APIError.invalidResponse }
             guard proof.server_id == id, proof.nonce == nonce,
                   let bytes = Data(base64Encoded: key), let signature = Data(base64Encoded: proof.signature) else { throw APIError.serverChanged }
             #if canImport(CryptoKit)

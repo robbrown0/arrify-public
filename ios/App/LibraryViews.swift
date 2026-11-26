@@ -239,6 +239,7 @@ enum CatalogSectionTitle {
 }
 
 struct BrowserScreen: View {
+    @Environment(\.scenePhase) private var scenePhase
     let model: AppModel
     let title: String
     @State private var browser: LibraryBrowser
@@ -380,6 +381,15 @@ struct BrowserScreen: View {
             if !Task.isCancelled && browser.error == nil { loadedRequestKey = requestKey }
         }
         .refreshable { await browser.load(query: activeQuery) }
+        .task(id:browser.needsRecovery && scenePhase == .active) {
+            guard scenePhase == .active else { return }
+            var attempt = 0
+            while browser.needsRecovery, !Task.isCancelled {
+                do { try await Task.sleep(for:.seconds(min(30,pow(2,Double(min(attempt + 1,5)))) * Double.random(in:0.8...1.2))) } catch { return }
+                guard !Task.isCancelled else { return }
+                if !browser.loading { await browser.retry() }; attempt += 1
+            }
+        }
     }
     private func initial(_ title: String) -> String { CatalogSectionTitle.initial(title) }
     private var trackSections: [(id: String, name: String, rows: [LibraryBrowser.TrackRow])] {

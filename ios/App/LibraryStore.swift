@@ -6,6 +6,15 @@ import CryptoKit
 /// Retries only read operations. Mutations and rotating tokens retain their own replay rules.
 @MainActor enum ReadRecovery {
     static func wait(_ seconds: Double) async throws { try await Task.sleep(for: .seconds(seconds)) }
+    static func reason(_ error: Error) -> String {
+        if let network = error as? URLError { return "network-\(network.code.rawValue)" }
+        if case APIError.rejected(let status,_,_) = error { return "http-\(status)" }
+        if case APIError.retryDeferred = error { return "cooldown" }
+        if case APIError.invalidResponse = error { return "invalid-response" }
+        if case APIError.signInRequired = error { return "authentication" }
+        if case APIError.serverChanged = error { return "identity" }
+        return "other"
+    }
     static func delay(_ error: Error, attempt: Int) -> Double? {
         guard attempt < 3 else { return nil }
         if case APIError.retryDeferred(let until) = error {
@@ -18,6 +27,7 @@ import CryptoKit
                          .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed].contains(network.code)
         } else if case APIError.rejected(let status, _, _) = error {
             transient = [500, 502, 503, 504].contains(status)
+        } else if case APIError.invalidResponse = error { transient = true
         } else { transient = false }
         return transient ? [0.5, 1.5, 3.0][attempt] * Double.random(in: 0.8...1.2) : nil
     }
@@ -33,7 +43,7 @@ import CryptoKit
                 if error is CancellationError, attempt < 3 { try await wait(0.05); continue }
                 guard !RequestCancellation.matches(error) else { throw CancellationError() }
                 guard let delay = delay(error, attempt: attempt) else { throw error }
-                PlaybackDiagnostics.event("read-recovery-retry attempt=\(attempt + 1)")
+                PlaybackDiagnostics.event("read-recovery-retry attempt=\(attempt + 1) reason=\(reason(error))")
                 try await wait(delay)
             }
         }
@@ -103,13 +113,15 @@ import CryptoKit
     var error: String?
     var updated: Date?
     private var revision: String?
+    var needsRecovery = false
+    private let retryWait: @MainActor (Double) async throws -> Void
     private var failedRequest: (query: String, more: Bool, previous: Bool, around: Int?, letter: String?)?
     func retry() async {
         guard let request = failedRequest, !loading else { return }
         await load(query: request.query, more: request.more, previous: request.previous, around: request.around, letter: request.letter)
     }
     private var generation = UUID()
-    init(api: APIClient, kind: String = "tracks", source: LibrarySource? = nil) { self.api = api; self.kind = kind; self.source = source }
+    init(api: APIClient, kind: String = "tracks", source: LibrarySource? = nil, retryWait: @escaping @MainActor (Double) async throws -> Void = ReadRecovery.wait) { self.api = api; self.kind = kind; self.source = source; self.retryWait = retryWait }
     func refreshPopularity(query: String = "") async {
         let token = generation
         for _ in 0..<4 {
@@ -136,7 +148,7 @@ import CryptoKit
     }
     func resetSearch() {
         generation = UUID(); tracks = []; entries = []; nextOffset = nil; previousOffset = nil; startOffset = 0
-        revision = nil; updated = nil; error = nil; failedRequest = nil; loading = true
+        revision = nil; updated = nil; error = nil; failedRequest = nil; loading = true; needsRecovery = false
     }
     func load(query: String = "", more: Bool = false, previous: Bool = false, around: Int? = nil, letter: String? = nil) async {
         if letter != nil { navigationRevision += 1 }
@@ -144,7 +156,7 @@ import CryptoKit
         if previous && (loading || previousOffset == nil) { return }
         let token: UUID
         if more || previous { token = generation } else { token = UUID(); generation = token }
-        loading = true
+        loading = true; error = nil
         let started = ProcessInfo.processInfo.systemUptime
         PlaybackDiagnostics.event("library-load-start more=\(more)")
         defer {
@@ -155,7 +167,7 @@ import CryptoKit
             let offset = more ? nextOffset ?? 0 : previous ? previousOffset ?? 0 : 0
             let rev = more || previous ? revision : nil
             if let source {
-                let page = try await api.detail(source, offset: offset, revision: rev, around: around)
+                let page = try await ReadRecovery.load(wait:retryWait, valid:{ self.generation == token }) { try await self.api.detail(source, offset:offset, revision:rev, around:around) }
                 guard token == generation, !Task.isCancelled else { return }
                 tracks = more ? tracks + page.items : previous ? Array(page.items.prefix(max(0, startOffset - (page.offset ?? offset)))) + tracks : page.items
                 if !more { startOffset = page.offset ?? offset; previousOffset = page.previousOffset }
@@ -163,7 +175,8 @@ import CryptoKit
                 item = page.item; total = page.total; revision = page.revision
                 if !previous { nextOffset = page.nextOffset }
             } else if kind == "tracks" {
-                let page = try await api.catalog(query: query, offset: offset, revision: rev, sort: sort, liked: likedOnly, around: around, letter: letter)
+                let sort = sort, liked = likedOnly
+                let page = try await ReadRecovery.load(wait:retryWait, valid:{ self.generation == token }) { try await self.api.catalog(query:query, offset:offset, revision:rev, sort:sort, liked:liked, around:around, letter:letter) }
                 guard token == generation, !Task.isCancelled else { return }
                 tracks = more ? tracks + page.items : previous ? Array(page.items.prefix(max(0, startOffset - (page.offset ?? offset)))) + tracks : page.items
                 if !more { startOffset = page.offset ?? offset; previousOffset = page.previousOffset }
@@ -171,21 +184,25 @@ import CryptoKit
                 total = page.total ?? tracks.count; revision = page.revision
                 if !previous { nextOffset = page.nextOffset }
             } else {
-                let page = try await api.entities(kind: kind, query: query, offset: offset, revision: rev, sort: sort, artist: artist, letter: letter)
+                let sort = sort, artist = artist
+                let page = try await ReadRecovery.load(wait:retryWait, valid:{ self.generation == token }) { try await self.api.entities(kind:self.kind, query:query, offset:offset, revision:rev, sort:sort, artist:artist, letter:letter) }
                 guard token == generation, !Task.isCancelled else { return }
                 entries = more ? entries + page.items : previous ? Array(page.items.prefix(max(0, startOffset - (page.offset ?? offset)))) + entries : page.items
                 if !more { startOffset = page.offset ?? offset; previousOffset = page.previousOffset }
                 total = page.total; revision = page.revision
                 if !previous { nextOffset = page.nextOffset }
             }
-            error = nil; failedRequest = nil; updated = Date()
+            error = nil; failedRequest = nil; updated = Date(); needsRecovery = false
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch APIError.rejected(_, let code, _) where code == "catalog_changed" && (more || previous) {
             guard generation == token else { return }
             await load(query: query)
         } catch {
             if generation == token {
                 failedRequest = (query, more, previous, around, letter)
-                self.error = error.localizedDescription
+                needsRecovery = ReadRecovery.delay(error, attempt:0) != nil
+                if case APIError.retryDeferred = error { needsRecovery = true }
+                self.error = needsRecovery ? "Reconnecting to your library…" : error.localizedDescription
+                PlaybackDiagnostics.event("catalog-read-deferred reason=\(ReadRecovery.reason(error))")
             }
         }
     }
