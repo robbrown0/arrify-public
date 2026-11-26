@@ -3,6 +3,37 @@ import CryptoKit
 @testable import ArrifyCore
 
 final class ServerRouterTests: XCTestCase {
+    func testIdentityRateLimitCooldownPreventsRepeatedProbes() async throws {
+        let transport = ProofTransport(), router = ServerRouter(transport:transport)
+        await router.configure(primary:try Endpoint("https://public.test"),home:nil,id:"test",key:transport.key.publicKey.derRepresentation.base64EncodedString())
+        await transport.setProofFailure(429)
+        for _ in 0..<2 {
+            do { _ = try await router.selected(); XCTFail("Rate-limited proof must defer verification") }
+            catch APIError.retryDeferred(let until) { XCTAssertGreaterThan(until,Date()) }
+        }
+        let requests = await transport.publicProofs; XCTAssertEqual(requests,1)
+    }
+    func testGatewayFailureDuringIdentityVerificationRemainsRetryable() async throws {
+        let transport = ProofTransport()
+        let router = ServerRouter(transport:transport)
+        await router.configure(primary:try Endpoint("https://public.test"),home:nil,id:"test",key:transport.key.publicKey.derRepresentation.base64EncodedString())
+        await transport.setProofFailure(503)
+        do { _ = try await router.selected(); XCTFail("Unavailable proof must not verify the server") }
+        catch APIError.rejected(let status,let code,_) { XCTAssertEqual(status,503); XCTAssertEqual(code,"server_verification_unavailable") }
+        await transport.setProofFailure(nil)
+        let endpoint = try await router.selected(); XCTAssertEqual(endpoint.url.host,"public.test")
+        let hosts = await transport.credentialHosts; XCTAssertTrue(hosts.isEmpty)
+    }
+    func testSlowArtworkDoesNotInvalidateTheVerifiedControlRoute() async throws {
+        let transport = ProofTransport(), client = APIClient(transport:transport,store:MemoryStore())
+        try await client.login(endpoint:"https://public.test",homeEndpoint:"https://home.test",username:"test",password:"test",deviceName:"test")
+        let before = await transport.homeProofs
+        await transport.setArtworkFailure()
+        do { _ = try await client.artwork(1); XCTFail("Image timeout expected") } catch is URLError {}
+        _ = try await client.catalog(query:"")
+        let after = await transport.homeProofs; XCTAssertEqual(after,before)
+        let connection = await client.connection(); XCTAssertTrue(connection.connected); XCTAssertTrue(connection.home); XCTAssertFalse(connection.degraded)
+    }
     func testConnectionHealthRequiresRepeatedSlowResponsesAndRecovers() async throws {
         let transport = ProofTransport()
         let router = ServerRouter(transport: transport)
@@ -166,7 +197,12 @@ actor ProofTransport: HTTPTransport {
     private var publicOffline = false
     private var failHome = false
     private var homeOffline = false
+    private var proofFailure: Int?
+    private var artworkFailure = false
+    func setProofFailure(_ status: Int?) { proofFailure = status }
+    func setArtworkFailure() { artworkFailure = true }
     var homeProofs = 0
+    var publicProofs = 0
     var refreshAttempts: [(String, String)] = []
     func setHomeOffline(_ offline: Bool) { homeOffline = offline }
     func setPublicOffline(_ offline: Bool) { publicOffline = offline }
@@ -183,7 +219,9 @@ actor ProofTransport: HTTPTransport {
             return try result(["server_id": "test", "server_public_key": key.publicKey.derRepresentation.base64EncodedString(), "features": ["refresh_recovery_v1", "rotating_refresh", "native_media_manifest_v1", "native_catalog_v1", "native_playback_v1"]])
         }
         if request.url!.path.hasSuffix("server-proof") {
+            if host == "public.test" { publicProofs += 1 }
             XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            if let proofFailure { return HTTPResult(status:proofFailure,data:Data("<html>temporarily unavailable</html>".utf8)) }
             let input = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody!) as? [String: String])
             let nonce = host == "home.test" && replayHome ? String(repeating: "0", count: 64) : input["nonce"]!
             let signer = host == "home.test" && wrongHome ? P256.Signing.PrivateKey() : key
@@ -191,6 +229,7 @@ actor ProofTransport: HTTPTransport {
             return try result(["server_id": "test", "nonce": nonce, "signature": signature.derRepresentation.base64EncodedString()])
         }
         credentialHosts.append(host)
+        if artworkFailure, request.url!.path.hasPrefix("/api/v1/artwork/") { throw URLError(.timedOut) }
         if request.url!.path.hasSuffix("refresh") {
             let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody!) as? [String: String])
             refreshAttempts.append((host, body["attempt_id"]!))

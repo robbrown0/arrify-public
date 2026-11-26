@@ -439,7 +439,8 @@ class Handler(BaseHTTPRequestHandler):
         if re.fullmatch('/api/v1/artwork/[0-9]+',path):
             artwork_headers={'Cache-Control':'private, no-store' if 'grant' in q else 'private, max-age=300'}
             try:
-                mime,data,source=lib.music.artwork(int(path.rsplit('/',1)[1]))
+                read_artwork=getattr(lib.music,'bounded_artwork',lib.music.artwork)
+                mime,data,source=read_artwork(int(path.rsplit('/',1)[1]))
             except FileNotFoundError:
                 # Missing local artwork continues through Arrify's fallback chain.
                 mime,data,source='',b'','fallback'

@@ -81,7 +81,7 @@ jobs:
             ONLY_TESTS=(-only-testing:ArrifyAppTests/NowPlayingArtworkTests/testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testTabletVolumeUsesNativeHeightCenteredInControlRow -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible)
           fi
           if [ "$RECOVERY_ONLY" = "true" ]; then
-            ONLY_TESTS=(-only-testing:ArrifyAppTests -only-testing:ArrifyUITests/LaunchTests/testHomePullRefreshRecoversSavedSongsWithoutVisitingLikedSongs -only-testing:ArrifyUITests/LaunchTests/testHomeRecoversBriefFailureAndPlayerCanRetrySavedSongs)
+            ONLY_TESTS=(-only-testing:ArrifyAppTests -only-testing:ArrifyUITests/LaunchTests/testHomePullRefreshRecoversSavedSongsWithoutVisitingLikedSongs -only-testing:ArrifyUITests/LaunchTests/testHomeRecoversBriefFailureAndPlayerCanRetrySavedSongs -only-testing:ArrifyUITests/LaunchTests/testAudiobookShelfRecoversAndKeepsKnownBooksDuringOutage)
           fi
           if [ "$NAVIGATION_ONLY" = "true" ]; then
             ONLY_TESTS=(-only-testing:ArrifyUITests/LaunchTests/testBrowseCategoriesChartsAndRequests -only-testing:ArrifyUITests/LaunchTests/testEmptyPlayerAndSingleTapAlbumActions -only-testing:ArrifyUITests/LaunchTests/testArtistsSelectDistinctItemsAndVisiblePageRetry)

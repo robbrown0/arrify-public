@@ -3,6 +3,30 @@ final class LaunchTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
+    @MainActor func testAudiobookShelfRecoversAndKeepsKnownBooksDuringOutage() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
+        app.launchEnvironment["ARRIFY_UI_SHELF_RECOVERY"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout:30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout:20)); app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Audiobooks"].firstMatch.waitForExistence(timeout:20)); app.buttons["Audiobooks"].firstMatch.tap()
+        let book = app.buttons["audiobook-book-one"]
+        XCTAssertTrue(book.waitForExistence(timeout:20),"The first failed request must recover without a Retry tap")
+        XCTAssertFalse(app.staticTexts["Your books will appear here when available."].exists)
+        app.buttons["Home"].firstMatch.tap(); app.buttons["Library"].firstMatch.tap()
+        app.buttons["Audiobooks"].firstMatch.tap()
+        let reconnecting = app.staticTexts["Reconnecting to your bookshelf…"]
+        XCTAssertTrue(reconnecting.waitForExistence(timeout:20))
+        XCTAssertTrue(book.exists,"A failed refresh must retain the known book")
+        XCTAssertFalse(app.staticTexts["Your books will appear here when available."].exists)
+        XCTAssertTrue(reconnecting.waitForNonExistence(timeout:15),"Recovery continues while this screen is visible")
+        XCTAssertTrue(book.exists)
+    }
     @MainActor func testAudiobookShelfPlayerAndOptionalSettings() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"

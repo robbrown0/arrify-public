@@ -285,7 +285,7 @@ class Library:
             if row is None or row[0] != choice['modified_ns']:
                 continue
             try:
-                mime, data, source = self.music.artwork(choice['id'])
+                mime, data, source = self.music.bounded_artwork(choice['id'])
                 if source != 'fallback' and data:
                     return mime, data
             except (OSError, CatalogError):

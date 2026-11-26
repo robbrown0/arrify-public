@@ -4,10 +4,78 @@ import CryptoKit
 @preconcurrency import AVFoundation
 @preconcurrency import MediaPlayer
 
+@MainActor @Observable final class AudiobookShelfStore {
+    let api: APIClient
+    var query = ""
+    var filter = "all"
+    var library = ""
+    private(set) var items: [Audiobook] = []
+    private(set) var libraries: [AudiobookLibrary.Library] = []
+    private(set) var next: Int?
+    private(set) var loading = false
+    private(set) var hasLoaded = false
+    private(set) var needsRecovery = false
+    private(set) var message: String?
+    private var generation = UUID()
+    private var account = UUID()
+    private var scope = ""
+    private var failedMore = false
+    private let wait: @MainActor (Double) async throws -> Void
+    var requestKey: String { query + "\u{0}" + filter + "\u{0}" + library }
+    init(api: APIClient, wait: @escaping @MainActor (Double) async throws -> Void = ReadRecovery.wait) { self.api = api; self.wait = wait }
+    func clear() {
+        generation = UUID(); account = UUID(); query = ""; filter = "all"; library = ""; scope = ""
+        items = []; libraries = []; next = nil; loading = false; hasLoaded = false; needsRecovery = false; message = nil; failedMore = false
+    }
+    func load(more: Bool = false) async {
+        guard filter != "downloads" else { return }
+        let key = requestKey, owner = account
+        if loading && scope == key {
+            let pending = generation
+            while loading && scope == key && generation == pending && !Task.isCancelled {
+                do { try await Task.sleep(for:.milliseconds(20)) } catch { return }
+            }
+            guard !Task.isCancelled, owner == account, key == requestKey else { return }
+            if !more && (hasLoaded || message != nil) { return }
+        }
+        if scope != key { items = []; next = nil; hasLoaded = false; scope = key; needsRecovery = false; failedMore = false }
+        let token = UUID(); generation = token
+        let query = query, filter = filter, library = library, page = more ? next ?? 0 : 0
+        loading = true; message = nil
+        defer { if generation == token { loading = false } }
+        do {
+            let value = try await ReadRecovery.load(wait:wait, valid:{ self.generation == token && self.account == owner && self.requestKey == key }) {
+                try await self.api.audiobookLibrary(query:query, library:library, page:page, filter:filter)
+            }
+            guard generation == token, owner == account, key == requestKey, !Task.isCancelled else { return }
+            items = more ? items + value.items : value.items
+            libraries = value.libraries; next = value.nextPage; hasLoaded = true; needsRecovery = false
+        } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
+            guard generation == token, owner == account, key == requestKey else { return }
+            failedMore = more
+            needsRecovery = ReadRecovery.delay(error, attempt:0) != nil
+            if case APIError.retryDeferred = error { needsRecovery = true }
+            message = needsRecovery ? "Reconnecting to your bookshelf…" : "Your bookshelf couldn’t be updated."
+            PlaybackDiagnostics.event("bookshelf-read-deferred reason=\(ReadRecovery.reason(error))")
+        }
+    }
+    func retry() async { await load(more:failedMore) }
+    func reconnect() async {
+        let owner = account, key = requestKey
+        var attempt = 0
+        while needsRecovery, owner == account, key == requestKey, !Task.isCancelled {
+            do { try await wait(min(30,pow(2,Double(min(attempt + 1,5)))) * Double.random(in:0.8...1.2)) } catch { return }
+            guard owner == account, key == requestKey, !Task.isCancelled else { return }
+            if !loading { await retry() }; attempt += 1
+        }
+    }
+}
+
 @MainActor @Observable final class AudiobookStore {
     private typealias Pending = AudiobookJournalEntry
     let api: APIClient
     let downloads: AudiobookDownloads
+    let shelf: AudiobookShelfStore
     private weak var music: PlaybackCoordinator?
     private let audioSession: any PlaybackAudioSession
     private let localMedia: ((Audiobook, AudiobookPart) -> URL?)?
@@ -73,7 +141,7 @@ import CryptoKit
         return values
     }
     init(api: APIClient, music: PlaybackCoordinator, audioSession: (any PlaybackAudioSession)? = nil, localMedia: ((Audiobook, AudiobookPart) -> URL?)? = nil) {
-        self.api = api; self.music = music; downloads = AudiobookDownloads(api:api)
+        self.api = api; self.music = music; downloads = AudiobookDownloads(api:api); shelf = AudiobookShelfStore(api:api)
         self.localMedia = localMedia
         self.audioSession = audioSession ?? SystemPlaybackAudioSession()
         installTimeObserver()
@@ -406,6 +474,7 @@ import CryptoKit
         player.replaceCurrentItem(with:nil); audioSession.invalidate()
     }
     func clear() {
+        shelf.clear()
         pause(); accountGeneration = UUID(); heartbeat?.cancel(); heartbeat = nil
         audioSession.invalidate()
         active = false; presented = false; book = nil; manifest = nil; part = nil; enabled = false
