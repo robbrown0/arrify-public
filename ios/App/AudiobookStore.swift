@@ -497,9 +497,12 @@ import CryptoKit
         } catch { if account == accountGeneration { message = "Connect to remove this bookmark." } }
     }
     private func ended() {
-        guard active, let book, !preparing, !finishing else { return }
+        guard active, wantsPlayback, let book, !preparing, !finishing else { return }
         let end = (part?.start ?? 0)+(part?.duration ?? 0)
-        if end < book.duration-1 { seek(end+0.05); return }
+        if let sleepChapter, end >= sleepChapter {
+            position = sleepChapter; pause(); setSleep("off"); message = "Sleep timer finished. Your place is saved."; return
+        }
+        if let part, let next = book.parts?.first(where:{ $0.index > part.index }) { seek(next.start); return }
         finishing = true; position = book.duration; playing = false; save(finished:true)
         let account = accountGeneration, token = generation
         Task { [weak self] in

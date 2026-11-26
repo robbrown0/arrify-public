@@ -212,10 +212,11 @@ actor UITestTransport: HTTPTransport {
     }
 }
 @MainActor enum UITestAudiobookAudio {
-    static func make() throws -> URL {
+    static func make(seconds: Double = 120) throws -> URL {
+        precondition(seconds.isFinite && seconds > 0 && seconds <= 600)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
         let format = AVAudioFormat(standardFormatWithSampleRate:8000, channels:1)!
-        let buffer = AVAudioPCMBuffer(pcmFormat:format, frameCapacity:8000*120)!
+        let buffer = AVAudioPCMBuffer(pcmFormat:format, frameCapacity:AVAudioFrameCount(8000*seconds))!
         buffer.frameLength = buffer.frameCapacity
         buffer.floatChannelData![0].initialize(repeating:0, count:Int(buffer.frameLength))
         let file = try AVAudioFile(forWriting:url, settings:[AVFormatIDKey:kAudioFormatLinearPCM, AVSampleRateKey:8000, AVNumberOfChannelsKey:1, AVLinearPCMBitDepthKey:16, AVLinearPCMIsFloatKey:false, AVLinearPCMIsBigEndianKey:false])

@@ -1,0 +1,15 @@
+[Unit]
+Description=Publish reviewed chapters as ordered Audiobookshelf books
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/rob/audiobook/scripts
+ExecStart=/usr/bin/python3 /home/rob/audiobook/scripts/audiobookshelf_books.py --all
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+Nice=10
+CPUQuota=20%
+MemoryMax=512M
+TimeoutStartSec=300

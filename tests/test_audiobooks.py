@@ -248,6 +248,27 @@ class AudiobookTests(unittest.TestCase):
         self.assertFalse(self.books.preferences(1)['continuous'])
         with self.assertRaises(BookError): self.books.queue(1, {'action': 'order', 'ids': [], 'revision': result['revision']})
 
+    def test_multiple_audio_files_remain_one_book_with_one_canonical_cursor(self):
+        original = self.fixture.item
+        def multipart(book_id='book-one'):
+            item = original(book_id)
+            if book_id == 'book-one':
+                item['media']['tracks'] = [
+                    {'startOffset':0,'duration':20,'mimeType':'audio/mpeg','contentUrl':'/api/items/book-one/file/123'},
+                    {'startOffset':20,'duration':100,'mimeType':'audio/mpeg','contentUrl':'/api/items/book-one/file/124'}]
+                item['media']['chapters'] = [{'title':'Prologue','start':0,'end':20},{'title':'Chapter One','start':20,'end':120}]
+            return item
+        self.fixture.item = multipart
+        library = self.books.library(1)
+        self.assertEqual([x['id'] for x in library['items']].count('book-one'),1)
+        result = self.play()
+        self.assertEqual([x['start'] for x in result['book']['parts']],[0,20])
+        self.assertEqual([x['title'] for x in result['book']['chapters']],['Prologue','Chapter One'])
+        self.assertEqual(self.books.stream(result['lease'],1)[2]['path'],'/api/items/book-one/file/124')
+        self.books.progress(1,{'lease':result['lease'],'device_id':self.device,'seq':1,'position':25,'playing':False})
+        self.assertEqual(self.books.remote_progress(1,'book-one')['currentTime'],25)
+        self.assertEqual(self.books.public_state(1)['queue'],[])
+
     def test_unsafe_provider_media_url_is_rejected(self):
         old = self.fixture.item
         def malicious(book_id='book-one'):
