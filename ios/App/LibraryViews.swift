@@ -1007,10 +1007,10 @@ struct HomeScreen: View {
                             NavigationLink("Artists") { BrowserScreen(model: model, title: "Artists", kind: "artists") }
                         }.frame(minHeight: 44)
                     }
-                    if model.books.visible && !model.books.continueListening.isEmpty {
+                    if model.books.visible && !model.books.resumeBooks.isEmpty {
                         VStack(alignment:.leading, spacing:16) {
                             Text("Continue listening").font(.title2.bold())
-                            ForEach(model.books.continueListening.prefix(4)) { book in
+                            ForEach(model.books.resumeBooks.prefix(4)) { book in
                                 Button { model.books.play(book) } label: {
                                     HStack(spacing:16) {
                                         RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:72, height:72).clipShape(RoundedRectangle(cornerRadius:10))

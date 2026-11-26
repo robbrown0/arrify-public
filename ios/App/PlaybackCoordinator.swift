@@ -626,6 +626,7 @@ import Network
             let commands = MPRemoteCommandCenter.shared()
             commands.nextTrackCommand.isEnabled = true; commands.previousTrackCommand.isEnabled = true
             commands.skipBackwardCommand.isEnabled = false; commands.skipForwardCommand.isEnabled = false
+            commands.changePlaybackRateCommand.isEnabled = false
         }
         let navigation = !automatic && ["next", "previous"].contains(action)
         if navigation && (navigationPending || endedInFlight) {
@@ -1441,6 +1442,12 @@ import Network
         commands.skipBackwardCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in _ = self?.externalControl?("back", nil) }; return .success }
         commands.skipForwardCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in _ = self?.externalControl?("forward", nil) }; return .success }
         commands.skipBackwardCommand.isEnabled = false; commands.skipForwardCommand.isEnabled = false
+        commands.changePlaybackRateCommand.isEnabled = false
+        commands.changePlaybackRateCommand.addTarget { @Sendable [weak self] event in
+            guard let event = event as? MPChangePlaybackRateCommandEvent else { return .commandFailed }
+            let rate = Double(event.playbackRate)
+            Task { @MainActor in _ = self?.externalControl?("rate", rate) }; return .success
+        }
         commands.changePlaybackPositionCommand.addTarget { @Sendable [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             let seconds = event.positionTime

@@ -4,6 +4,9 @@ public struct AudiobookProgress: Codable, Sendable {
     public var currentTime: Double?
     public var lastUpdate: Double?
     public var isFinished: Bool?
+    public init(currentTime: Double, lastUpdate: Double, isFinished: Bool) {
+        self.currentTime = currentTime; self.lastUpdate = lastUpdate; self.isFinished = isFinished
+    }
 }
 public struct AudiobookChapter: Codable, Sendable, Identifiable {
     public let title: String
@@ -108,6 +111,22 @@ public struct AudiobookCheckpoint: Codable, Sendable {
         sessionId = UUID().uuidString.lowercased(); self.deviceId = deviceId
         baseRemoteStamp = book.progress?.lastUpdate ?? 0; seq = 0
         position = book.progress?.currentTime ?? 0; finished = false
+    }
+}
+public struct AudiobookJournalEntry: Codable, Sendable {
+    public var checkpoint: AudiobookCheckpoint
+    public var lease: String?
+    public var playing: Bool
+    public var dirty: Bool
+    public init(checkpoint: AudiobookCheckpoint, lease: String?, playing: Bool, dirty: Bool) {
+        self.checkpoint = checkpoint; self.lease = lease; self.playing = playing; self.dirty = dirty
+    }
+    /// A delayed response cannot erase a later seek or a newly opened session.
+    @discardableResult public mutating func acknowledge(session: String, sequence: Int, remoteStamp: Double?) -> Bool {
+        guard checkpoint.sessionId == session, sequence <= checkpoint.seq else { return false }
+        if let remoteStamp { checkpoint.baseRemoteStamp = remoteStamp }
+        if checkpoint.seq == sequence { dirty = false }
+        return !dirty
     }
 }
 public enum AudiobookTimeline {

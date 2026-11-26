@@ -16,30 +16,13 @@ struct AudiobookShelf: View {
         ScrollView {
             LazyVStack(alignment:.leading, spacing:20) {
                 Text("Your next good listen").font(.subheadline).foregroundStyle(.secondary)
-                ScrollView(.horizontal, showsIndicators:false) {
-                    HStack {
-                        ForEach(["all", "started", "finished", "downloads"], id:\.self) { value in
-                            Button(filterTitle(value)) { filter = value }.buttonStyle(.bordered).tint(filter == value ? Color.green : Color.gray)
-                        }
-                    }
-                }
+                ScrollView(.horizontal, showsIndicators:false) { filterButtons }
                 if libraries.count > 1 {
                     Picker("Library", selection:$library) { ForEach(libraries) { Text($0.name).tag($0.id) } }.pickerStyle(.menu)
                 }
                 if let message { Text(message).foregroundStyle(.secondary); Button("Try again") { Task { await load() } } }
                 LazyVGrid(columns:[GridItem(.adaptive(minimum:145, maximum:230), alignment:.top)], alignment:.leading, spacing:24) {
-                    ForEach(displayed) { book in
-                        NavigationLink { AudiobookDetail(model:model, initial:book) } label: {
-                            VStack(alignment:.leading, spacing:7) {
-                                RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).aspectRatio(1, contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:12))
-                                Text(book.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
-                                Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                                if book.progress?.isFinished == true { Label("Finished", systemImage:"checkmark.circle").font(.caption) }
-                                else { Text(AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary) }
-                                if model.books.downloads.complete(book.id) { Label("Downloaded", systemImage:"arrow.down.circle.fill").font(.caption).foregroundStyle(.green) }
-                            }.frame(maxWidth:.infinity, alignment:.leading)
-                        }.buttonStyle(.plain).accessibilityIdentifier("audiobook-" + book.id)
-                    }
+                    ForEach(displayed) { book in AudiobookShelfCard(model:model, book:book) }
                 }
                 if loading { ProgressView().frame(maxWidth:.infinity) }
                 if !loading && displayed.isEmpty && message == nil {
@@ -55,6 +38,14 @@ struct AudiobookShelf: View {
             }
             .refreshable { await load() }
     }
+    private var filterButtons: some View {
+        HStack { ForEach(["all", "started", "finished", "downloads"], id:\.self) { value in filterButton(value) } }
+    }
+    private func filterButton(_ value: String) -> some View {
+        let selected = filter == value
+        return Button(action:{ filter = value }) { Text(filterTitle(value)) }
+            .buttonStyle(.bordered).tint(selected ? Color.green : Color.gray)
+    }
     private var displayed: [Audiobook] {
         if filter == "downloads" { return model.books.downloads.records.values.map { $0.manifest.book }.filter { query.isEmpty || ($0.title + " " + $0.author).localizedCaseInsensitiveContains(query) }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
         return items
@@ -69,6 +60,24 @@ struct AudiobookShelf: View {
             guard !Task.isCancelled, search == query, selected == filter, currentLibrary == library else { return }
             items = more ? items + value.items : value.items; libraries = value.libraries; next = value.nextPage; message = nil
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch { message = "Your bookshelf is reconnecting. Downloaded books are ready to listen." }
+    }
+}
+
+private struct AudiobookShelfCard: View {
+    let model: AppModel
+    let book: Audiobook
+    var body: some View {
+        NavigationLink { AudiobookDetail(model:model, initial:book) } label: {
+            VStack(alignment:.leading, spacing:7) {
+                RemoteCover(path:book.cover, title:book.title, artwork:model.artwork)
+                    .aspectRatio(1, contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:12))
+                Text(book.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
+                Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                if book.progress?.isFinished == true { Label("Finished", systemImage:"checkmark.circle").font(.caption) }
+                else { Text(AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary) }
+                if model.books.downloads.complete(book.id) { Label("Downloaded", systemImage:"arrow.down.circle.fill").font(.caption).foregroundStyle(.green) }
+            }.frame(maxWidth:.infinity, alignment:.leading)
+        }.buttonStyle(.plain).accessibilityIdentifier("audiobook-" + book.id)
     }
 }
 
@@ -95,6 +104,7 @@ struct AudiobookDetail: View {
                 downloadControls
                 if (book.progress?.currentTime ?? 0) > 0 { Button("Play from beginning") { model.books.play(book, restart:true) } }
                 if let error { Text(error).foregroundStyle(.secondary) }
+                if let message = model.books.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
                 Text(plainDescription).textSelection(.enabled)
                 if let chapters = book.chapters {
                     Text("Chapters").font(.title2.bold())
@@ -199,10 +209,26 @@ struct AudiobookPlayer: View {
         case "Up Next":
             Toggle("Continue to the next queued book", isOn:Binding(get:{ model.books.preferences.continuous }, set:{ enabled in var value = model.books.preferences; value.continuous = enabled; Task { await model.books.updatePreferences(value) } }))
             if model.books.queue.isEmpty { Text("Your chapters stay in this book. Add another book with Play next or Add to Up Next.").foregroundStyle(.secondary) }
-            ForEach(model.books.queue) { entry in HStack { Text(entry.title); Spacer(); Text(entry.author).font(.caption).foregroundStyle(.secondary) }.frame(minHeight:44) }
+            ForEach(model.books.queue) { entry in
+                HStack {
+                    VStack(alignment:.leading) { Text(entry.title); Text(entry.author).font(.caption).foregroundStyle(.secondary) }
+                    Spacer()
+                    Menu {
+                        Button("Listen now") { Task { await model.books.playQueued(entry.id) } }
+                        Button("Move earlier") { Task { await model.books.editQueue(entry.id, delta:-1) } }
+                        Button("Move later") { Task { await model.books.editQueue(entry.id, delta:1) } }
+                        Button("Remove from Up Next", role:.destructive) { Task { await model.books.editQueue(entry.id) } }
+                    } label: { Image(systemName:"ellipsis").frame(width:44,height:44) }.accessibilityLabel("Queue actions for " + entry.title)
+                }.frame(minHeight:44)
+            }
         default:
             if model.books.bookmarks.isEmpty { Text("Save a moment worth coming back to with the bookmark button.").foregroundStyle(.secondary) }
-            ForEach(model.books.bookmarks) { mark in Button { model.books.seek(mark.time) } label: { HStack { Text(mark.title); Spacer(); Text(AudiobookTimeline.time(mark.time)) }.frame(maxWidth:.infinity, minHeight:44) } }
+            ForEach(model.books.bookmarks) { mark in
+                HStack {
+                    Button { model.books.seek(mark.time) } label: { HStack { Text(mark.title); Spacer(); Text(AudiobookTimeline.time(mark.time)) }.frame(maxWidth:.infinity, minHeight:44) }
+                    Button(role:.destructive) { Task { await model.books.removeBookmark(mark) } } label: { Image(systemName:"trash").frame(width:44,height:44) }.accessibilityLabel("Delete bookmark " + mark.title)
+                }
+            }
         }
     }
 }

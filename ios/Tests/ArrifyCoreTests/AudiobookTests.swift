@@ -14,6 +14,14 @@ final class AudiobookTests: XCTestCase {
         let restored = try JSONDecoder().decode(AudiobookCheckpoint.self, from:JSONEncoder().encode(journal))
         XCTAssertEqual(restored.position, 20000); XCTAssertEqual(restored.seq, 2)
         XCTAssertEqual(restored.baseRemoteStamp, 123); XCTAssertEqual(restored.sessionId, journal.sessionId)
+        var entry = AudiobookJournalEntry(checkpoint:restored, lease:"first", playing:false, dirty:true)
+        XCTAssertFalse(entry.acknowledge(session:journal.sessionId, sequence:1, remoteStamp:124))
+        XCTAssertTrue(entry.dirty); XCTAssertEqual(entry.checkpoint.position, 20000)
+        XCTAssertEqual(entry.checkpoint.seq, 2)
+        XCTAssertTrue(entry.acknowledge(session:journal.sessionId, sequence:2, remoteStamp:125))
+        XCTAssertEqual(entry.checkpoint.seq, 2, "Acknowledgement must never reset the monotonic sequence")
+        XCTAssertFalse(entry.acknowledge(session:"a-new-opened-session", sequence:2, remoteStamp:999))
+        XCTAssertEqual(entry.checkpoint.baseRemoteStamp, 125)
     }
     func testAudiobookCapabilitiesCannotBecomeArbitraryAuthenticatedURLs() throws {
         let endpoint = try Endpoint("https://arrify.example")

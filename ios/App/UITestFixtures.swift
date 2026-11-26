@@ -19,6 +19,7 @@ actor UITestTransport: HTTPTransport {
     private var bookPreferences: [String:Any] = ["visible":true,"continuous":false,"speed":1.0,"back_seconds":30,"forward_seconds":30]
     private var bookPosition = 40.0
     private var bookDevice = ""
+    private var bookEpoch = 1
     private var bookMarks: [[String:Any]] = []
     private var owner: String? = (ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1") ? "other-device" : nil
     private var playing = ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1"
@@ -41,7 +42,7 @@ actor UITestTransport: HTTPTransport {
         if path.hasPrefix("/api/v1/audiobooks/"), ProcessInfo.processInfo.environment["ARRIFY_UI_AUDIOBOOKS"] == "1" {
             let body = (try? JSONSerialization.jsonObject(with:request.httpBody ?? Data())) as? [String:Any] ?? [:]
             if path.hasSuffix("/preferences"), request.httpMethod == "POST" { bookPreferences.merge(body) { _,new in new } }
-            if path.hasSuffix("/play") { bookDevice = body["device_id"] as? String ?? ""; owner = bookDevice; playing = false }
+            if path.hasSuffix("/play") { bookDevice = body["device_id"] as? String ?? ""; owner = bookDevice; playing = false; bookEpoch += 1 }
             if path.hasSuffix("/progress") { bookPosition = body["position"] as? Double ?? bookPosition }
             if path.hasSuffix("/bookmark") { bookMarks.append(["time":body["position"] ?? bookPosition,"title":body["title"] ?? "Bookmark"]) }
             let book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Good Story","author":"A Writer","narrator":"A Reader","series":"","description":"A story worth listening to.","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":120,"progress":["currentTime":bookPosition,"lastUpdate":0,"isFinished":false],
@@ -52,7 +53,7 @@ actor UITestTransport: HTTPTransport {
             else if path.hasSuffix("/library") { result = ["libraries":[["id":"books","name":"Books"]],"library_id":"books","items":[book],"total":1,"next_page":NSNull()] }
             else if path.hasSuffix("/continue") { result = ["items":[book]] }
             else if path.contains("/book/") { result = book }
-            else if path.hasSuffix("/play") || path.hasSuffix("/download") { result = ["book":book,"position":bookPosition,"lease":String(repeating:"a",count:43),"revision":1,"queue":[],"preferences":bookPreferences,"music_epoch":1,"music_intent":1] }
+            else if path.hasSuffix("/play") || path.hasSuffix("/download") { result = ["book":book,"position":bookPosition,"lease":String(repeating:"a",count:43),"revision":1,"queue":[],"preferences":bookPreferences,"music_epoch":bookEpoch,"music_intent":1] }
             else if path.hasSuffix("/state") { result = ["book_id":"book-one","lease":String(repeating:"a",count:43),"device_id":bookDevice,"active":true,"position":bookPosition,"revision":1,"queue":[],"preferences":bookPreferences] }
             else if path.hasSuffix("/preferences") { result = bookPreferences }
             else { result = ["saved":true,"pending":false,"active":true,"remote_stamp":0] }
@@ -202,7 +203,7 @@ actor UITestTransport: HTTPTransport {
                 if let mode = body["mode"] as? String { repeatMode = mode }
                 playing = body["action"] as? String != "pause"
             }
-            value = "{\"context\":\(playbackContext),\"shuffle\":\(shuffle),\"repeat_mode\":\"\(repeatMode)\",\"queue_controls_available\":true,\"partial\":false,\"current_track_id\":\(owner == nil ? "null" : String(currentTrack)),\"position_seconds\":0,\"server_time\":1,\"queue_revision\":1,\"owner_device_id\":\(owner.map { "\"\($0)\"" } ?? "null"),\"owner_epoch\":1,\"intent\":1,\"playing\":\(playing),\"observed\":\"\(playing && ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" ? "playing" : "paused")\",\"seek_target_seconds\":0,\"seek_intent\":0,\"play_id\":1,\"upcoming_track_ids\":[2]}"
+            value = "{\"context\":\(playbackContext),\"shuffle\":\(shuffle),\"repeat_mode\":\"\(repeatMode)\",\"queue_controls_available\":true,\"partial\":false,\"current_track_id\":\(owner == nil ? "null" : String(currentTrack)),\"position_seconds\":0,\"server_time\":1,\"queue_revision\":1,\"owner_device_id\":\(owner.map { "\"\($0)\"" } ?? "null"),\"owner_epoch\":\(bookEpoch),\"intent\":1,\"playing\":\(playing),\"observed\":\"\(playing && ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" ? "playing" : "paused")\",\"seek_target_seconds\":0,\"seek_intent\":0,\"play_id\":1,\"upcoming_track_ids\":[2]}"
         }
         let response = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_TITLE"] == "1"
             ? value.replacingOccurrences(of: "Just Like a Pill", with: "A Very Long Song Title That Wraps Onto Two Lines in the Expanded Player During Keyboard Restoration")

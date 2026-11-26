@@ -8,6 +8,9 @@ import CryptoKit
         var manifest: AudiobookManifest
         var addresses: [String]
         var transferId: String
+        var lastPosition: Double?
+        var remoteStamp: Double?
+        var finished: Bool?
     }
     private let api: APIClient
     private var root: URL?
@@ -106,7 +109,8 @@ import CryptoKit
                     for file in files where file.pathExtension == "resume" { try? FileManager.default.removeItem(at:file) }
                 }
             }
-            records[id] = Record(manifest:manifest, addresses:urls, transferId:old?.transferId ?? UUID().uuidString.lowercased()); errors[id] = nil
+            records[id] = Record(manifest:manifest, addresses:urls, transferId:old?.transferId ?? UUID().uuidString.lowercased(),
+                lastPosition:old?.lastPosition, remoteStamp:old?.remoteStamp, finished:old?.finished); errors[id] = nil
             try persist(id); await schedule(id)
         } catch where RequestCancellation.matches(error) {} catch {
             if epoch == ticket { errors[id] = "Download paused. Your completed parts are saved. Try again when connected." }
@@ -150,6 +154,13 @@ import CryptoKit
         epoch = UUID(); delegate?.invalidate(); session?.invalidateAndCancel(); session = nil; delegate = nil
         if let root { try? FileManager.default.removeItem(at:root) }
         root = nil; records = [:]; working = []; errors = [:]; revision += 1
+    }
+    func checkpoint(_ id: String, position: Double? = nil, remoteStamp: Double? = nil, finished: Bool? = nil) {
+        guard records[id] != nil else { return }
+        if let position { records[id]?.lastPosition = position }
+        if let remoteStamp { records[id]?.remoteStamp = remoteStamp }
+        if let finished { records[id]?.finished = finished }
+        try? persist(id)
     }
 }
 

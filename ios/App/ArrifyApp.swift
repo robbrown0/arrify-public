@@ -229,7 +229,7 @@ struct MainView: View {
         }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
-        .fullScreenCover(isPresented: Binding(get:{ model.books.presented }, set:{ model.books.presented = $0 })) { AudiobookPlayer(model:model) }
+        .onChange(of: scenePhase) { if scenePhase == .active { Task { await model.books.refresh() } } }
         .task { await model.refreshBranding(); await model.favorites.refresh() }
         .task(id: scenePhase == .active && (model.library.needsRecovery || model.favorites.needsRecovery)) {
             guard scenePhase == .active else { return }
@@ -240,7 +240,10 @@ struct MainView: View {
                 guard !Task.isCancelled, scenePhase == .active else { return }
                 await model.recoverReads(); attempt += 1
             }
-        }.fullScreenCover(isPresented: $showPlayer) { NowPlayingView(model: model) }
+        }.fullScreenCover(isPresented: Binding(get:{ showPlayer || model.books.presented }, set:{ visible in showPlayer = visible; if !visible { model.books.presented = false } })) {
+            if model.books.presented { AudiobookPlayer(model:model) }
+            else { NowPlayingView(model:model) }
+        }
     }
     private var tabs: some View {
         TabView(selection: Binding(get: { selectedTab }, set: { value in
