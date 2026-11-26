@@ -127,7 +127,14 @@ class Audiobooks:
                  for x in media.get('tracks', [])]], sort_keys=True).encode()).hexdigest()
             chapters = []
             for chapter in media.get('chapters', [])[:5000]:
-                start = number(chapter.get('start'), duration); end = number(chapter.get('end'), duration)
+                # Embedded chapter clocks can extend past the decoded audio
+                # duration (for example MP3 encoder padding). They are optional
+                # navigation metadata, not a reason to reject playable audio.
+                if not isinstance(chapter, dict): continue
+                start, end = chapter.get('start'), chapter.get('end')
+                if any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x)
+                       for x in (start, end)): continue
+                start, end = max(0, min(duration, start)), max(0, min(duration, end))
                 if end > start:
                     chapters.append({'title': str(chapter.get('title') or f'Chapter {len(chapters)+1}')[:500], 'start': start, 'end': end})
             book['chapters'] = sorted(chapters, key=lambda x: x['start']) or [
