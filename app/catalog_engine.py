@@ -922,7 +922,7 @@ class Catalog:
             reads = self._artwork_reads[source]
         # Capacity stays bounded even when a hard-mounted NAS never returns.
         return reads.read(track_id, lambda: self.artwork(track_id),
-                          ('image/svg+xml', FALLBACK, 'fallback'))
+                          ('image/svg+xml', b'', 'deferred'))
 
 
     def artwork_version(self, track_id: int) -> str:

@@ -107,3 +107,17 @@ class StreamGrantHTTPTests(unittest.TestCase):
         self.lib.music.artwork=lambda tid:('image/png',b'confirmed-album','confirmed')
         status,body,_=self.raw(self.url().replace('/stream/','/artwork/'))
         self.assertEqual((status,body),(200,b'confirmed-album'))
+
+    def test_temporary_source_outage_never_becomes_a_saved_placeholder_cover(self):
+        self.lib.music.artwork=lambda tid:('image/png',b'','fallback')
+        self.lib.music.bounded_artwork=lambda tid:('image/svg+xml',b'','deferred')
+        self.lib.supplemental_artwork=lambda *args,**kwargs:None
+        self.lib.related_artwork=lambda *args:None
+        status,body,headers=self.raw('/api/v1/artwork/1',Cookie=self.hostcookie)
+        self.assertEqual((status,body),(204,b''))
+        self.assertEqual(headers['Cache-Control'],'private, no-store')
+        self.lib.supplemental_artwork=lambda *args,**kwargs:b'saved-supplemental-cover'
+        self.assertEqual(self.raw('/api/v1/artwork/1',Cookie=self.hostcookie)[:2],(200,b'saved-supplemental-cover'))
+        self.lib.supplemental_artwork=lambda *args,**kwargs:None
+        self.lib.music.bounded_artwork=lambda tid:('image/png',b'recovered-cover','embedded')
+        self.assertEqual(self.raw('/api/v1/artwork/1',Cookie=self.hostcookie)[:2],(200,b'recovered-cover'))

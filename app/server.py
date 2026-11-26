@@ -438,9 +438,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,image.read_bytes(),'image/jpeg',{'Cache-Control':'private, max-age=3600'})
         if re.fullmatch('/api/v1/artwork/[0-9]+',path):
             artwork_headers={'Cache-Control':'private, no-store' if 'grant' in q else 'private, max-age=300'}
+            deferred=False
             try:
                 read_artwork=getattr(lib.music,'bounded_artwork',lib.music.artwork)
                 mime,data,source=read_artwork(int(path.rsplit('/',1)[1]))
+                deferred=source=='deferred'
+                if deferred:source='fallback'
             except FileNotFoundError:
                 # Missing local artwork continues through Arrify's fallback chain.
                 mime,data,source='',b'','fallback'
@@ -460,6 +463,11 @@ class Handler(BaseHTTPRequestHandler):
                     mime,data=related
                     return self.send(200,data,mime,artwork_headers)
             if source=='fallback':
+                if deferred:
+                    # Do not turn a temporary NAS outage into a saved device
+                    # cover. Existing clients treat an empty image as a local
+                    # placeholder without invalidating the verified API route.
+                    return self.send(204,b'','image/png',{'Cache-Control':'private, no-store'})
                 mime='image/png'
                 data=(WEB/'assets/icon-192.png').read_bytes()
             return self.send(200,data,mime,artwork_headers)
