@@ -1,0 +1,273 @@
+Podflix source-only handoff — 2026-11-26
+Workspace: /home/rob/arrify-ops/arrify-api-fix-20261126
+
+Scope and coordination
+During the source-patch phase, the live source and overrides were read only. No live database reads/writes,
+Lidarr calls/settings changes, service restarts, deployments, or job interruption
+were performed. The isolated snapshot already contained dirty/untracked source;
+those changes were retained. GitHub's old hub redirects to robbrown0/hive-mind;
+both new START_HERE.md and PROTOCOL.md returned connector 404 at start/end.
+No registration, claim, ACK or result post could be made. Deliver this report to
+the orchestrator; shared hub and live mutations were avoided.
+
+Exact source additions/changes for this invocation
+- request-bridge/hitdiscovery/album_index.py (already untracked in baseline)
+- request-bridge/hitdiscovery/api.py
+- tests/test_album_index.py (new)
+- Dockerfile.lidarr-api-fix (new)
+- docs/lidarr-api-fix-20261126/ (this report, focused.patch, test logs, hashes)
+No preparation.py or expansion.py change is included. Existing read_ids callers
+obtain the Store from Lidarr.http.store; preparation_albums passes it explicitly.
+
+Behavior and bounds
+Follow-up review fixed the per-call full inventory deserialization: read_ids now
+selects only input IDs from inventory and requests in parameterized SQL IN batches
+of at most 500 IDs, supporting inputs over the older 999-variable SQLite limit.
+Inventory uses its existing composite (kind,id) primary-key index without casts.
+Request rows override inventory mappings as before. No new DB index or schema
+change was introduced; requests.lidarr_id is not indexed in the current schema,
+so SQLite may still scan that smaller table, but only matching rows reach Python.
+
+Batch reads remain 50 numeric IDs. A batch 500 falls back to singleton reads;
+only singleton 404 proves deletion. A known release group is then queried using
+album?foreignAlbumId=<rg>. Its exact identity is validated. Returned replacements
+are used in memory, with aliases stored in the existing cache table. No schema
+migration or direct UPDATE/DELETE of requests, transfers, inventory or history.
+Existing downstream acquisition transitions remain unchanged and may naturally
+record the current album ID when they next update a request.
+
+Confirmed missing groups are skipped, preserving their state and reservations;
+they are NOT automatically re-added or re-prepared. This deliberately leaves
+truly deleted prepared requests for later operator review rather than creating
+new acquisitions or changing budgets. Cache entries persist across processes
+and retain the old-ID tombstone. After 3600 seconds, known groups are checked by
+foreignAlbumId, never by the deleted numeric ID. New numeric IDs and groups
+return normally. Unknown groups use singleton rechecks after expiry. No-Store
+adapters have instance-local cache only; deployed callers use the shared Store.
+Cache keys are namespaced by configured Lidarr endpoint. Changing that endpoint
+causes one new validation cycle. This does not seed the 24 supplied IDs: first
+encounter can still generate one batch 500 and one singleton 404 per stale ID.
+
+For N unique pending IDs: healthy reads cost ceil(N/50) API calls. A failed batch
+of k IDs costs at most 1+2k calls (one batch, k singleton reads, <=k RG lookups).
+All 50 known-deleted IDs: 101 calls initially, zero while cached. Mixed two-ID
+valid/deleted case: 4 initially, 1 on later passes. Unrelated singleton 500 aborts
+immediately; an all-endpoints-500 outage uses 2 calls and records no deletion.
+The bound is API calls; 429/502/503/504/connectivity retain four transport attempts.
+Album HTTP 500 responses are not retried at transport. The live api-metadata.py
+already suppressed batch-500 retries; repository API did not. Other GET retry
+behavior is preserved. Unscoped track/trackfile reads are rejected before IO.
+The deployed optional metadata_transport hook is preserved; older images without
+that module retain the repository's original HTTP behavior.
+
+Validation
+20 focused tests pass: mixed IDs, valid batch size, unknown/deleted groups,
+persistent cache across clients, expiry and reappearance, replacement deletion,
+endpoint isolation, numeric-ID reuse, inventory reconciliation, selective SQL
+reads (irrelevant payloads never returned/parsed), indexed inventory query plan,
+1,205 IDs under an enforced 999-variable SQLite limit, HTTP error
+classification, worst-case call bounds, scoped track guard, metadata adapter.
+71 request regression tests pass with local Unix socket permission.
+Initial sandbox-only request run: 69 pass, 2 socket permission errors.
+Broad exploratory run: 144 discovered, 23 errors from missing marsv2/tinytag
+imports and sandbox socket restrictions; no assertion failures. This is not a
+passing full application suite. The focused patch does not require those player
+dependencies. No tests exercised a live Lidarr or a running production container.
+
+Read-only deployment evidence
+Live source /srv/arrify/data/arrify/source/album helper matches the initial
+snapshot; source and apple-music-worktree AGENTS.md inspected with read-only sudo.
+Actual docker inspect confirmed these three album consumers and image IDs:
+arrify-requests: sha256:f721c52207a0e6e29dd0c0ecf9ef714e266c4b1c8f255a471a6023158fd048c0
+hitdiscovery: sha256:175e89e49fb42d2d816c30187672d8f72132ce6ce97f0bd898854cb8f3cf8d94
+hitdiscovery-download-watchdog: sha256:a7f3be7c25216fe2c9a26332b500d696dc9314cf87a773f52b109810432f2d12
+Both main clients mount /srv/arrify/overrides/song-acquisition/api-metadata.py.
+Discovery and download-watchdog mount /srv/arrify/overrides/album_index.py.
+Requests has its baked album helper. Deployment must replace/mask ALL of these
+with the SAME controlled api.py and album_index.py, not only rebuild one image.
+Retain every other override, notably metadata_transport.py and service-specific
+preparation/expansion modules. The exact-song worker is separate and does not
+use this album helper.
+
+Artifact verification (run from the snapshot root, not the artifact directory)
+cd /home/rob/arrify-ops/arrify-api-fix-20261126
+sha256sum -c docs/lidarr-api-fix-20261126/SHA256SUMS
+The manifest paths are relative to that root. focused.patch includes only this
+invocation's changes relative to the initial snapshot, including its pre-existing
+untracked album_index.py. Test logs reflect the revised 20/71 test runs.
+
+Concrete deployment plan — NOT executed; requires separately authorized window
+1. Recheck hub claims, active jobs and mounts. Record private Compose securely,
+   immutable image IDs, mounted-file checksums and process/module hashes.
+2. The orchestrator completed the verified SQLite online backup described below.
+   Retain it privately; recheck its checksum and suitability at deployment time. Do NOT copy only the live main DB file. No
+   request-ID migration is required by this patch. Any later cleanup/reprepare
+   must have its own reviewed, transactional, RG-validated migration.
+3. Stage only the two changed modules from this snapshot in an immutable release
+   directory, with recorded SHA256, readable by container UID. Do not overwrite
+   /srv/arrify/overrides or the dirty live source. Generate a reviewed Compose
+   change replacing the api.py and album_index.py bind destinations in ALL THREE
+   services with those same staged files, read_only true. Preserve all other
+   mounts/settings. Check resolved Compose for duplicate destination mounts.
+   Alternatively build Dockerfile.lidarr-api-fix three times with BASE_IMAGE set
+   to each captured immutable image ID; remove only the superseded api/helper
+   mounts so they cannot hide the baked modules. Do not rebuild the entire dirty
+   source snapshot or replace unrelated service code.
+4. In a window where active preparation/grab/import work has completed, recreate
+   only arrify-requests, hitdiscovery and hitdiscovery-download-watchdog via the
+   reviewed Compose. Plain restart does not apply new image/mount definitions.
+   Do not restart arrify.service (it controls other services), the player, Lidarr,
+   the exact-song worker, or unrelated watchdog/artwork services.
+5. Verify imported api.py/album_index.py checksums agree in all three containers,
+   metadata adapter remains loaded in both main clients, queues/jobs are intact,
+   and repeated maintenance uses persistent tombstones. Observe bounded calls
+   and a foreign-group replacement case; no unscoped track/full-root scan probe.
+   Check request/transfer state changes are only normal authorized acquisition.
+
+Rollback
+Restore the saved Compose image/mount entries for only those three consumers,
+then recreate them in the same safe window. Existing old override files/images
+are unchanged by the proposed staged-file approach. New cache keys are ignored
+by old code; no database restore is needed. Do not restore the backup over a live
+DB and lose acquisition history. Any later DB migration requires its own
+transactional rollback independent of this code rollback.
+
+SSH and scan investigation
+/home/rob/lidarr-ops/api.py reads config.xml through SSH on each API call; sab()
+reads downloader config from DB per call. remote() has no overall subprocess
+timeout. The live worker adds ConnectTimeout=10, ServerAliveInterval=15 and
+ServerAliveCountMax=2 but no multiplexing. A later patch can preserve identity,
+host-key verification and BatchMode while using ControlMaster=auto, short
+ControlPersist and identity-specific %C sockets in a 0700 RuntimeDirectory.
+The systemd worker uses ProtectHome=read-only, ProtectSystem=strict, PrivateTmp;
+do not put writable sockets under home. Bound read subprocess duration and test
+stale-socket reconnect/outages. Do not automatically replay mutating SSH commands
+(shared SSH arguments also support file/archive mutations). No SSH behavior was
+changed here; that later change needs its own tests and targeted
+arrify-song-acquisition.service restart after active jobs complete.
+
+All inspected track calls in snapshot and live worker were scoped by artist,
+album or individual track. No RescanFolders occurrence found in readable source,
+overrides, Lidarr-ops Python/shell, /usr/local/lib/arrify or mount-watchdog code.
+Worker command sites use per-artist RefreshArtist and explicit-file ManualImport.
+This does NOT identify or exonerate external triggers for the four reported root
+rescans. Correlate Lidarr command history/request logs with host scheduler and
+other clients before changing scan behavior. No scan-trigger behavior changed.
+
+Deployment preparation completed — 2026-11-26 19:35 UTC
+Release root: /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z
+Immutable module directory: /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/modules
+Private proposed Compose: /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/private/compose.proposed.json
+Private byte-for-byte backup: /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/private/compose.before.json
+Sanitized mount comparison: /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/sanitized-comparison.json
+Offline validation: /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/validation.json
+Read-only job observation: /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/jobs-observation.json
+
+The release root and private directory are mode 0700, owned by rob. Every
+private Compose/validation file is mode 0600. The module directory is root-owned
+0555, its two modules root-owned 0444, and both files plus the module directory
+have chattr +i set. Host parent directories remain private; Docker resolves bind
+sources as root, and containers see the mounted file at /app/hitdiscovery.
+All three containers run UID/GID 21012:21012. A subprocess dropped to that UID/GID
+and successfully opened/read both files via the staged directory FD. This tests
+file access without broadening host parent-directory permissions or starting a
+container. No container was created or modified.
+
+Offline docker compose config --format json succeeded for both before/proposed
+files using --project-directory /srv/arrify -p arrify. Secret-bearing resolved
+outputs/stderr are retained only in the private directory. Structural comparison
+of both raw and resolved configurations proves all settings outside the six
+selected module mount entries are identical. No duplicate mount destinations.
+All three services point to the same immutable api.py and album_index.py.
+arrify-requests gains the missing album_index.py mount; download-watchdog gains
+the missing api.py mount. Other four entries replace their old module sources.
+Image references were preserved and each reference still resolves to its current
+running image ID recorded earlier. Live Compose hash remained unchanged:
+ec416e76dc83490b00b41d473dab0f1628641fbedd2f246f2e1a589f95ad3e84
+
+Verification commands (read-only; already passed):
+cd /home/rob/arrify-ops/arrify-api-fix-20261126
+sha256sum -c docs/lidarr-api-fix-20261126/SHA256SUMS
+cd /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z
+sha256sum -c SHA256SUMS
+cd /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/private
+sha256sum -c SHA256SUMS
+The snapshot manifest must be checked from the snapshot root. The separate
+release and private manifests are relative to their respective directories.
+
+Safe-window assessment: NOT CLEARED. At 19:34:52 UTC (14:34:52 EST), discovery
+had one adding-artist request, 43 requested, 21 prepared, 122 queued transfers
+and two import-retry transfers. The song worker database contained only terminal
+available/failed/review states (587/87/33), but its worker service and lifetime
+lock remained active. No expansion lock was observed. These are state snapshots,
+not proof of remote downloader completion; some queue rows may be stale. Before
+any approved action, reconcile current downloader/Lidarr queues and command
+activity read-only, wait for current preparation/grab/import operations to end,
+and recheck the shared expansion lock. Do not stop jobs to create a window.
+No live queue command was sent during staging. No DB backup/migration was made.
+The orchestrator subsequently completed the online backup; see the final source-control update below.
+
+EXACT FUTURE COMMANDS — NOT EXECUTED. Explicit approval still required.
+Only after approval, verified backup, current safe-window checks, and revalidation
+that private proposal and live Compose have not drifted:
+
+cd /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/private
+sha256sum -c SHA256SUMS
+printf '%s  %s\n' 'ec416e76dc83490b00b41d473dab0f1628641fbedd2f246f2e1a589f95ad3e84' '/srv/arrify/compose.private.json' | sudo -n sha256sum -c -
+sudo -n docker compose --project-directory /srv/arrify -p arrify -f /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/private/compose.proposed.json config --quiet
+sudo -n install -o root -g root -m 0600 /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/private/compose.proposed.json /srv/arrify/compose.private.json
+sudo -n docker compose --project-directory /srv/arrify -p arrify -f /srv/arrify/compose.private.json up -d --no-deps --no-build --pull never --force-recreate arrify-requests hitdiscovery hitdiscovery-download-watchdog
+
+Persisting the approved Compose before recreation avoids a later systemd start
+silently reverting to old mounts. If a future deployment chooses a temporary
+trial with -f compose.proposed.json instead, it must explicitly manage that drift.
+Never use docker compose down, restart arrify.service, or recreate the player,
+Lidarr, exact-song worker, or unrelated services for this patch.
+
+EXACT ROLLBACK COMMANDS — NOT EXECUTED. Require approval/safe window too.
+Before rollback, ensure no unrelated configuration changed since deployment;
+otherwise restore only the six reviewed mount entries in a newly reviewed file.
+When no other configuration has changed:
+
+cd /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/private
+sha256sum -c SHA256SUMS
+sudo -n install -o root -g root -m 0600 /home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/private/compose.before.json /srv/arrify/compose.private.json
+sudo -n docker compose --project-directory /srv/arrify -p arrify -f /srv/arrify/compose.private.json up -d --no-deps --no-build --pull never --force-recreate arrify-requests hitdiscovery hitdiscovery-download-watchdog
+
+Old images and overrides remain intact. Rollback needs no database restore;
+legacy code ignores the new cache keys. Restore no live DB from an old backup.
+
+Blockers: explicit deployment/restart approval is absent, a safe job window has
+not been established. The online DB backup is now completed per the orchestrator;
+see verification provenance below.
+Hub connector START_HERE/PROTOCOL still return 404; no claim or ACK was posted.
+All preparation files are staged only; live Compose/overrides/DB/services/jobs
+were not changed. The only DB access in this preparation turn was SELECT through
+SQLite mode=ro with query_only enabled for aggregate state counts.
+
+Final source-control update — 2026-11-26
+The orchestrator reports completion of the SQLite online backup at:
+/home/rob/arrify-ops/lidarr-api-release-20261126T193358Z/private/discovery.before.sqlite3
+Size: 2,923,171,840 bytes. Reported PRAGMA quick_check: ok. Consistent snapshot:
+3,159 requests / 2,785 transfers, matching the immediate live counts. The
+orchestrator reports the SHA-256 sidecar was verified and recorded in private
+backup-verification.txt. This agent independently confirmed the backup exists,
+its exact reported size and mode 0600. backup-verification.txt was not present at
+the reported private path during this final check; checksum/quick_check/count
+results above are attributed to the orchestrator, not a repeat local verification.
+No backup contents or private verification material are included in Git.
+
+Rollback use: retain this consistent online backup for separately approved DB
+recovery or analysis if later required. This API fix introduces no schema or
+request-history migration, so ordinary rollback restores only Compose/module
+mounts and recreates the three services after approval in a safe window. Do not
+restore the pre-deployment DB over ongoing acquisition history. Any DB recovery
+must first preserve the current database/WAL state, stop writers only with explicit
+approval, verify the backup checksum/integrity, and reconcile work since backup
+under a separately reviewed recovery plan. No DB restoration is authorized here.
+
+The source-only commit includes api.py, album_index.py, test_album_index.py,
+Dockerfile.lidarr-api-fix and the sanitized docs/lidarr-api-fix-20261126 artifacts.
+Private Compose files, database backups and unrelated dirty source are excluded.
+Existing validation remains 20 focused and 71 request tests passed; code has not
+changed since those runs. No push, deployment, live Compose edit or restart.

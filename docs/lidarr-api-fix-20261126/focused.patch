@@ -1,0 +1,464 @@
+--- a/request-bridge/hitdiscovery/api.py
++++ b/request-bridge/hitdiscovery/api.py
+@@ -5,15 +5,27 @@
+ from urllib.parse import urlencode
+ from pathlib import Path
+
+-class APIError(RuntimeError): pass
++class APIError(RuntimeError):
++    def __init__(self, message, status=None):
++        super().__init__(message)
++        self.status = status
+
+ class HTTP:
+     def __init__(self, store=None):
+         self.store=store; self.last={}
+-    def json(self,url,method='GET',body=None,headers=None,interval=0,cache_ttl=0):
++    def json(self,url,method='GET',body=None,headers=None,interval=0,cache_ttl=0,retry_500=True):
+         if cache_ttl and self.store:
+             saved=self.store.cached(url,cache_ttl)
+             if saved is not None: return saved
++        # Preserve the deployed shared metadata pacing/circuit-breaker adapter.
++        # Older images without that optional module retain their HTTP behavior.
++        if method=='GET' and url.startswith('https://musicbrainz.org/ws/2/'):
++            try:
++                from .metadata_transport import fetch_json
++            except ModuleNotFoundError as exc:
++                if exc.name != __package__+'.metadata_transport': raise
++            else:
++                return fetch_json(url,headers=headers,store=self.store,cache_ttl=cache_ttl)
+         host=url.split('/')[2]
+         for attempt in range(4 if method=='GET' else 1):
+             time.sleep(max(0,interval-(time.monotonic()-self.last.get(host,0))))
+@@ -26,10 +38,10 @@
+                 if cache_ttl and self.store: self.store.cache(url,result)
+                 return result
+             except HTTPError as e:
+-                if e.code in (429,500,502,503,504) and method=='GET' and attempt<3:
++                if e.code in (429,502,503,504) + ((500,) if retry_500 else ()) and method=='GET' and attempt<3:
+                     delay=e.headers.get('Retry-After','')
+                     time.sleep(min(60,float(delay)) if delay.isdigit() else 2**(attempt+1)); continue
+-                raise APIError(f'{method} {host}{req.selector.split("?")[0]} HTTP {e.code}') from None
++                raise APIError(f'{method} {host}{req.selector.split("?")[0]} HTTP {e.code}',status=e.code) from None
+             except (URLError,TimeoutError,OSError) as e:
+                 if method=='GET' and attempt<3:
+                     time.sleep(2**attempt); continue
+@@ -42,7 +54,9 @@
+         self.headers={'X-Api-Key':Path(config.key_file).read_text().strip()}
+         if not self.headers['X-Api-Key']: raise APIError('Lidarr API key file is empty')
+     def get(self,path,**params):
+-        return self.http.json(self.c.url.rstrip('/')+'/api/v1/'+path+('?' + urlencode(params,doseq=True) if params else ''),headers=self.headers,interval=.05)
++        if path.strip('/') in ('track','trackfile') and not any(params.get(k) for k in ('albumId','artistId','trackIds','trackFileIds')):
++            raise APIError('Unscoped Lidarr track reads are disabled')
++        return self.http.json(self.c.url.rstrip('/')+'/api/v1/'+path+('?' + urlencode(params,doseq=True) if params else ''),headers=self.headers,interval=.05,retry_500=not (path=='album' or path.startswith('album/')))
+     def write(self,path,method,body):
+         if not (self.c.acquire and self.c.reviewed): raise APIError('Acquisition disabled: review initial report and enable configuration')
+         if self.http.store:
+--- a/request-bridge/hitdiscovery/album_index.py
++++ b/request-bridge/hitdiscovery/album_index.py
+@@ -1,16 +1,138 @@
+-"""Bounded live album reads using installed Lidarr's albumIds filter."""
++"""Bounded album reads; deleted IDs are reconciled without changing request history.
++
++Only a singleton 404 proves deletion. Durable cache entries remember that an ID
++was deleted, so expiry probes the release group rather than the dead ID again.
++"""
++import hashlib
+ import json
++import logging
++import time
++from .api import APIError
+
+-def read_ids(lidarr,ids):
+-    ids=sorted(set(int(i) for i in ids if i))
+-    result=[]
+-    for start in range(0,len(ids),50):
+-        result.extend(lidarr.get('album',albumIds=ids[start:start+50]))
+-    return result
++log = logging.getLogger(__name__)
++RECHECK_SECONDS = 3600
++BATCH_SIZE = 50
++SQL_BATCH_SIZE = 500  # Below SQLite's older 999 bound-variable limit.
+
+-def preparation_albums(lidarr,store,groups):
+-    snapshot=[json.loads(r[0]) for r in store.db.execute("SELECT payload FROM inventory WHERE kind='album'")]
+-    if not snapshot:return lidarr.get('album')
+-    ids={a['id'] for a in snapshot if groups is None or a['foreignAlbumId'] in groups}
++
++def _status(exc):
++    # Compatibility with older HTTP adapters during a coordinated rollout.
++    return getattr(exc, 'status', None) or next(
++        (code for code in (404, 500) if str(exc).endswith('HTTP '+str(code))), None)
++
++
++def read_ids(lidarr, ids, store=None):
++    store = store or getattr(getattr(lidarr, 'http', None), 'store', None)
++    ids = sorted(set(int(i) for i in ids if i))
++    if not ids:
++        return []
++    groups = {}
++    if store:
++        for start in range(0, len(ids), SQL_BATCH_SIZE):
++            batch = ids[start:start+SQL_BATCH_SIZE]
++            placeholders = ','.join('?' for _ in batch)
++            # Keep id uncast so SQLite can use inventory's (kind,id) key.
++            for row in store.db.execute(
++                    "SELECT payload FROM inventory WHERE kind='album' AND id IN ("+placeholders+')',
++                    tuple(str(i) for i in batch)):
++                album = json.loads(row[0])
++                if album.get('foreignAlbumId'):
++                    groups[int(album['id'])] = album['foreignAlbumId']
++            for row in store.db.execute(
++                    'SELECT lidarr_id,rg FROM requests WHERE lidarr_id IN ('+placeholders+')', batch):
++                groups[int(row[0])] = row[1]
++    endpoint = getattr(getattr(lidarr, 'c', None), 'url', '').rstrip('/')
++    prefix = 'album-tombstone-v1:'+hashlib.sha256(endpoint.encode()).hexdigest()+':'
++    memory = getattr(lidarr, '_album_tombstones', None)
++    if memory is None:
++        memory = lidarr._album_tombstones = {}
++
++    def saved(i):
++        if store:
++            row = store.db.execute('SELECT payload FROM cache WHERE key=?', (prefix+str(i),)).fetchone()
++            return json.loads(row[0]) if row else None
++        return memory.get(i)
++
++    def remember(i, value):
++        if store:
++            store.cache(prefix+str(i), value)
++        else:
++            memory[i] = value
++
++    def reconcile(i, previous=None, confirmed_missing=False):
++        rg = groups.get(i) or (previous or {}).get('rg')
++        if rg:
++            matches = lidarr.get('album', foreignAlbumId=rg)
++            if not isinstance(matches, list) or any(a.get('foreignAlbumId') != rg for a in matches) or len(matches)>1:
++                raise APIError('Ambiguous Lidarr release-group reconciliation')
++            album = matches[0] if matches else None
++        elif confirmed_missing:
++            album = None
++        else:
++            try:
++                album = lidarr.get('album/'+str(i))
++            except APIError as exc:
++                if _status(exc) != 404:
++                    raise
++                album = None
++        remember(i, {'rg': rg, 'id': album['id'] if album else None,
++                     'checked': time.time()})
++        return album
++
++    result = {}
++    pending = {}
++    for i in ids:
++        entry = saved(i)
++        if entry and (not groups.get(i) or entry.get('rg') == groups[i]):
++            if time.time()-entry['checked'] >= RECHECK_SECONDS:
++                album = reconcile(i, entry)
++                if album:
++                    result[album['id']] = album
++            elif entry['id']:
++                pending.setdefault(entry['id'], []).append(i)
++        else:
++            pending.setdefault(i, []).append(i)
++
++    numeric = sorted(pending)
++    for start in range(0, len(numeric), BATCH_SIZE):
++        batch = numeric[start:start+BATCH_SIZE]
++        try:
++            albums = lidarr.get('album', albumIds=batch)
++        except APIError as exc:
++            if _status(exc) != 500:
++                raise
++            albums = []
++            # One failed batch, then at most one singleton and one RG lookup per
++            # ID. An unrelated singleton 500 aborts immediately, never cached.
++            for i in batch:
++                try:
++                    albums.append(lidarr.get('album/'+str(i)))
++                except APIError as single:
++                    if _status(single) != 404:
++                        raise
++                    for original in pending[i]:
++                        album = reconcile(original, saved(original), confirmed_missing=True)
++                        if album:
++                            albums.append(album)
++                    log.warning('Deleted Lidarr album ID %s reconciled or deferred', i)
++        for album in albums:
++            # Numeric IDs can be reused; never attach another RG to a request.
++            originals = pending.get(album['id'], [])
++            mismatched = [i for i in originals if groups.get(i) and groups[i] != album.get('foreignAlbumId')]
++            if mismatched:
++                for i in mismatched:
++                    replacement = reconcile(i, saved(i))
++                    if replacement:
++                        result[replacement['id']] = replacement
++            else:
++                result[album['id']] = album
++    return list(result.values())
++
++
++def preparation_albums(lidarr, store, groups):
++    snapshot = [json.loads(r[0]) for r in store.db.execute("SELECT payload FROM inventory WHERE kind='album'")]
++    if not snapshot:
++        return lidarr.get('album')
++    ids = {a['id'] for a in snapshot if groups is None or a['foreignAlbumId'] in groups}
+     ids.update(r[0] for r in store.db.execute('SELECT lidarr_id FROM requests WHERE lidarr_id IS NOT NULL'))
+-    return read_ids(lidarr,ids)
++    return read_ids(lidarr, ids, store)
+--- /dev/null
++++ b/tests/test_album_index.py
+@@ -0,0 +1,243 @@
++import io
++import json
++import sqlite3
++import tempfile
++import unittest
++from pathlib import Path
++from types import SimpleNamespace
++from unittest.mock import patch
++from urllib.error import HTTPError
++
++from hitdiscovery.album_index import read_ids, preparation_albums
++from hitdiscovery.api import APIError, HTTP, Lidarr
++from hitdiscovery.store import Store
++
++
++def album(i, rg):
++    return {'id': i, 'foreignAlbumId': rg}
++
++
++class FakeLidarr:
++    def __init__(self, store=None):
++        self.http = SimpleNamespace(store=store)
++        self.c = SimpleNamespace(url='http://lidarr')
++        self.albums = {2: album(2, 'valid')}
++        self.calls = []
++        self.failure = None
++
++    def get(self, path, **params):
++        self.calls.append((path, params))
++        if self.failure:
++            raise APIError('unrelated failure', status=self.failure)
++        if path == 'album':
++            if 'foreignAlbumId' in params:
++                return [a for a in self.albums.values() if a['foreignAlbumId'] == params['foreignAlbumId']]
++            if any(i not in self.albums for i in params['albumIds']):
++                raise APIError('batch failure', status=500)
++            return [self.albums[i] for i in params['albumIds']]
++        i = int(path.split('/')[1])
++        if i not in self.albums:
++            raise APIError('missing', status=404)
++        return self.albums[i]
++
++
++class AlbumIndexTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.store = Store(Path(self.temp.name)/'test.db')
++        self.addCleanup(self.store.db.close)
++        self.store.db.execute("INSERT INTO requests VALUES('deleted','reserved-at','week','waiting-for-release',1,'history')")
++        self.store.db.commit()
++        self.original = tuple(self.store.db.execute('SELECT * FROM requests').fetchone())
++        self.l = FakeLidarr(self.store)
++
++    def test_only_relevant_inventory_payloads_and_requests_are_returned(self):
++        self.store.inventory('album', [album(2, 'valid')])
++        # Invalid JSON must never reach the parser, nor even the row factory.
++        self.store.db.execute("INSERT INTO inventory VALUES('album','99999','','invalid JSON','')")
++        self.store.db.execute("INSERT INTO inventory VALUES('artist','2','','invalid artist JSON','')")
++        self.store.db.commit()
++        rows = []
++        def record_row(cursor, values):
++            rows.append((tuple(c[0] for c in cursor.description), values))
++            return sqlite3.Row(cursor, values)
++        self.store.db.row_factory = record_row
++        with patch('hitdiscovery.album_index.json.loads', wraps=json.loads) as parse:
++            self.assertEqual(read_ids(self.l, [2]), [album(2, 'valid')])
++        self.assertEqual(parse.call_count, 1)
++        self.assertEqual(rows, [(('payload',), (json.dumps(album(2, 'valid'), sort_keys=True),))])
++        plan = self.store.db.execute(
++            "EXPLAIN QUERY PLAN SELECT payload FROM inventory WHERE kind='album' AND id IN (?)", ('2',))
++        detail = ' '.join(row[3] for row in plan)
++        self.assertIn('SEARCH inventory', detail)
++        self.assertIn('kind=? AND id=?', detail)
++
++    def test_more_than_999_ids_with_legacy_sqlite_variable_limit(self):
++        ids = list(range(2, 1207))
++        self.l.albums = {i: album(i, 'rg-'+str(i)) for i in ids}
++        self.store.inventory('album', list(self.l.albums.values()))
++        # Exercise request precedence in each SQL batch, including its last one.
++        for i in (2, 502, 1206):
++            self.store.db.execute('INSERT INTO requests VALUES(?,?,?,?,?,?)',
++                                  ('request-'+str(i), '', '', 'prepared', i, ''))
++            self.l.albums[i] = album(i, 'request-'+str(i))
++        self.store.db.commit()
++        self.store.db.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
++        queries = []
++        self.store.db.set_trace_callback(queries.append)
++        result = read_ids(self.l, ids)
++        self.assertEqual({a['id'] for a in result}, set(ids))
++        self.assertEqual(len(self.l.calls), 25)  # Only healthy API batches.
++        for table in ('inventory', 'requests'):
++            selected = [q for q in queries if 'FROM '+table+' WHERE' in q]
++            self.assertEqual(len(selected), 3)
++            self.assertTrue(all(' IN (' in q for q in selected))
++
++    def test_mixed_stale_and_valid_persist_across_clients_without_history_change(self):
++        self.assertEqual(read_ids(self.l, [1, 2, 1]), [album(2, 'valid')])
++        self.assertEqual(len(self.l.calls), 4)  # batch, singleton404, RG, valid singleton
++        other = FakeLidarr(self.store)
++        self.assertEqual(read_ids(other, [1, 2]), [album(2, 'valid')])
++        self.assertEqual(other.calls, [('album', {'albumIds': [2]})])
++        self.assertEqual(tuple(self.store.db.execute('SELECT * FROM requests').fetchone()), self.original)
++
++    def test_reconcile_replacement_and_expiry_never_probe_dead_numeric_id(self):
++        self.l.albums[3] = album(3, 'deleted')
++        self.assertEqual({a['id'] for a in read_ids(self.l, [1, 2])}, {2, 3})
++        self.l.calls.clear()
++        self.assertEqual({a['id'] for a in read_ids(self.l, [1, 2])}, {2, 3})
++        self.assertEqual(self.l.calls, [('album', {'albumIds': [2, 3]})])
++        with patch('hitdiscovery.album_index.time.time', return_value=10**11):
++            self.l.calls.clear()
++            read_ids(self.l, [1])
++            self.assertEqual(self.l.calls, [('album', {'foreignAlbumId': 'deleted'})])
++
++    def test_deleted_group_reappears_after_expiry(self):
++        read_ids(self.l, [1])
++        self.l.albums[4] = album(4, 'deleted')
++        self.assertEqual(read_ids(self.l, [1]), [])
++        with patch('hitdiscovery.album_index.time.time', return_value=10**11):
++            self.assertEqual(read_ids(self.l, [1]), [album(4, 'deleted')])
++
++    def test_unrelated_500_aborts_after_two_calls_without_tombstone(self):
++        self.l.failure = 500
++        with self.assertRaises(APIError):
++            read_ids(self.l, range(1, 51))
++        self.assertEqual(len(self.l.calls), 2)
++        self.assertEqual(self.store.db.execute('SELECT count(*) FROM cache').fetchone()[0], 0)
++
++    def test_batch_404_is_not_deletion(self):
++        self.l.failure = 404
++        with self.assertRaises(APIError):
++            read_ids(self.l, [1, 2])
++        self.assertEqual(len(self.l.calls), 1)
++        self.assertEqual(self.store.db.execute('SELECT count(*) FROM cache').fetchone()[0], 0)
++
++    def test_unknown_missing_has_only_one_404_and_expires(self):
++        l = FakeLidarr()
++        self.assertEqual(read_ids(l, [9]), [])
++        self.assertEqual(len(l.calls), 2)
++        read_ids(l, [9])
++        self.assertEqual(len(l.calls), 2)
++        l.albums[9] = album(9, 'new')
++        with patch('hitdiscovery.album_index.time.time', return_value=10**11):
++            self.assertEqual(read_ids(l, [9]), [album(9, 'new')])
++
++    def test_all_missing_batch_call_bound(self):
++        self.l.albums.clear()
++        read_ids(self.l, range(1, 51))
++        self.assertEqual(len(self.l.calls), 52)  # one RG known, 50 singletons, one batch
++        self.l.calls.clear()
++        self.assertEqual(read_ids(self.l, range(1, 51)), [])
++        self.assertEqual(self.l.calls, [])
++
++    def test_all_known_missing_worst_case_bound(self):
++        self.store.inventory('album', [album(i, 'rg-'+str(i)) for i in range(2, 51)])
++        self.l.albums.clear()
++        self.assertEqual(read_ids(self.l, range(1, 51)), [])
++        self.assertEqual(len(self.l.calls), 101)
++
++    def test_replacement_deleted_again_reconciles_original_group(self):
++        self.l.albums[3] = album(3, 'deleted')
++        read_ids(self.l, [1])
++        del self.l.albums[3]
++        self.l.albums[4] = album(4, 'deleted')
++        self.assertEqual(read_ids(self.l, [1]), [album(4, 'deleted')])
++
++    def test_endpoint_namespaces_do_not_share_tombstones(self):
++        read_ids(self.l, [1])
++        other = FakeLidarr(self.store)
++        other.c.url = 'http://other-lidarr'
++        other.albums[1] = album(1, 'deleted')
++        self.assertEqual(read_ids(other, [1]), [album(1, 'deleted')])
++
++    def test_valid_batch_size_and_empty_input(self):
++        self.l.albums = {i: album(i, str(i)) for i in range(2, 123)}
++        self.assertEqual(len(read_ids(self.l, range(2, 123))), 121)
++        self.assertEqual([len(p['albumIds']) for _, p in self.l.calls], [50, 50, 21])
++        self.l.calls.clear()
++        self.assertEqual(read_ids(self.l, []), [])
++        self.assertEqual(self.l.calls, [])
++
++    def test_numeric_id_reuse_does_not_attach_wrong_group(self):
++        self.l.albums[1] = album(1, 'different')
++        self.l.albums[3] = album(3, 'deleted')
++        self.assertEqual(read_ids(self.l, [1]), [album(3, 'deleted')])
++
++    def test_inventory_stale_id_uses_release_group(self):
++        self.store.inventory('album', [album(8, 'inventory')])
++        self.l.albums[10] = album(10, 'inventory')
++        self.assertEqual(preparation_albums(self.l, self.store, {'inventory'}), [album(10, 'inventory')])
++
++    def test_reconciliation_failure_does_not_cache_deletion(self):
++        original = self.l.get
++        def get(path, **params):
++            if 'foreignAlbumId' in params:
++                raise APIError('outage', status=500)
++            return original(path, **params)
++        self.l.get = get
++        with self.assertRaises(APIError):
++            read_ids(self.l, [1])
++        self.assertEqual(self.store.db.execute('SELECT count(*) FROM cache').fetchone()[0], 0)
++
++
++class HTTPBoundsTests(unittest.TestCase):
++    def test_deployed_metadata_adapter_is_preserved(self):
++        from unittest.mock import Mock
++        adapter = SimpleNamespace(fetch_json=Mock(return_value={'ok': True}))
++        url = 'https://musicbrainz.org/ws/2/recording/id'
++        with patch.dict('sys.modules', {'hitdiscovery.metadata_transport': adapter}), patch('hitdiscovery.api.urlopen') as network:
++            self.assertEqual(HTTP().json(url), {'ok': True})
++        adapter.fetch_json.assert_called_once_with(url, headers=None, store=None, cache_ttl=0)
++        network.assert_not_called()
++
++
++    def test_album_500_not_retried_at_transport(self):
++        error = HTTPError('http://lidarr/api/v1/album', 500, 'error', {}, io.BytesIO())
++        with patch('hitdiscovery.api.urlopen', side_effect=error) as send, patch('hitdiscovery.api.time.sleep'):
++            with self.assertRaises(APIError) as raised:
++                HTTP().json('http://lidarr/api/v1/album', retry_500=False)
++        self.assertEqual(raised.exception.status, 500)
++        self.assertEqual(send.call_count, 1)
++
++    def test_other_requests_keep_outage_retries(self):
++        error = HTTPError('http://lidarr/api/v1/queue', 503, 'error', {}, io.BytesIO())
++        with patch('hitdiscovery.api.urlopen', side_effect=error) as send, patch('hitdiscovery.api.time.sleep'):
++            with self.assertRaises(APIError):
++                HTTP().json('http://lidarr/api/v1/queue')
++        self.assertEqual(send.call_count, 4)
++
++    def test_guard_and_album_retry_policy(self):
++        l = Lidarr.__new__(Lidarr)
++        l.c = SimpleNamespace(url='http://lidarr'); l.headers = {}
++        from unittest.mock import Mock
++        l.http = Mock()
++        for path in ('track', 'trackfile'):
++            with self.assertRaises(APIError):
++                l.get(path)
++        l.http.json.assert_not_called()
++        l.get('track', albumId=2)
++        self.assertTrue(l.http.json.call_args.kwargs['retry_500'])
++        l.get('album', albumIds=[1, 2])
++        self.assertFalse(l.http.json.call_args.kwargs['retry_500'])
+--- /dev/null
++++ b/Dockerfile.lidarr-api-fix
+@@ -0,0 +1,6 @@
++# Build once per captured deployed image digest to preserve all existing jobs
++# and service-specific overrides. All three images receive these identical modules.
++ARG BASE_IMAGE
++FROM ${BASE_IMAGE}
++COPY request-bridge/hitdiscovery/api.py /app/hitdiscovery/api.py
++COPY request-bridge/hitdiscovery/album_index.py /app/hitdiscovery/album_index.py
