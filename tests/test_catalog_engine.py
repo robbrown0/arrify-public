@@ -128,7 +128,7 @@ class CatalogEngineTests(unittest.TestCase):
             return ('image/png',b'cover','embedded')
         try:
             with patch.object(catalog,'artwork',side_effect=artwork):
-                self.assertEqual(catalog.bounded_artwork(first)[2],'fallback')
+                self.assertEqual(catalog.bounded_artwork(first)[2],'deferred')
                 self.assertEqual(catalog.bounded_artwork(second),('image/png',b'cover','embedded'))
         finally:
             gate.set()

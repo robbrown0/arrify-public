@@ -286,7 +286,7 @@ class Library:
                 continue
             try:
                 mime, data, source = self.music.bounded_artwork(choice['id'])
-                if source != 'fallback' and data:
+                if source not in ('fallback', 'deferred') and data:
                     return mime, data
             except (OSError, CatalogError):
                 pass
