@@ -866,8 +866,8 @@ class Catalog:
             self.artwork_cache_bytes += size
 
 
-    def artwork(self, track_id: int) -> tuple[str, bytes, str]:
-        """Return confirmed, embedded, folder, or branded fallback artwork."""
+    def _stored_artwork(self, track_id):
+        """Read confirmed/cached artwork without accessing a source filesystem."""
         with self.lock:
             row = self.db.execute("SELECT " + CATALOG_COLUMNS + CATALOG_JOIN +
                                   "WHERE t.id=? AND t.available=1", (track_id,)).fetchone()
@@ -883,14 +883,21 @@ class Catalog:
                     artwork_keys + [artwork_keys[0]],
                 ).fetchone()
             if confirmed is not None:
-                return str(confirmed["mime_type"]), bytes(confirmed["image"]), "confirmed"
+                return row, None, (str(confirmed["mime_type"]), bytes(confirmed["image"]), "confirmed")
 
         cache_key = (track_id, int(self.artwork_version(track_id), 16))
         with self.lock:
             cached = self.artwork_cache.pop(cache_key, None)
             if cached is not None:
                 self.artwork_cache[cache_key] = cached
-                return cached
+                return row, cache_key, cached
+        return row, cache_key, None
+
+    def artwork(self, track_id: int) -> tuple[str, bytes, str]:
+        """Return confirmed, embedded, folder, or branded fallback artwork."""
+        _, cache_key, stored = self._stored_artwork(track_id)
+        if stored is not None:
+            return stored
         _, filename = self._track_file(track_id)
         found = local_artwork(filename)
         value = found if found is not None else (
@@ -901,10 +908,10 @@ class Catalog:
 
     def bounded_artwork(self, track_id):
         from .artwork_reads import ArtworkReads
+        row, _, stored = self._stored_artwork(track_id)
+        if stored is not None:
+            return stored
         with self.lock:
-            row = self.db.execute('SELECT source FROM tracks WHERE id=? AND available=1', (track_id,)).fetchone()
-            if row is None:
-                raise CatalogError('track unavailable')
             if not hasattr(self, '_artwork_reads'):
                 self._artwork_reads = {}
             # Each source has its own small budget: an offline share must not

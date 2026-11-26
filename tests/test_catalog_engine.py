@@ -105,6 +105,17 @@ class CatalogEngineTests(unittest.TestCase):
         track=catalog.db.execute('SELECT id FROM tracks').fetchone()[0]
         with patch.object(catalog,'_track_file',side_effect=AssertionError('must not touch NAS')):
             self.assertEqual(catalog.artwork(track),('image/png',b'confirmed','confirmed'))
+            # A saturated NAS queue must not hide a cover already in the database.
+            from app.artwork_reads import ArtworkReads
+            reader=ArtworkReads(workers=1,capacity=1,timeout=0.025)
+            catalog._artwork_reads={'local':reader}
+            gate=threading.Event()
+            try:
+                reader.read('stalled',lambda:gate.wait(3),None)
+                self.assertEqual(len(reader.pending),1)
+                self.assertEqual(catalog.bounded_artwork(track),('image/png',b'confirmed','confirmed'))
+            finally:
+                gate.set();reader.queue.join()
 
     def test_stalled_source_does_not_block_other_source_artwork(self):
         catalog=self.catalog();catalog.scan()
