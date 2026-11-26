@@ -17,7 +17,7 @@ class CollectionArtTests(unittest.TestCase):
             {'slug':'mix','tracks':3},{'slug':'jazz-for-sleep','tracks':0}])
         try:
             collections=library.collections()
-            self.assertEqual(collections[0]['artworks'],['/api/v1/artwork/1','/api/v1/artwork/3'])
+            self.assertEqual(collections[0]['artworks'],['/api/v1/artwork/1?r=2','/api/v1/artwork/3?r=2'])
             self.assertEqual(collections[1]['artworks'],[])
             self.assertIsNone(collections[1]['artwork'])
         finally:db.close()

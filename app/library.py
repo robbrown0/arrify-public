@@ -188,6 +188,9 @@ class Library:
             confirmed_version = next((confirmed_art[k] for k in Catalog._artwork_keys(row) if k in confirmed_art), None)
             if confirmed_version:
                 t['artwork'] = f"/api/v1/artwork/{t['id']}?v=confirmed-{confirmed_version[:16]}"
+            else:
+                # Refetch default images retained by clients during the outage.
+                t['artwork'] += ('&' if '?' in t['artwork'] else '?') + 'r=2'
             t.update(album_id=aid, artist_id=rid, artist_credit_id=self.key(t['artist']))
             tracks[t['id']] = t
             album = albums.setdefault(aid, {'id':aid, 'name':t['album'] or 'Unknown album', 'artist':artist, 'artwork':t['artwork'], 'year':t.get('year',''), 'track_ids':[]})
@@ -330,7 +333,7 @@ class Library:
                 rows = self.music.db.execute('''SELECT pt.track_id FROM playlist_tracks pt
                     JOIN tracks t ON t.id=pt.track_id WHERE pt.playlist_slug=? AND t.available=1
                     GROUP BY t.artist,t.album ORDER BY min(pt.position) LIMIT 4''',(p['slug'],)).fetchall()
-                p['artworks']=[f"/api/v1/artwork/{row[0]}" for row in rows]
+                p['artworks']=[f"/api/v1/artwork/{row[0]}?r=2" for row in rows]
                 p['artwork']=p['artworks'][0] if rows else None
                 if p['slug']=='jazz-for-sleep':
                     p['description'] = 'Spotify metadata snapshot · 161 entries / 148 unique songs. Only locally matched songs can play.'

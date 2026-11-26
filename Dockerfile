@@ -9,6 +9,9 @@ COPY requirements.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \
     && python -m pip uninstall -y pip && rm /tmp/requirements.txt
 WORKDIR /opt/arrify
+# Operators can bind a stable local parent at /media-sources. Docker then
+# avoids statting a nested NAS directory during startup while it is offline.
+RUN mkdir -p /music && ln -s /media-sources/unr01/Music /music/unr01
 COPY vendor/music-playlists.json /opt/arrify/music-playlists.json
 COPY app /opt/arrify/app
 COPY web /opt/arrify/web
