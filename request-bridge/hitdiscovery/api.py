@@ -5,15 +5,27 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from pathlib import Path
 
-class APIError(RuntimeError): pass
+class APIError(RuntimeError):
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 class HTTP:
     def __init__(self, store=None):
         self.store=store; self.last={}
-    def json(self,url,method='GET',body=None,headers=None,interval=0,cache_ttl=0):
+    def json(self,url,method='GET',body=None,headers=None,interval=0,cache_ttl=0,retry_500=True):
         if cache_ttl and self.store:
             saved=self.store.cached(url,cache_ttl)
             if saved is not None: return saved
+        # Preserve the deployed shared metadata pacing/circuit-breaker adapter.
+        # Older images without that optional module retain their HTTP behavior.
+        if method=='GET' and url.startswith('https://musicbrainz.org/ws/2/'):
+            try:
+                from .metadata_transport import fetch_json
+            except ModuleNotFoundError as exc:
+                if exc.name != __package__+'.metadata_transport': raise
+            else:
+                return fetch_json(url,headers=headers,store=self.store,cache_ttl=cache_ttl)
         host=url.split('/')[2]
         for attempt in range(4 if method=='GET' else 1):
             time.sleep(max(0,interval-(time.monotonic()-self.last.get(host,0))))
@@ -26,10 +38,10 @@ class HTTP:
                 if cache_ttl and self.store: self.store.cache(url,result)
                 return result
             except HTTPError as e:
-                if e.code in (429,500,502,503,504) and method=='GET' and attempt<3:
+                if e.code in (429,502,503,504) + ((500,) if retry_500 else ()) and method=='GET' and attempt<3:
                     delay=e.headers.get('Retry-After','')
                     time.sleep(min(60,float(delay)) if delay.isdigit() else 2**(attempt+1)); continue
-                raise APIError(f'{method} {host}{req.selector.split("?")[0]} HTTP {e.code}') from None
+                raise APIError(f'{method} {host}{req.selector.split("?")[0]} HTTP {e.code}',status=e.code) from None
             except (URLError,TimeoutError,OSError) as e:
                 if method=='GET' and attempt<3:
                     time.sleep(2**attempt); continue
@@ -42,7 +54,9 @@ class Lidarr:
         self.headers={'X-Api-Key':Path(config.key_file).read_text().strip()}
         if not self.headers['X-Api-Key']: raise APIError('Lidarr API key file is empty')
     def get(self,path,**params):
-        return self.http.json(self.c.url.rstrip('/')+'/api/v1/'+path+('?' + urlencode(params,doseq=True) if params else ''),headers=self.headers,interval=.05)
+        if path.strip('/') in ('track','trackfile') and not any(params.get(k) for k in ('albumId','artistId','trackIds','trackFileIds')):
+            raise APIError('Unscoped Lidarr track reads are disabled')
+        return self.http.json(self.c.url.rstrip('/')+'/api/v1/'+path+('?' + urlencode(params,doseq=True) if params else ''),headers=self.headers,interval=.05,retry_500=not (path=='album' or path.startswith('album/')))
     def write(self,path,method,body):
         if not (self.c.acquire and self.c.reviewed): raise APIError('Acquisition disabled: review initial report and enable configuration')
         if self.http.store:

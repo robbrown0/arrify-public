@@ -1,0 +1,6 @@
+# Build once per captured deployed image digest to preserve all existing jobs
+# and service-specific overrides. All three images receive these identical modules.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY request-bridge/hitdiscovery/api.py /app/hitdiscovery/api.py
+COPY request-bridge/hitdiscovery/album_index.py /app/hitdiscovery/album_index.py
