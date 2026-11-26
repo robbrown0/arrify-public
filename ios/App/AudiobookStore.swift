@@ -181,6 +181,7 @@ import CryptoKit
             let account = self.accountGeneration
             do {
                 await self.synchronize(force:true)
+                guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
                 if self.pending[value.id]?.dirty == true && !useRemote {
                     if self.conflict { self.preparing = false; self.message = "Your place changed on another device. Choose which position to keep."; return }
                     // Connectivity failure is not a progress conflict. Let the
@@ -188,6 +189,7 @@ import CryptoKit
                     throw URLError(.notConnectedToInternet)
                 }
                 let musicState = try await self.api.state()
+                guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
                 let result = try await self.api.beginAudiobook(value.id, deviceId:self.music?.deviceId ?? "", revision:musicState.queueRevision, requestId:ticket.uuidString.lowercased(), restart:restart, useRemote:useRemote, previousLease:previousLease)
                 guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
                 if useRemote { self.pending.removeValue(forKey:value.id); self.persist() }
@@ -293,6 +295,7 @@ import CryptoKit
                 if !self.offline, let manifest = self.manifest {
                     do {
                         let state = try await self.api.audiobookState()
+                        guard ticket == self.generation, !Task.isCancelled else { return }
                         if !state.active || state.lease != manifest.lease { self.play(book); return }
                     } catch {
                         if case APIError.rejected(let status, _, _) = error, [401,403,409].contains(status) { throw error }
@@ -398,13 +401,15 @@ import CryptoKit
         } else if offline, state.playing, state.ownerDeviceId != music?.deviceId { pause(); message = "Another device is playing. Your offline place is saved." }
     }
     func stopForMusic() {
-        guard active else { return }; pause(); active = false; presented = false; book = nil; manifest = nil
+        pause(); active = false; presented = false; book = nil; manifest = nil
+        systemArtwork = nil; receiverArtwork = nil
         player.replaceCurrentItem(with:nil); audioSession.invalidate()
     }
     func clear() {
         pause(); accountGeneration = UUID(); heartbeat?.cancel(); heartbeat = nil
         audioSession.invalidate()
         active = false; presented = false; book = nil; manifest = nil; part = nil; enabled = false
+        systemArtwork = nil; receiverArtwork = nil
         canonicalLoaded = false
         player.replaceCurrentItem(with:nil); downloads.clear(); pending = [:]; continueListening = []; queue = []; bookmarks = []
         if let journal { try? FileManager.default.removeItem(at:journal) }; journal = nil
@@ -439,47 +444,75 @@ import CryptoKit
     }
     func addBookmark() async {
         guard let book else { return }
-        do { try await api.audiobookBookmark(book.id, position:position, title:chapter?.title ?? "Bookmark"); bookmarks = (try await api.audiobook(book.id)).bookmarks ?? []; message = "Bookmark saved." }
-        catch { message = "Connect to save this bookmark." }
+        let account = accountGeneration
+        do {
+            try await api.audiobookBookmark(book.id, position:position, title:chapter?.title ?? "Bookmark")
+            guard account == accountGeneration, self.book?.id == book.id else { return }
+            let value = try await api.audiobook(book.id)
+            guard account == accountGeneration, self.book?.id == book.id else { return }
+            bookmarks = value.bookmarks ?? []; message = "Bookmark saved."
+        } catch { if account == accountGeneration { message = "Connect to save this bookmark." } }
     }
     func refreshQueue() async {
-        if let state = try? await api.audiobookState() { queue = state.queue ?? [] }
+        let account = accountGeneration
+        if let state = try? await api.audiobookState(), account == accountGeneration { queue = state.queue ?? [] }
     }
     func queueBook(_ id: String, action: String) async {
-        do { let state = try await api.audiobookState(); try await api.audiobookQueue(id, action:action, revision:state.revision ?? 0); await refreshQueue(); message = action == "next" ? "This book is next in Up Next." : "Added to Up Next." }
-        catch { message = "Your book queue could not be updated. Try again when connected." }
+        let account = accountGeneration
+        do {
+            let state = try await api.audiobookState()
+            guard account == accountGeneration else { return }
+            try await api.audiobookQueue(id, action:action, revision:state.revision ?? 0)
+            guard account == accountGeneration else { return }; await refreshQueue()
+            if account == accountGeneration { message = action == "next" ? "This book is next in Up Next." : "Added to Up Next." }
+        } catch { if account == accountGeneration { message = "Your book queue could not be updated. Try again when connected." } }
     }
     func editQueue(_ id: String, delta: Int? = nil) async {
+        let account = accountGeneration
         do {
             let state = try await api.audiobookState(); var ids = (state.queue ?? []).map(\.id)
+            guard account == accountGeneration else { return }
             guard let index = ids.firstIndex(of:id) else { return }
             if let delta { let target = index + delta; guard ids.indices.contains(target) else { return }; ids.swapAt(index,target) }
             else { ids.remove(at:index) }
-            try await api.audiobookQueue("", action:"order", revision:state.revision ?? 0, ids:ids); await refreshQueue()
-        } catch { message = "Your queue changed. Open Up Next and try again." }
+            try await api.audiobookQueue("", action:"order", revision:state.revision ?? 0, ids:ids)
+            guard account == accountGeneration else { return }; await refreshQueue()
+        } catch { if account == accountGeneration { message = "Your queue changed. Open Up Next and try again." } }
     }
     func playQueued(_ id: String) async {
-        do { play(try await api.audiobook(id)) } catch { message = "This book will be ready when Arrify reconnects." }
+        let account = accountGeneration, token = generation
+        do {
+            let value = try await api.audiobook(id)
+            guard account == accountGeneration, token == generation else { return }; play(value)
+        } catch { if account == accountGeneration, token == generation { message = "This book will be ready when Arrify reconnects." } }
     }
     func removeBookmark(_ mark: AudiobookBookmark) async {
         guard let book else { return }
-        do { try await api.audiobookBookmark(book.id, position:mark.time, title:mark.title, remove:true); bookmarks = (try await api.audiobook(book.id)).bookmarks ?? [] }
-        catch { message = "Connect to remove this bookmark." }
+        let account = accountGeneration
+        do {
+            try await api.audiobookBookmark(book.id, position:mark.time, title:mark.title, remove:true)
+            guard account == accountGeneration, self.book?.id == book.id else { return }
+            let value = try await api.audiobook(book.id)
+            guard account == accountGeneration, self.book?.id == book.id else { return }; bookmarks = value.bookmarks ?? []
+        } catch { if account == accountGeneration { message = "Connect to remove this bookmark." } }
     }
     private func ended() {
         guard active, let book, !preparing, !finishing else { return }
         let end = (part?.start ?? 0)+(part?.duration ?? 0)
         if end < book.duration-1 { seek(end+0.05); return }
         finishing = true; position = book.duration; playing = false; save(finished:true)
+        let account = accountGeneration, token = generation
         Task { [weak self] in
             guard let self else { return }; let lease = self.manifest?.lease
             await self.synchronize(force:true)
+            guard account == self.accountGeneration, token == self.generation else { return }
             if self.preferences.continuous, self.sleepChoice == "off", self.wantsPlayback, self.active,
                self.pending[book.id]?.dirty != true, let lease,
                let state = try? await self.api.audiobookState(), state.active, state.lease == lease,
                let next = state.queue?.first, let value = try? await self.api.audiobook(next.id) {
+                guard account == self.accountGeneration, token == self.generation, self.active, self.wantsPlayback else { return }
                 self.play(value, previousLease:lease)
-            } else { self.wantsPlayback = false; self.message = "You’ve finished " + book.title + "."; self.publish() }
+            } else if account == self.accountGeneration, token == self.generation { self.wantsPlayback = false; self.message = "You’ve finished " + book.title + "."; self.publish() }
         }
     }
     func remote(_ action: String, position: Double?) -> Bool {
