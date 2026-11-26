@@ -154,10 +154,10 @@ struct AudiobookMiniPlayer: View {
                         RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:52, height:52).clipShape(RoundedRectangle(cornerRadius:8))
                         VStack(alignment:.leading) { Text(book.title).font(.headline).lineLimit(1); Text(model.books.chapter?.title ?? book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
                     }.frame(maxWidth:.infinity, alignment:.leading).contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityLabel("Open audiobook player")
+                }.buttonStyle(.plain).accessibilityLabel("Open audiobook player").accessibilityIdentifier("audiobookMiniPlayer")
                 Button { model.books.seek(model.books.position-Double(model.books.preferences.backSeconds)) } label: { Image(systemName:"gobackward").frame(width:44, height:44) }.accessibilityLabel("Skip backward")
                 Button { model.books.toggle() } label: { Image(systemName:model.books.playing || model.books.preparing ? "pause.fill" : "play.fill").frame(width:44, height:44) }.accessibilityLabel(model.books.playing ? "Pause audiobook" : "Play audiobook")
-            }.padding(8).background(.regularMaterial, in:RoundedRectangle(cornerRadius:16)).accessibilityIdentifier("audiobookMiniPlayer")
+            }.padding(8).background(.regularMaterial, in:RoundedRectangle(cornerRadius:16))
         }
     }
 }

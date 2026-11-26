@@ -8,6 +8,26 @@ from unittest.mock import patch
 from tools import testflight_beta_review as review
 
 class BetaReviewTests(unittest.TestCase):
+    def test_beta_notes_select_the_requested_build_and_keep_history(self):
+        self.assertIn('Audiobooks', review.build_notes('42','0.3.0'))
+        self.assertIn('Home and saved songs', review.build_notes('41','0.3.0'))
+        self.assertNotIn('Home and saved songs', review.build_notes('42','0.3.0'))
+        with self.assertRaises(ValueError): review.build_notes('../42','0.3.0')
+        with self.assertRaises(ValueError): review.build_notes('42','../0.3.0')
+
+    def test_private_book_catalog_prevents_beta_submission(self):
+        config = {'username':'review','password':'test-only'}
+        def request(url, method='GET', payload=None, token=None):
+            if url.endswith('/health'): return {'catalog_tracks':6}
+            if url.endswith('/sessions'): return {'access_token':'fixture','session_id':'session'}
+            if url.endswith('/catalog'): return {'total':6,'items':[{'title':t,'artist':'Arrify Studio'} for t in ['First Light','Open Windows','Bright Steps','Quiet Water','Evening Drift','Last Lantern']]}
+            if url.endswith('/audiobooks/library'): return {'total':22,'items':[{'title':'Private content','author':'Private author'}]}
+            if url.endswith('/revoke'): return {}
+            self.fail('Unexpected external request')
+        with patch.dict(os.environ,{'BUILD_NUMBER':'42','APP_VERSION':'0.3.0','ASC_BETA_REVIEW_CONFIG':json.dumps(config)}), patch.object(review,'request',side_effect=request), patch.object(review,'signing_token') as sign:
+            with self.assertRaisesRegex(RuntimeError,'two generated'): review.main()
+            sign.assert_not_called()
+
     def test_der_signature_handles_sign_padding_and_rejects_malformed(self):
         r=b'\x00\x80'+b'\x01'*31; s=b'\x01'
         der=b'\x30'+bytes([len(r)+len(s)+4])+b'\x02'+bytes([len(r)])+r+b'\x02'+bytes([len(s)])+s

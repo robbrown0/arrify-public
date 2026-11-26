@@ -43,7 +43,9 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(continuous.waitForExistence(timeout:10)); XCTAssertEqual(continuous.value as? String,"0")
         let attachment = XCTAttachment(screenshot:app.screenshot()); attachment.name = "Audiobook player"; attachment.lifetime = .keepAlways; add(attachment)
         app.buttons["Close audiobook player"].tap()
-        XCTAssertTrue(app.otherElements["audiobookMiniPlayer"].waitForExistence(timeout:10))
+        XCTAssertTrue(app.buttons["audiobookMiniPlayer"].waitForExistence(timeout:10))
+        app.buttons["audiobookMiniPlayer"].tap()
+        XCTAssertTrue(app.buttons["audiobookPlayPause"].waitForExistence(timeout:10))
     }
     @MainActor func testSongsInitialFailureAndVisiblePageRetry() { checkCatalogPaging("Songs") }
     @MainActor func testAlbumsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Albums") }
@@ -103,7 +105,14 @@ final class LaunchTests: XCTestCase {
             if retryFullyVisible() { break }
             list.swipeUp(velocity: .fast)
         }
-        XCTAssertTrue(retryFullyVisible(), "Reaching the boundary must show the next-page retry")
+        // Inserting the failure footer during a fling changes the content bounds.
+        // Let that layout settle, then bring the actual Retry row into view.
+        let visibleRetry = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in retryFullyVisible() }, object:nil)
+        if XCTWaiter.wait(for:[visibleRetry], timeout:2) != .completed {
+            list.swipeUp(velocity:.slow)
+        }
+        let settledRetry = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in retryFullyVisible() }, object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[settledRetry], timeout:5), .completed, "Reaching the boundary must show the next-page retry")
         // The frame is verified inside the list; avoid UIKit's transient invalid
         // suggested activation point while the newly inserted footer settles.
         retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()

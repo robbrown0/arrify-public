@@ -33,8 +33,16 @@ final class AudiobookDownloadTests: XCTestCase {
         XCTAssertFalse(downloads.complete("book-one")); XCTAssertNotNil(downloads.errors["book-one"])
         downloads.clear(); XCTAssertTrue(downloads.records.isEmpty); await api.logout()
     }
-    @MainActor private func makeAPI(fail: Bool = false) async throws -> APIClient {
-        let api = APIClient(transport:DownloadContractTransport(fail:fail), store:UITestStore())
+    @MainActor func testEmptySuccessfulResponseNeverBecomesAnOfflineBook() async throws {
+        let api = try await makeAPI(empty:true)
+        let downloads = AudiobookDownloads(api:api, configuration:Self.configuration)
+        await downloads.download("book-one")
+        for _ in 0..<300 where downloads.working.contains("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertFalse(downloads.complete("book-one")); XCTAssertNotNil(downloads.errors["book-one"])
+        downloads.clear(); await api.logout()
+    }
+    @MainActor private func makeAPI(fail: Bool = false, empty: Bool = false) async throws -> APIClient {
+        let api = APIClient(transport:DownloadContractTransport(fail:fail, empty:empty), store:UITestStore())
         try await api.login(endpoint:"https://book-download.invalid", username:"fixture", password:"fixture", deviceName:"Test")
         return api
     }
@@ -45,8 +53,9 @@ final class AudiobookDownloadTests: XCTestCase {
 
 private actor DownloadContractTransport: HTTPTransport {
     let fail: Bool
+    let empty: Bool
     let session = UUID().uuidString.lowercased()
-    init(fail: Bool) { self.fail = fail }
+    init(fail: Bool, empty: Bool = false) { self.fail = fail; self.empty = empty }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
         let object: [String:Any]
@@ -55,7 +64,7 @@ private actor DownloadContractTransport: HTTPTransport {
         } else if path.hasSuffix("sessions") || path.hasSuffix("refresh") {
             object = ["access_token":"fixture", "refresh_token":"fixture", "expires_in":3600,"refresh_expires_in":86400,"session_id":session]
         } else if path.hasSuffix("/audiobooks/download") {
-            let lease = String(repeating:fail ? "b" : "a", count:43)
+            let lease = String(repeating:fail ? "b" : empty ? "c" : "a", count:43)
             let book: [String:Any] = ["id":"book-one","library_id":"books","title":"Downloaded story","author":"Author","narrator":"Reader","series":"","description":"","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":1,
                 "parts":[["index":0,"start":0,"duration":1,"size_bytes":BookAudioProtocol.audio.count,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+lease+"/0"]],"chapters":[["title":"Chapter","start":0,"end":1]],"progress":["currentTime":0,"lastUpdate":0,"isFinished":false]]
             object = ["book":book,"position":0,"lease":lease,"revision":0,"preferences":["visible":true,"continuous":false,"speed":1,"back_seconds":30,"forward_seconds":30]]
@@ -80,7 +89,7 @@ private final class BookAudioProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         guard let url = request.url else { return }
         let failed = url.path.contains(String(repeating:"b",count:43))
-        let bytes = failed ? Data() : Self.audio
+        let bytes = failed || url.path.contains(String(repeating:"c",count:43)) ? Data() : Self.audio
         let response = HTTPURLResponse(url:url,statusCode:failed ? 503 : 200,httpVersion:"HTTP/1.1",headerFields:["Content-Type":"audio/wav","Content-Length":String(bytes.count)])!
         client?.urlProtocol(self,didReceive:response,cacheStoragePolicy:.notAllowed)
         client?.urlProtocol(self,didLoad:bytes); client?.urlProtocolDidFinishLoading(self)

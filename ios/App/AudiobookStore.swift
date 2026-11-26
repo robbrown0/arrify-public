@@ -40,6 +40,7 @@ import CryptoKit
     private var lastAudioProgress = Date()
     private var recoveryAttempts = 0
     private var systemArtwork: MPMediaItemArtwork?
+    private var receiverArtwork: Data?
     private var canonicalLoaded = false
     private(set) var enabled = false
     var preferences = AudiobookPreferences()
@@ -212,10 +213,11 @@ import CryptoKit
         music?.suspendForAudiobook(); self.book = value; self.manifest = manifest; self.position = position
         self.offline = offline; active = true; wantsPlayback = true; part = nil; finishing = false
         bookmarks = value.bookmarks ?? []; sleepChoice = "off"; sleepDeadline = nil; sleepChapter = nil
-        systemArtwork = nil; recoveryAttempts = 0; lastAudioPosition = position; lastAudioProgress = Date()
+        systemArtwork = nil; receiverArtwork = nil; recoveryAttempts = 0; lastAudioPosition = position; lastAudioProgress = Date()
         Task { [weak self] in
             guard let self, let image = await self.music?.artworkStore.image(value.cover, pixels:1024), self.book?.id == value.id, self.active else { return }
-            self.systemArtwork = NowPlayingArtwork.make(image:image); self.publish()
+            self.systemArtwork = NowPlayingArtwork.make(image:image)
+            self.receiverArtwork = image.jpegData(compressionQuality:0.9); self.publish()
         }
         if pending[value.id]?.dirty != true {
             var checkpoint = AudiobookCheckpoint(book:value, deviceId:music?.deviceId ?? "")
@@ -242,6 +244,7 @@ import CryptoKit
                 guard token == generation, !Task.isCancelled else { throw CancellationError() }
                 let item = AVPlayerItem(url:address); item.audioTimePitchAlgorithm = .spectral; part = selected; currentURL = address
                 player.replaceCurrentItem(with:item)
+                publish()
                 let deadline = Date().addingTimeInterval(15)
                 while item.status == .unknown, Date() < deadline {
                     try await Task.sleep(for:.milliseconds(100))
@@ -400,6 +403,7 @@ import CryptoKit
     }
     func clear() {
         pause(); accountGeneration = UUID(); heartbeat?.cancel(); heartbeat = nil
+        audioSession.invalidate()
         active = false; presented = false; book = nil; manifest = nil; part = nil; enabled = false
         canonicalLoaded = false
         player.replaceCurrentItem(with:nil); downloads.clear(); pending = [:]; continueListening = []; queue = []; bookmarks = []
@@ -502,6 +506,8 @@ import CryptoKit
     }
     private func publish() {
         guard active, let book else { return }
+        player.currentItem?.externalMetadata = ReceiverMetadata.make(title:book.title, artist:book.author,
+            album:chapter?.title ?? "Audiobook", artwork:receiverArtwork)
         var info: [String:Any] = [MPMediaItemPropertyTitle:book.title, MPMediaItemPropertyArtist:book.author,
             MPMediaItemPropertyAlbumTitle:chapter?.title ?? "Audiobook", MPMediaItemPropertyPlaybackDuration:book.duration,
             MPNowPlayingInfoPropertyElapsedPlaybackTime:position, MPNowPlayingInfoPropertyPlaybackRate:playing ? preferences.speed : 0,

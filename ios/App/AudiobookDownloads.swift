@@ -217,6 +217,8 @@ private final class BookDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         lock.lock(); defer { lock.unlock() }; guard valid, let name = name(downloadTask),
             let response = downloadTask.response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else { return }
         do {
+            let bytes = try location.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
+            guard bytes > 0 else { return }
             let destination = root.appending(path:name)
             try? FileManager.default.removeItem(at:destination)
             try FileManager.default.moveItem(at:location, to:destination)
