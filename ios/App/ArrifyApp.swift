@@ -226,7 +226,7 @@ struct MainView: View {
             if UIDevice.current.userInterfaceIdiom == .pad {
                 TabletShell(model: model) { showPlayer = true }
             } else { tabs }
-        }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
+        }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { if model.books.active { model.books.presented = true } else { showPlayer = true } } }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
         .onChange(of: scenePhase) { if scenePhase == .active { Task { await model.books.refresh() } } }

@@ -133,7 +133,10 @@ struct AudiobookDetail: View {
         if downloads.complete(book.id) {
             HStack { Label("Downloaded", systemImage:"checkmark.circle.fill").foregroundStyle(.green); Spacer(); Button("Remove download", role:.destructive) { Task { await downloads.remove(book.id) } } }.frame(minHeight:44)
         } else if downloads.working.contains(book.id) {
-            HStack { ProgressView(); Text("Downloading · \(downloads.completedParts(book.id)) of \(book.parts?.count ?? 1) parts"); Spacer(); Button("Pause") { Task { await downloads.pause(book.id) } } }.frame(minHeight:44)
+            VStack(alignment:.leading) {
+                ProgressView(value:downloads.fraction(book.id))
+                HStack { Text("Downloading · \(Int(downloads.fraction(book.id)*100))%"); Spacer(); Button("Pause") { Task { await downloads.pause(book.id) } } }.frame(minHeight:44)
+            }
         } else {
             Button { Task { await downloads.download(book.id) } } label: { Label(downloads.records[book.id] == nil ? "Download for offline listening" : "Resume download", systemImage:"arrow.down.circle").frame(minHeight:44) }
         }

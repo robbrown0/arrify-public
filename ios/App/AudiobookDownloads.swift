@@ -13,6 +13,7 @@ import CryptoKit
         var finished: Bool?
     }
     private let api: APIClient
+    private let configuration: @MainActor (String) -> URLSessionConfiguration
     private var root: URL?
     private var session: URLSession?
     private var delegate: BookDownloadDelegate?
@@ -20,15 +21,18 @@ import CryptoKit
     private(set) var records: [String: Record] = [:]
     private(set) var working: Set<String> = []
     private(set) var errors: [String: String] = [:]
+    private var transferProgress: [String: (Int64, Int64)] = [:]
     private(set) var revision = 0
-    init(api: APIClient) { self.api = api }
+    init(api: APIClient, configuration: @escaping @MainActor (String) -> URLSessionConfiguration = { URLSessionConfiguration.background(withIdentifier:$0) }) {
+        self.api = api; self.configuration = configuration
+    }
     func configure() async {
         guard let scope = try? await api.sessionScope() else { return }
         let key = SHA256.hash(data:Data(scope.utf8)).map { String(format:"%02x", $0) }.joined()
         let directory = URL.applicationSupportDirectory.appending(path:"Audiobooks/" + key)
         if root == directory { return }
         session?.invalidateAndCancel(); epoch = UUID(); let ticket = epoch
-        root = directory; records = [:]; errors = [:]; working = []
+        root = directory; records = [:]; errors = [:]; working = []; transferProgress = [:]
         do {
             try FileManager.default.createDirectory(at:directory, withIntermediateDirectories:true,
                 attributes:[.protectionKey:FileProtectionType.completeUntilFirstUserAuthentication])
@@ -37,16 +41,22 @@ import CryptoKit
                 if let data = try? Data(contentsOf:file), let value = try? JSONDecoder().decode(Record.self, from:data) { records[value.manifest.book.id] = value }
             }
             let identifier = "com.robnets.arrify.books." + key
-            let handler = BookDownloadDelegate(root:directory, identifier:identifier) { [weak self] book, error in
+            let handler = BookDownloadDelegate(root:directory, identifier:identifier, progress:{ [weak self] book, received, expected in
+                Task { @MainActor in
+                    guard let self, self.epoch == ticket else { return }
+                    self.transferProgress[book] = (received, expected)
+                }
+            }) { [weak self] book, error in
                 Task { @MainActor in
                     guard let self, self.epoch == ticket else { return }
                     self.working.remove(book); self.errors[book] = error
+                    self.transferProgress.removeValue(forKey:book)
                     self.revision += 1
                     if error == nil { await self.schedule(book) }
                 }
             }
             delegate = handler
-            let config = URLSessionConfiguration.background(withIdentifier:identifier)
+            let config = configuration(identifier)
             config.sessionSendsLaunchEvents = true; config.isDiscretionary = false
             config.waitsForConnectivity = true; config.httpMaximumConnectionsPerHost = 2
             config.timeoutIntervalForResource = 3600; config.httpCookieStorage = nil; config.urlCache = nil
@@ -79,6 +89,18 @@ import CryptoKit
         guard let book = records[id]?.manifest.book else { return 0 }
         return book.parts?.filter { file(book, part:$0) != nil }.count ?? 0
     }
+    func fraction(_ id: String) -> Double {
+        guard let book = records[id]?.manifest.book, let parts = book.parts, !parts.isEmpty else { return 0 }
+        if complete(id) { return 1 }
+        let progress = transferProgress[id]
+        let total = parts.reduce(Int64(0)) { $0 + ($1.sizeBytes ?? 0) }
+        if total > 0 {
+            let completed = parts.filter { file(book, part:$0) != nil }.reduce(Int64(0)) { $0 + ($1.sizeBytes ?? 0) }
+            return min(0.99, Double(completed+(progress?.0 ?? 0))/Double(total))
+        }
+        let current = (progress?.1 ?? 0) > 0 ? Double(progress?.0 ?? 0)/Double(progress!.1) : 0
+        return min(0.99,(Double(completedParts(id))+current)/Double(parts.count))
+    }
     private func persist(_ id: String) throws {
         guard let root, let record = records[id] else { return }
         try JSONEncoder().encode(record).write(to:root.appending(path:id + ".json"), options:[.atomic, .completeFileProtectionUntilFirstUserAuthentication])
@@ -95,7 +117,8 @@ import CryptoKit
             }
             guard epoch == ticket, let root else { return }
             let size = (manifest.book.parts ?? []).reduce(Int64(0)) { $0 + ($1.sizeBytes ?? 0) }
-            let capacity = try root.resourceValues(forKeys:[.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage ?? 0
+            let storage = try root.resourceValues(forKeys:[.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+            let capacity = storage.volumeAvailableCapacityForImportantUsage ?? Int64(storage.volumeAvailableCapacity ?? 0)
             guard capacity > min(size, Int64.max - 256*1024*1024) + 256*1024*1024 else {
                 errors[id] = "There isn’t enough free space to download this book."; return
             }
@@ -149,13 +172,13 @@ import CryptoKit
         guard let root else { return }; let ticket = epoch
         if let session { for task in await session.allTasks where task.taskDescription?.hasPrefix(id + "/") == true { task.cancel() } }
         guard epoch == ticket else { return }
-        records.removeValue(forKey:id); working.remove(id); errors.removeValue(forKey:id)
+        records.removeValue(forKey:id); working.remove(id); errors.removeValue(forKey:id); transferProgress.removeValue(forKey:id)
         try? FileManager.default.removeItem(at:root.appending(path:id)); try? FileManager.default.removeItem(at:root.appending(path:id + ".json")); revision += 1
     }
     func clear() {
         epoch = UUID(); delegate?.invalidate(); session?.invalidateAndCancel(); session = nil; delegate = nil
         if let root { try? FileManager.default.removeItem(at:root) }
-        root = nil; records = [:]; working = []; errors = [:]; revision += 1
+        root = nil; records = [:]; working = []; errors = [:]; transferProgress = [:]; revision += 1
     }
     func checkpoint(_ id: String, position: Double? = nil, remoteStamp: Double? = nil, finished: Bool? = nil) {
         guard records[id] != nil else { return }
@@ -172,14 +195,23 @@ private final class BookDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
     let root: URL
     let identifier: String
     let completion: @Sendable (String, String?) -> Void
+    let progress: @Sendable (String, Int64, Int64) -> Void
     private let lock = NSLock()
     private var valid = true
-    init(root: URL, identifier: String, completion: @escaping @Sendable (String, String?) -> Void) {
-        self.root = root; self.identifier = identifier; self.completion = completion
+    private var progressAt: [Int:TimeInterval] = [:]
+    init(root: URL, identifier: String, progress: @escaping @Sendable (String, Int64, Int64) -> Void, completion: @escaping @Sendable (String, String?) -> Void) {
+        self.root = root; self.identifier = identifier; self.progress = progress; self.completion = completion
     }
     func invalidate() { lock.lock(); defer { lock.unlock() }; valid = false }
     private func name(_ task: URLSessionTask) -> String? {
         guard let value = task.taskDescription, value.range(of:"^[A-Za-z0-9_-]{1,128}/[a-f0-9-]{36}/[0-9]{1,4}\\.(mp3|m4b|flac|wav|aac|ogg)$", options:.regularExpression) != nil else { return nil }; return value
+    }
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        lock.lock(); defer { lock.unlock() }
+        let now = Date.timeIntervalSinceReferenceDate
+        guard valid, let name = name(downloadTask), now-(progressAt[downloadTask.taskIdentifier] ?? 0) >= 0.25 else { return }
+        progressAt[downloadTask.taskIdentifier] = now
+        progress(String(name.split(separator:"/")[0]), max(0,totalBytesWritten), max(0,totalBytesExpectedToWrite))
     }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         lock.lock(); defer { lock.unlock() }; guard valid, let name = name(downloadTask),
@@ -194,6 +226,7 @@ private final class BookDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
         lock.lock(); defer { lock.unlock() }; guard valid, let name = name(task) else { return }
+        progressAt.removeValue(forKey:task.taskIdentifier)
         let book = String(name.split(separator:"/")[0])
         if let data = (error as NSError?)?.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
             try? data.write(to:root.appending(path:name + ".resume"), options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication])

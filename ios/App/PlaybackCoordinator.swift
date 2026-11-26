@@ -428,6 +428,7 @@ import Network
     func suspendForAudiobook() {
         externalOutput = true; permission.userPause(); player.pause()
         cancelPreparation(); cancelRecovery(); activationTask?.cancel(); activationTask = nil
+        if busy || preparationSeeking { desiredKey = nil; loadedKey = nil; busy = false; preparationSeeking = false }
         audioSession.invalidate()
         // Retain downloaded successors and the music queue for the next music tap.
         Task { await remoteActivity.stop() }
@@ -793,6 +794,9 @@ import Network
         state = PlaybackState.merging(update, into: state)
         guard let metadataState = state else { return }
         onPlaybackState?(metadataState)
+        // Music polling still observes ownership, but must not clear a book's
+        // Lock Screen metadata or replace its system controls while suspended.
+        if externalOutput { player.pause(); return }
         let incomingKey = metadataState.currentTrackId.map { "\($0):\(metadataState.ownerEpoch):\(metadataState.playId)" }
         // Acquire protection while the old audio is still running, before pausing
         // or removing its item. Starting it inside the asynchronous prepare task

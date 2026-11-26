@@ -75,10 +75,7 @@ import CryptoKit
         self.api = api; self.music = music; downloads = AudiobookDownloads(api:api)
         self.localMedia = localMedia
         self.audioSession = audioSession ?? SystemPlaybackAudioSession()
-        observer = player.addPeriodicTimeObserver(forInterval:CMTime(seconds:0.5, preferredTimescale:600), queue:.main) { @Sendable [weak self] time in
-            let seconds = time.seconds
-            MainActor.assumeIsolated { self?.tick(seconds) }
-        }
+        installTimeObserver()
         notifications.append(NotificationCenter.default.addObserver(forName:.AVPlayerItemDidPlayToEndTime, object:nil, queue:.main) { @Sendable [weak self] note in
             let identity = (note.object as? AVPlayerItem).map(ObjectIdentifier.init)
             MainActor.assumeIsolated { if let self, identity == self.player.currentItem.map(ObjectIdentifier.init) { self.ended() } }
@@ -103,10 +100,21 @@ import CryptoKit
         })
         for name in [AVAudioSession.mediaServicesWereLostNotification, AVAudioSession.mediaServicesWereResetNotification] {
             notifications.append(NotificationCenter.default.addObserver(forName:name, object:nil, queue:.main) { @Sendable [weak self] _ in
-                MainActor.assumeIsolated { guard let self, self.active else { return }; self.pause(); self.player.replaceCurrentItem(with:nil); self.audioSession.invalidate(); self.message = "Audio was reset. Tap Play to continue from your saved place." }
+                MainActor.assumeIsolated { guard let self, self.active else { return }; self.pause(); self.resetPlayer(); self.audioSession.invalidate(); self.message = "Audio was reset. Tap Play to continue from your saved place." }
             })
         }
     }
+    private func installTimeObserver() {
+        observer = player.addPeriodicTimeObserver(forInterval:CMTime(seconds:0.5, preferredTimescale:600), queue:.main) { @Sendable [weak self] time in
+            let seconds = time.seconds
+            MainActor.assumeIsolated { self?.tick(seconds) }
+        }
+    }
+    private func resetPlayer() {
+        if let observer { player.removeTimeObserver(observer) }
+        player = AVPlayer(); part = nil; currentURL = nil; installTimeObserver()
+    }
+
     func restore() async {
         let ticket = accountGeneration
         guard let scope = try? await api.sessionScope() else { return }
