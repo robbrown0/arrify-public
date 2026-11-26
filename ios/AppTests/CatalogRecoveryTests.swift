@@ -81,7 +81,7 @@ final class CatalogRecoveryTests: XCTestCase {
     func testBlockedArtworkConnectionsDoNotQueueCatalogRequests() async throws {
         let fixture = try ArtworkConnectionFixture()
         defer { fixture.stop() }
-        for _ in 0..<100 where fixture.port == nil { try await Task.sleep(for:.milliseconds(10)) }
+        for _ in 0..<500 where fixture.port == nil { try await Task.sleep(for:.milliseconds(10)) }
         let port = try XCTUnwrap(fixture.port)
         let transport = SessionTransport()
         let images = (0..<6).map { index in Task { try? await transport.send(URLRequest(url:URL(string:"http://127.0.0.1:\(port)/api/v1/artwork/\(index)")!)) } }
@@ -137,10 +137,16 @@ private final class ArtworkConnectionFixture: @unchecked Sendable {
     private let lock = NSLock()
     private var connections: [NWConnection] = []
     private var count = 0
-    var port: UInt16? { listener.port?.rawValue }
+    private var readyPort: UInt16?
+    var port: UInt16? { lock.lock(); defer { lock.unlock() }; return readyPort }
     var imageCount: Int { lock.lock(); defer { lock.unlock() }; return count }
     init() throws {
         listener = try NWListener(using:.tcp,on:.any)
+        listener.stateUpdateHandler = { [weak self] state in
+            guard let self, case .ready = state,
+                  let port = self.listener.port?.rawValue, port != 0 else { return }
+            self.lock.lock(); self.readyPort = port; self.lock.unlock()
+        }
         listener.newConnectionHandler = { [weak self] connection in
             guard let self else { connection.cancel(); return }
             self.lock.lock(); self.connections.append(connection); self.lock.unlock()
