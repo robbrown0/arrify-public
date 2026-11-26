@@ -59,6 +59,7 @@ struct LibraryHome: View {
                     NavigationLink { BrowserScreen(model: model, title: "Albums", kind: "albums") } label: { Label("Albums", systemImage: "square.stack") }
                     NavigationLink { BrowserScreen(model: model, title: "Artists", kind: "artists") } label: { Label("Artists", systemImage: "music.mic") }
                     NavigationLink { PlaylistLibraryView(model: model) } label: { Label("Playlists", systemImage: "music.note.list") }
+                    if model.books.visible { NavigationLink { AudiobookShelf(model:model) } label: { Label("Audiobooks", systemImage:"book.closed") } }
                     NavigationLink { MoodScreen(model: model) } label: { Label("Moods", systemImage: "circle.lefthalf.filled") }
                 }.font(.title3).listRowBackground(Color.white.opacity(0.04))
                 if let overview = model.library.overview {
@@ -985,6 +986,20 @@ struct HomeScreen: View {
                             NavigationLink("Albums") { BrowserScreen(model: model, title: "Albums", kind: "albums") }
                             NavigationLink("Artists") { BrowserScreen(model: model, title: "Artists", kind: "artists") }
                         }.frame(minHeight: 44)
+                    }
+                    if model.books.visible && !model.books.continueListening.isEmpty {
+                        VStack(alignment:.leading, spacing:16) {
+                            Text("Continue listening").font(.title2.bold())
+                            ForEach(model.books.continueListening.prefix(4)) { book in
+                                Button { model.books.play(book) } label: {
+                                    HStack(spacing:16) {
+                                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:72, height:72).clipShape(RoundedRectangle(cornerRadius:10))
+                                        VStack(alignment:.leading, spacing:5) { Text(book.title).font(.headline); Text(book.author).font(.subheadline).foregroundStyle(.secondary); Text(AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary) }
+                                        Spacer(); Image(systemName:"play.circle.fill").font(.largeTitle)
+                                    }.frame(maxWidth:.infinity, minHeight:80).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
+                            }
+                        }
                     }
                     if let overview = model.library.overview {
                         recentSongs(overview.recentTracks ?? [])

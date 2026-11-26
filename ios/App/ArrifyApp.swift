@@ -8,6 +8,7 @@ import AVKit
     let library: LibraryStore
     let favorites: FavoritesStore
     let artwork: ArtworkStore
+    let books: AudiobookStore
     var brandIcon: UIImage?
     var signedIn = false
     var restoring = true
@@ -37,6 +38,10 @@ import AVKit
         favorites = FavoritesStore(api: api)
         library = LibraryStore(api: api)
         artwork = playback.artworkStore
+        books = AudiobookStore(api:api, music:playback)
+        playback.onExplicitMusic = { [weak books] in books?.stopForMusic() }
+        playback.onPlaybackState = { [weak books] state in books?.observe(state) }
+        playback.externalControl = { [weak books] action, position in books?.remote(action, position:position) ?? false }
         playback.onHistoryRecorded = { [weak library] in
             library?.scheduleRefresh()
         }
@@ -49,12 +54,14 @@ import AVKit
         async let home: Void = library.refresh()
         async let savedSongs: Void = favorites.refresh()
         _ = await (home, savedSongs)
+        Task { await books.refresh() }
     }
     func recoverReads() async {
         guard signedIn else { return }
         async let home: Void = recoverLibrary()
         async let savedSongs: Void = recoverFavorites()
         _ = await (home, savedSongs)
+        await books.networkAvailable()
     }
     private func recoverLibrary() async { if library.needsRecovery, !library.loading { await library.refresh() } }
     private func recoverFavorites() async { if favorites.needsRecovery, !favorites.refreshing { await favorites.refresh() } }
@@ -68,7 +75,7 @@ import AVKit
             return
         }
         guard event == "sign-in-required" else { return }
-        playback.stop(); library.clear(); favorites.clear(); artwork.clear()
+        books.clear(); playback.stop(); library.clear(); favorites.clear(); artwork.clear()
         signedIn = false; error = "Your session has ended. Please sign in again."
         await playback.remoteActivity.stop()
     }
@@ -86,12 +93,14 @@ import AVKit
         }
         do {
             if let saved = try await api.restore() { endpoint = saved; homeEndpoint = await api.connectionAddresses()?.homeAddress ?? ""; signedIn = true; restoring = false; await playback.remoteActivity.restoreForSession(); if signedIn { playback.start() } }
+            if signedIn { Task { await books.restore() } }
         } catch { self.error = error.localizedDescription }
     }
     func login(username: String, password: String) async {
         do {
             try await api.login(endpoint: endpoint, homeEndpoint: homeEndpoint, username: username, password: password, deviceName: UIDevice.current.model)
             signedIn = true; error = nil; await playback.remoteActivity.restoreForSession(); if signedIn { playback.start() }
+            Task { await books.restore() }
         } catch { self.error = error.localizedDescription }
     }
     func refreshBranding() async {
@@ -109,10 +118,11 @@ import AVKit
         await logout()
         accountDeleted = true
     }
-    func logout() async { await playback.remoteActivity.stop(); brandIcon = nil; playback.stop(); library.clear(); favorites.clear(); artwork.clear(); signedIn = false; await api.logout() }
+    func logout() async { books.clear(); await playback.remoteActivity.stop(); brandIcon = nil; playback.stop(); library.clear(); favorites.clear(); artwork.clear(); signedIn = false; await api.logout() }
 }
 
 @main struct ArrifyApp: App {
+    @UIApplicationDelegateAdaptor(ArrifyApplicationDelegate.self) private var applicationDelegate
     @State private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
     var body: some Scene {
@@ -212,6 +222,7 @@ struct MainView: View {
         }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
+        .fullScreenCover(isPresented: $model.books.presented) { AudiobookPlayer(model:model) }
         .task { await model.refreshBranding(); await model.favorites.refresh() }
         .task(id: scenePhase == .active && (model.library.needsRecovery || model.favorites.needsRecovery)) {
             guard scenePhase == .active else { return }
@@ -248,6 +259,8 @@ struct MainView: View {
     }
     private var playbackFooter: some View {
         VStack(spacing: 8) {
+            if model.books.active { AudiobookMiniPlayer(model:model) }
+            else {
             // Keep status beside playback controls and out of search fields.
             if model.playback.needsTakeover {
                 PlaybackTakeoverBanner(playback: model.playback)
@@ -267,6 +280,7 @@ struct MainView: View {
                 } else {
                     EmptyPlayerView { libraryRoot = UUID(); selectedTab = "Library" }
                 }
+            }
             }
         }.padding(.horizontal, 16).padding(.bottom, 8)
     }
@@ -288,6 +302,7 @@ struct SettingsView: View {
                 }
                 Section { Link("Privacy policy", destination: URL(string: "https://arrify.robnets.com/privacy")!).accessibilityIdentifier("privacyPolicy") }
                 Section("Connection") { NavigationLink("Server addresses") { ServerAddressesView(model: model) } }
+                if model.books.enabled { Section { NavigationLink("Audiobooks") { AudiobookSettings(books:model.books) } } }
                 Section("Audio") {
                     Picker("Quality", selection: Binding(get: { model.playback.profile }, set: { model.playback.profile = $0 })) {
                         Text("Original").tag("original"); Text("AAC").tag("aac"); Text("MP3").tag("mp3")

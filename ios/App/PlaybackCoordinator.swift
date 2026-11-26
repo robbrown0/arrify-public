@@ -421,6 +421,17 @@ import Network
         if transitionTask != .invalid { backgroundTasks.end(transitionTask); transitionTask = .invalid }
     }
     var onNetworkAvailable: (() -> Void)?
+    var onExplicitMusic: (() -> Void)?
+    var onPlaybackState: ((PlaybackState) -> Void)?
+    var externalControl: ((String, Double?) -> Bool)?
+    private var externalOutput = false
+    func suspendForAudiobook() {
+        externalOutput = true; permission.userPause(); player.pause()
+        cancelPreparation(); cancelRecovery(); activationTask?.cancel(); activationTask = nil
+        audioSession.invalidate()
+        // Retain downloaded successors and the music queue for the next music tap.
+        Task { await remoteActivity.stop() }
+    }
     @ObservationIgnored private var receivedNetworkPath = false
     func start() {
         guard pollTask == nil else { return }
@@ -460,6 +471,7 @@ import Network
         }
     }
     func stop() {
+        externalOutput = false
         cancelRecovery(); resumeCheckpoint = nil; preparationSeeking = false; playbackFailed = false; recoveryUsed = false; mediaWindow = [:]; pendingPause = false; reportedHistoryKey = nil; historyRequestKey = nil
         networkMonitor?.cancel(); networkMonitor = nil; serverConnection = ServerConnection()
         localPeer.stop()
@@ -609,6 +621,12 @@ import Network
     }
     func send(_ action: String, ids: [Int]? = nil, seek: Double? = nil, automatic: Bool = false,
               source: LibrarySource? = nil, trackId: Int? = nil, shuffle: Bool? = nil, mode: String? = nil, index: Int? = nil, from: Int? = nil, to: Int? = nil, revision: Int? = nil) async {
+        if !automatic, ["play", "resume", "next", "previous", "takeover", "seek"].contains(action) {
+            onExplicitMusic?(); externalOutput = false
+            let commands = MPRemoteCommandCenter.shared()
+            commands.nextTrackCommand.isEnabled = true; commands.previousTrackCommand.isEnabled = true
+            commands.skipBackwardCommand.isEnabled = false; commands.skipForwardCommand.isEnabled = false
+        }
         let navigation = !automatic && ["next", "previous"].contains(action)
         if navigation && (navigationPending || endedInFlight) {
             PlaybackDiagnostics.event("navigation-coalesced")
@@ -773,6 +791,7 @@ import Network
         let previous = state
         state = PlaybackState.merging(update, into: state)
         guard let metadataState = state else { return }
+        onPlaybackState?(metadataState)
         let incomingKey = metadataState.currentTrackId.map { "\($0):\(metadataState.ownerEpoch):\(metadataState.playId)" }
         // Acquire protection while the old audio is still running, before pausing
         // or removing its item. Starting it inside the asynchronous prepare task
@@ -1362,6 +1381,7 @@ import Network
         }
     }
     private func playIfAllowed() {
+        guard !externalOutput else { return }
         guard loadedKey != completedKey, !busy, !preparationSeeking, !recovering, !playbackFailed else { return }
         if player.currentItem?.status == .failed { recoverServerRoute(); return }
         guard permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: loadedKey != nil) else { return }
@@ -1395,6 +1415,7 @@ import Network
         item.externalMetadata = ReceiverMetadata.make(track: track, artwork: receiverArtwork)
     }
     private func publishNowPlaying() {
+        guard !externalOutput else { return }
         guard ownsOutput, permission.enabled, loadedKey != nil, let track else { return }
         let signature = "\(track.id):\(artworkRevision):\(Int(duration)):\(state?.playId ?? 0)"
         guard nowPlayingGate.shouldPublish(signature: signature, position: position,
@@ -1410,18 +1431,25 @@ import Network
     }
     private func configureSystemControls() {
         let commands = MPRemoteCommandCenter.shared()
-        commands.playCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in await self?.send("resume") }; return .success }
-        commands.pauseCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in await self?.send("pause") }; return .success }
+        commands.playCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in await self?.systemCommand("resume") }; return .success }
+        commands.pauseCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in await self?.systemCommand("pause") }; return .success }
         commands.togglePlayPauseCommand.addTarget { @Sendable [weak self] _ in
-            Task { @MainActor in guard let self else { return }; await self.send(self.showsPauseControl ? "pause" : "resume") }; return .success
+            Task { @MainActor in guard let self else { return }; if self.externalControl?("toggle", nil) != true { await self.send(self.showsPauseControl ? "pause" : "resume") } }; return .success
         }
-        commands.nextTrackCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in await self?.send("next") }; return .success }
-        commands.previousTrackCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in await self?.send("previous") }; return .success }
+        commands.nextTrackCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in await self?.systemCommand("next") }; return .success }
+        commands.previousTrackCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in await self?.systemCommand("previous") }; return .success }
+        commands.skipBackwardCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in _ = self?.externalControl?("back", nil) }; return .success }
+        commands.skipForwardCommand.addTarget { @Sendable [weak self] _ in Task { @MainActor in _ = self?.externalControl?("forward", nil) }; return .success }
+        commands.skipBackwardCommand.isEnabled = false; commands.skipForwardCommand.isEnabled = false
         commands.changePlaybackPositionCommand.addTarget { @Sendable [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             let seconds = event.positionTime
-            Task { @MainActor in await self?.send("seek", seek: seconds) }; return .success
+            Task { @MainActor in await self?.systemCommand("seek", position:seconds) }; return .success
         }
+    }
+    private func systemCommand(_ action: String, position: Double? = nil) async {
+        if externalControl?(action, position) == true { return }
+        await send(action, seek:position)
     }
 }
 @MainActor private final class PlaybackSeekCompletion { var finished: Bool? }

@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import subprocess
 import threading
 import time
@@ -31,6 +32,7 @@ from .apple_music import AppleMusic
 from .spotify import Spotify
 from .native_media import NativeMedia
 from .media_type import audio_mime
+from . import audiobooks_http
 from . import native_http
 from . import spotify_http
 from .playlists import Playlists
@@ -205,7 +207,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed=urlparse(self.path); path=unquote(parsed.path); q=parse_qs(parsed.query)
         a,lib,player=self.server.accounts,self.server.library,self.server.player
         if native_http.dispatch(self,path):return
-        if path=='/health': return self.json({'status':'ok','build':build_identity(),'catalog_tracks':len(lib.tracks),'refresh_error':lib.refresh_error,'last_refresh_success':lib.last_refresh_success,'active_streams':len(self.server.active_streams.snapshot()['items'])})
+        if audiobooks_http.dispatch(self,path):return
+        if path=='/health': return self.json({'status':'ok','build':build_identity(),'catalog_tracks':len(lib.tracks),'refresh_error':lib.refresh_error,'last_refresh_success':lib.last_refresh_success,'active_streams':len(self.server.active_streams.snapshot()['items']), 'audiobook_playing':self.server.audiobooks.active_count() if getattr(self.server,'audiobooks',None) else 0})
         if path=='/api/v1/branding':return self.json(self.server.branding.status())
         if path=='/api/v1/branding/icon':return self.send(200,self.server.branding.image(),'image/png')
         if path=='/api/v1/setup':
@@ -214,7 +217,7 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/.well-known/apple-app-site-association':
                 app_ids=[x.strip() for x in os.environ.get('ARRIFY_IOS_APP_IDS','').split(',') if re.fullmatch(r'[A-Z0-9]{10}\.[A-Za-z0-9.-]+',x.strip())]
                 return self.json({'applinks':{'details':[{'appIDs':app_ids,'components':[{'/':'/party/join'}]}] if app_ids else []}})
-            assets={'/catalog-browser.js':'catalog-browser.js','/account-access.html':'account-access.html','/account-access.js':'account-access.js','/account-ui.js':'account-ui.js','/branding.js':'branding.js','/privacy':'privacy.html','/buffer-status.js':'buffer-status.js','/device-buffer-worker.js':'device-buffer-worker.js','/party':'party.html','/party-display':'party.html','/party-guest.js':'party-guest.js','/party-host.js':'party-host.js','/party.css':'party.css','/metadata.js':'metadata.js','/browse.js':'browse.js','/connections.js':'connections.js','/apple-music.js':'apple-music.js','/spotify.js':'spotify.js','/listening.js':'listening.js','/api.js':'api.js','/navigation.js':'navigation.js','/gapless.js':'gapless.js','/':'index.html','/app.js':'app.js','/player.js':'player.js','/playback.js':'playback.js','/install.js':'install.js','/sw.js':'sw.js','/offline.html':'offline.html','/manifest.webmanifest':'manifest.webmanifest','/style.css':'style.css','/brand.css':'brand.css','/recover':'recover.html','/recover.js':'recover.js','/output.js':'output.js','/timeline.js':'timeline.js'}
+            assets={'/audiobooks.js':'audiobooks.js','/audiobook-core.js':'audiobook-core.js','/audiobooks.css':'audiobooks.css','/catalog-browser.js':'catalog-browser.js','/account-access.html':'account-access.html','/account-access.js':'account-access.js','/account-ui.js':'account-ui.js','/branding.js':'branding.js','/privacy':'privacy.html','/buffer-status.js':'buffer-status.js','/device-buffer-worker.js':'device-buffer-worker.js','/party':'party.html','/party-display':'party.html','/party-guest.js':'party-guest.js','/party-host.js':'party-host.js','/party.css':'party.css','/metadata.js':'metadata.js','/browse.js':'browse.js','/connections.js':'connections.js','/apple-music.js':'apple-music.js','/spotify.js':'spotify.js','/listening.js':'listening.js','/api.js':'api.js','/navigation.js':'navigation.js','/gapless.js':'gapless.js','/':'index.html','/app.js':'app.js','/player.js':'player.js','/playback.js':'playback.js','/install.js':'install.js','/sw.js':'sw.js','/offline.html':'offline.html','/manifest.webmanifest':'manifest.webmanifest','/style.css':'style.css','/brand.css':'brand.css','/recover':'recover.html','/recover.js':'recover.js','/output.js':'output.js','/timeline.js':'timeline.js'}
             if re.fullmatch(r'/assets/fonts/(outfit|dm-sans)-latin-wght-normal\.woff2',path):
                 return self.send(200,(WEB/path.lstrip('/')).read_bytes(),'font/woff2',{'Cache-Control':'public, max-age=86400'})
             if re.fullmatch(r'/assets/channels/(80s-on-8|the-bridge|the-blend|1st-wave|the-pulse|classic-rewind|the-spectrum)\.svg',path):
@@ -473,6 +476,7 @@ class Handler(BaseHTTPRequestHandler):
         from .account_email_http import dispatch as email_dispatch
         if email_dispatch(self,path,data):return
         if native_http.dispatch(self,path,data):return
+        if audiobooks_http.dispatch(self,path,data):return
         if party_http.public_post(self,path,data):return
         if path in ('/api/v1/auth/recovery-link','/api/v1/auth/recovery-check','/api/v1/auth/recover'):
             a.rate_limit(('recovery',self.client_address[0]),12,900)
@@ -788,6 +792,11 @@ def main():
     server.request_submissions=RequestSubmissions(accounts,acquisition.call)
     server.listening_events=ListeningEvents();server.event_slots=threading.BoundedSemaphore(8)
     server.listening=Listening(server.player,events=server.listening_events)
+    from .audiobooks import Audiobooks
+    server.audiobooks=None
+    try:
+        server.audiobooks=Audiobooks(accounts,server.listening,DATA);server.audiobooks.start()
+    except (ValueError,OSError,sqlite3.Error):logging.error('Optional audiobook service could not start.')
     server.avatars=Avatars(accounts)
     server.branding=Branding(DATA,WEB/'assets/icon-512.png')
     server.diagnostics=Diagnostics(DATA)
@@ -809,6 +818,8 @@ def main():
     threading.Thread(target=server.request_progress.background,daemon=True).start()
     threading.Thread(target=lib.background_refresh,daemon=True).start()
     try:server.serve_forever()
-    finally:server.live_activities.close();server.native_media.close();server.server_close()
+    finally:
+        if server.audiobooks:server.audiobooks.close()
+        server.live_activities.close();server.native_media.close();server.server_close()
 
 if __name__=='__main__': main()

@@ -46,6 +46,23 @@ class Listening:
         with self.a.lock:
             d=self.session(self.p.load(uid))
             return (not d['owner'] and not device and not epoch) or (bool(d['owner']) and d['owner']==device and str(d['epoch'])==str(epoch))
+    def claim_external(self,uid,device,name,expected_revision=None):
+        """Fence music output once when an explicit long-form listen takes over.
+
+        Preserve the music queue/cursor and the legacy/native music DTO. Older
+        clients observe a paused music session, never an unknown book track ID.
+        """
+        self.device({'device_id':device})
+        with self.a.transaction():
+            s=self.load(uid);d=self.session(s)
+            if expected_revision is not None and expected_revision!=d['revision']:
+                raise PlaybackConflict('Playback changed before the book was ready. Choose Listen here again.')
+            s['position']=self.position(s)
+            d.update(owner=device,device_name=name,epoch=d['epoch']+1,revision=d['revision']+1,
+                     intent=d['intent']+1,playing=False,observed='paused',action='pause',seen=self.now())
+            self.p.save(uid,s);result=dict(d)
+        if self.events:self.events.publish(uid)
+        return result
     def command(self,uid,data):
         with self.a.transaction():result=self._command(uid,data)
         if self.events:self.events.publish(uid)

@@ -393,7 +393,7 @@ public actor APIClient {
     public func artwork(path: String) async throws -> Data? {
         // Only our authenticated image endpoints; never fetch arbitrary catalog URLs.
         guard let c = URLComponents(string: path), c.scheme == nil, c.host == nil,
-              ["/api/v1/artwork/", "/api/v1/artist-artwork/", "/api/v1/stations/artwork/", "/api/v1/branding/icon"].contains(where: c.path.hasPrefix) else { return nil }
+              ["/api/v1/artwork/", "/api/v1/artist-artwork/", "/api/v1/stations/artwork/", "/api/v1/audiobooks/cover/", "/api/v1/branding/icon"].contains(where: c.path.hasPrefix) else { return nil }
         let response = try await authorizedResponse(path)
         guard response.status == 200, response.data.count <= 10 * 1024 * 1024 else { return nil }
         return response.data
@@ -436,6 +436,54 @@ public actor APIClient {
         guard credential != nil, let path = item.url else { throw APIError.signInRequired }
         return try await router.selected().mediaURL(path)
     }
+    public func audiobookStatus() async throws -> AudiobookStatus { try await call("/api/v1/audiobooks/status") }
+    public func audiobookLibrary(query: String = "", library: String = "", page: Int = 0, filter: String = "all") async throws -> AudiobookLibrary {
+        var c = URLComponents(); c.path = "/api/v1/audiobooks/library"
+        c.queryItems = [.init(name:"q", value:query), .init(name:"library", value:library), .init(name:"page", value:String(page)), .init(name:"filter", value:filter)]
+        return try await call(c.string!)
+    }
+    public func continueAudiobooks() async throws -> [Audiobook] {
+        struct Result: Decodable, Sendable { let items: [Audiobook] }
+        let value: Result = try await call("/api/v1/audiobooks/continue"); return value.items
+    }
+    private func bookIdentifier(_ id: String) throws -> String {
+        guard id.range(of: "^[A-Za-z0-9_-]{1,128}$", options:.regularExpression) != nil else { throw APIError.invalidEndpoint }
+        return id
+    }
+    public func audiobook(_ id: String) async throws -> Audiobook { try await call("/api/v1/audiobooks/book/" + bookIdentifier(id)) }
+    public func audiobookState() async throws -> AudiobookState { try await call("/api/v1/audiobooks/state") }
+    public func beginAudiobook(_ id: String, deviceId: String, revision: Int, requestId: String, restart: Bool = false, useRemote: Bool = false, previousLease: String? = nil) async throws -> AudiobookManifest {
+        struct Input: Encodable { let bookId: String; let deviceId: String; let deviceName = "Arrify iOS"; let musicRevision: Int; let requestId: String; let restart: Bool; let useRemote: Bool; let automatic: Bool; let previousLease: String? }
+        return try await call("/api/v1/audiobooks/play", method:"POST", body:Self.encoder().encode(Input(bookId:try bookIdentifier(id), deviceId:deviceId, musicRevision:revision, requestId:requestId, restart:restart, useRemote:useRemote, automatic:previousLease != nil, previousLease:previousLease)))
+    }
+    public func audiobookDownload(_ id: String) async throws -> AudiobookManifest {
+        struct Input: Encodable { let bookId: String }
+        return try await call("/api/v1/audiobooks/download", method:"POST", body:Self.encoder().encode(Input(bookId:try bookIdentifier(id))))
+    }
+    public func audiobookProgress(lease: String, deviceId: String, seq: Int, position: Double, playing: Bool, finished: Bool) async throws -> AudiobookReceipt {
+        struct Input: Encodable { let lease: String; let deviceId: String; let seq: Int; let position: Double; let playing: Bool; let finished: Bool }
+        return try await call("/api/v1/audiobooks/progress", method:"POST", body:Self.encoder().encode(Input(lease:lease, deviceId:deviceId, seq:seq, position:position, playing:playing, finished:finished)))
+    }
+    public func offlineAudiobookProgress(_ checkpoint: AudiobookCheckpoint) async throws -> AudiobookReceipt {
+        try await call("/api/v1/audiobooks/offline-progress", method:"POST", body:Self.encoder().encode(checkpoint))
+    }
+    public func audiobookPreferences(_ value: AudiobookPreferences) async throws -> AudiobookPreferences {
+        try await call("/api/v1/audiobooks/preferences", method:"POST", body:Self.encoder().encode(value))
+    }
+    public func audiobookBookmark(_ id: String, position: Double, title: String, remove: Bool = false) async throws {
+        struct Input: Encodable { let bookId: String; let position: Double; let title: String; let action: String }
+        struct Result: Decodable, Sendable { let saved: Bool }
+        let _: Result = try await call("/api/v1/audiobooks/bookmark", method:"POST", body:Self.encoder().encode(Input(bookId:try bookIdentifier(id), position:position, title:title, action:remove ? "remove" : "save")))
+    }
+    public func audiobookQueue(_ id: String, action: String, revision: Int, ids: [String]? = nil) async throws {
+        struct Input: Encodable { let bookId: String; let action: String; let revision: Int; let ids: [String]? }
+        struct Result: Decodable, Sendable { let revision: Int }
+        let _: Result = try await call("/api/v1/audiobooks/queue", method:"POST", body:Self.encoder().encode(Input(bookId:id, action:action, revision:revision, ids:ids)))
+    }
+    public func audiobookMediaURL(_ path: String) async throws -> URL {
+        guard credential != nil else { throw APIError.signInRequired }
+        return try await router.selected().audiobookURL(path)
+    }
     public func alternateMediaURL(_ url: URL) async throws -> URL? {
         guard let saved = credential, url.scheme == "https", let host = url.host else { return nil }
         var origin = URLComponents(); origin.scheme = "https"; origin.host = host; origin.port = url.port
@@ -448,7 +496,7 @@ public actor APIClient {
         guard selected.url != failed.url else { return nil }
         var path = URLComponents(url: url, resolvingAgainstBaseURL: false)!
         path.scheme = nil; path.host = nil; path.port = nil
-        return try selected.mediaURL(path.string!)
+        return try path.path.hasPrefix("/api/v1/audiobooks/") ? selected.audiobookURL(path.string!) : selected.mediaURL(path.string!)
     }
     public func logout() async {
         let address = await router.snapshot().address

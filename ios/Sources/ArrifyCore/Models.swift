@@ -179,6 +179,12 @@ public struct Endpoint: Sendable {
               candidate.standardized.path.hasPrefix("/api/v1/stream/") else { throw APIError.invalidEndpoint }
         return candidate
     }
+    public func audiobookURL(_ path: String) throws -> URL {
+        guard path.range(of: "^/api/v1/audiobooks/stream/[A-Za-z0-9_-]{43}/[0-9]{1,4}$", options:.regularExpression) != nil,
+              let candidate = URL(string:path, relativeTo:url)?.absoluteURL,
+              candidate.host == url.host, candidate.scheme == url.scheme, candidate.port == url.port else { throw APIError.invalidEndpoint }
+        return candidate
+    }
 }
 
 public struct PlaybackContext: Codable, Sendable {
