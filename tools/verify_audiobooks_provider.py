@@ -52,6 +52,19 @@ with tempfile.TemporaryDirectory(prefix='arrify-book-verification-') as director
         assert saved['saved'] and not saved['pending']
         assert abs(books.remote_progress(1, book_id)['currentTime']-target) < .1
         assert books.remote_progress(2, book_id)['currentTime'] == 0
+        assert book_id in {x['id'] for x in books.continue_listening(1)['items']}
+        assert book_id in {x['id'] for x in books.library(1, progress_filter='started')['items']}
+        before_download = listening.state(1)['listening']
+        download = books.download(1, {'book_id':book_id}, token, 'web')
+        assert download['lease'] == books.download(1, {'book_id':book_id}, token, 'web')['lease']
+        assert listening.state(1)['listening'] == before_download
+        checkpoint = {'book_id':book_id, 'source_revision':download['book']['source_revision'],
+            'device_id':'a'*32, 'session_id':'verification-offline', 'seq':1, 'position':min(target+1, download['book']['duration']),
+            'base_remote_stamp':download['book']['progress'].get('lastUpdate', 0)}
+        assert books.offline_progress(1, checkpoint)['saved']
+        assert books.offline_progress(1, checkpoint)['saved']
+        assert abs(books.remote_progress(1, book_id)['currentTime']-checkpoint['position']) < .1
+        assert listening.state(1)['listening'] == before_download
         _, session, part = books.stream(result['lease'], 0)
         with books.provider.user(1, 'HEAD', part['path'], raw=True) as response:
             assert response.status == 200 and int(response.headers['Content-Length']) > 0
@@ -68,6 +81,8 @@ with tempfile.TemporaryDirectory(prefix='arrify-book-verification-') as director
         print(json.dumps({'passed':True,'library_books_on_first_page':len(first['items']),
             'chapters':len(result['book']['chapters']),'transparent_restricted_accounts':True,
             'per_user_canonical_progress':True,'head_and_ranges':True,'restart_identity':True,
+            'canonical_continue_and_filters':True,'stable_download_resume_grant':True,
+            'offline_receipt_without_ownership_change':True,
             'test_accounts_removed':True,'existing_accounts_untouched':True}))
     finally:
         # Recover any account created before a failed response and remove it.

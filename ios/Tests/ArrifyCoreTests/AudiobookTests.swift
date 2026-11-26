@@ -1,7 +1,19 @@
 import XCTest
 @testable import ArrifyCore
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 final class AudiobookTests: XCTestCase {
+    func testUnavailableBookProviderDoesNotInvalidateLoginOrMusicServerRouting() async throws {
+        let store = MemoryStore(); let api = APIClient(transport:BookProviderFailureTransport(), store:store)
+        try await api.login(endpoint:"https://example.com", username:"test", password:"test", deviceName:"test")
+        do { _ = try await api.audiobookLibrary(); XCTFail("Expected an optional provider failure") } catch {}
+        let connection = await api.connection()
+        XCTAssertTrue(connection.connected); XCTAssertFalse(connection.degraded)
+        let saved = try await store.load(); XCTAssertNotNil(saved)
+        _ = try await api.catalog(query:"")
+    }
     func testLongBooksRetainHoursAndChapterPartBoundaries() throws {
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
         let book = try decoder.decode(Audiobook.self, from:Data(#"{"id":"book","library_id":"books","title":"Long book","author":"Author","narrator":"Reader","series":"","description":"","cover":"/api/v1/audiobooks/cover/book","duration":100000,"source_revision":"revision","parts":[{"index":0,"start":0,"duration":50000},{"index":1,"start":50000,"duration":50000}],"chapters":[{"title":"One","start":0,"end":50000},{"title":"Two","start":50000,"end":100000}],"progress":{"currentTime":90000,"lastUpdate":123,"isFinished":false}}"#.utf8))
@@ -34,5 +46,15 @@ final class AudiobookTests: XCTestCase {
     func testMusicManifestDoesNotAcceptBookGrants() throws {
         let endpoint = try Endpoint("https://arrify.example")
         XCTAssertThrowsError(try endpoint.mediaURL("/api/v1/audiobooks/stream/" + String(repeating:"a", count:43) + "/0"))
+    }
+}
+
+private actor BookProviderFailureTransport: HTTPTransport {
+    let fallback = FakeTransport()
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        if request.url?.path.hasPrefix("/api/v1/audiobooks/") == true {
+            return HTTPResult(status:503, data:Data(#"{"error":{"code":"audiobooks_unavailable","message":"Your book library is reconnecting."}}"#.utf8))
+        }
+        return try await fallback.send(request)
     }
 }

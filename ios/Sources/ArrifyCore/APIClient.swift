@@ -173,13 +173,18 @@ public actor APIClient {
             var request = try Self.request(endpoint: endpoint, path: path, method: method, body: body, token: saved.tokens.accessToken)
             if foreground { request.setValue("1", forHTTPHeaderField: "X-Arrify-Foreground") }
             let result = try await transport.send(request)
-            await router.observed(endpoint, seconds: Date().timeIntervalSince(started), statusCode: result.status)
+            let providerFailure = Self.audiobookProviderFailure(path, result)
+            await router.observed(endpoint, seconds: providerFailure ? 0 : Date().timeIntervalSince(started), statusCode: providerFailure ? 200 : result.status)
             return result
         } catch {
             guard !RequestCancellation.matches(error), !Task.isCancelled else { throw CancellationError() }
             await router.failed(endpoint)
             throw error
         }
+    }
+    private static func audiobookProviderFailure(_ path: String, _ result: HTTPResult) -> Bool {
+        guard path.hasPrefix("/api/v1/audiobooks/"), result.status == 503 else { return false }
+        return (try? decoder().decode(ErrorEnvelope.self, from:result.data).error.code) == "audiobooks_unavailable"
     }
     private func sendAuthorized(_ path: String, method: String, body: Data?, saved: Credential) async throws -> HTTPResult {
         let endpoint = try await router.selected()
@@ -198,7 +203,7 @@ public actor APIClient {
             }
             return try await measuredSend(path, method: "GET", body: nil, saved: saved, endpoint: alternate)
         }
-        if [502, 503, 504].contains(result.status) {
+        if [502, 503, 504].contains(result.status) && !Self.audiobookProviderFailure(path, result) {
             await router.failed(endpoint)
             if method == "GET", let alternate = try? await router.selected(), alternate.url != endpoint.url {
                 return try await measuredSend(path, method: "GET", body: nil, saved: saved, endpoint: alternate)

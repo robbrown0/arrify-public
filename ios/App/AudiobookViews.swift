@@ -26,7 +26,7 @@ struct AudiobookShelf: View {
                 }
                 if loading { ProgressView().frame(maxWidth:.infinity) }
                 if !loading && displayed.isEmpty && message == nil {
-                    ContentUnavailableView(filter == "downloads" ? "Take a story with you" : "Your bookshelf", systemImage:"book.closed", description:Text(filter == "downloads" ? "Download a book to listen without a connection." : "Your books will appear here when available."))
+                    emptyShelf
                 }
                 if next != nil && filter != "downloads" { Button("More books") { Task { await load(more:true) } }.disabled(loading) }
             }.padding(24)
@@ -40,6 +40,15 @@ struct AudiobookShelf: View {
     }
     private var filterButtons: some View {
         HStack { ForEach(["all", "started", "finished", "downloads"], id:\.self) { value in filterButton(value) } }
+    }
+    private var emptyShelf: some View {
+        let title: String = filter == "downloads" ? "Take a story with you" : "Your bookshelf"
+        let detail: String = filter == "downloads" ? "Download a book to listen without a connection." : "Your books will appear here when available."
+        return VStack(spacing:12) {
+            Image(systemName:"book.closed").font(.largeTitle).foregroundStyle(.secondary)
+            Text(title).font(.title2.bold())
+            Text(detail).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }.frame(maxWidth:.infinity).padding(.vertical,32)
     }
     private func filterButton(_ value: String) -> some View {
         let selected = filter == value
@@ -94,7 +103,7 @@ struct AudiobookDetail: View {
                 Text(book.title).font(.largeTitle.bold()); Text(book.author).font(.title3).foregroundStyle(.secondary)
                 if !book.narrator.isEmpty { Text("Narrated by " + book.narrator).foregroundStyle(.secondary) }
                 Text(AudiobookTimeline.time(book.duration)).foregroundStyle(.secondary)
-                Button { model.books.play(book) } label: { Label((book.progress?.currentTime ?? 0) > 0 ? "Continue listening" : "Listen now", systemImage:"play.fill").frame(maxWidth:.infinity, minHeight:44) }.buttonStyle(.borderedProminent)
+                Button { model.books.play(book) } label: { Label(listenTitle, systemImage:"play.fill").frame(maxWidth:.infinity, minHeight:44) }.buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("listenAudiobook")
                 HStack {
                     Button("Play next") { Task { await model.books.queueBook(book.id, action:"next") } }
@@ -118,6 +127,7 @@ struct AudiobookDetail: View {
             }
     }
     private var plainDescription: String { book.description.replacingOccurrences(of:"<[^>]*>", with:" ", options:.regularExpression) }
+    private var listenTitle: String { (book.progress?.currentTime ?? 0) > 0 ? "Continue listening" : "Listen now" }
     @ViewBuilder private var downloadControls: some View {
         let downloads = model.books.downloads
         if downloads.complete(book.id) {
@@ -204,7 +214,7 @@ struct AudiobookPlayer: View {
         switch tab {
         case "Chapters":
             ForEach(book.chapters ?? []) { chapter in
-                Button { model.books.seek(chapter.start) } label: { HStack { Text(chapter.title).multilineTextAlignment(.leading); Spacer(); Text(AudiobookTimeline.time(chapter.end-chapter.start)).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth:.infinity, minHeight:44) }.foregroundStyle(model.books.chapter?.start == chapter.start ? .green : .primary)
+                Button { model.books.seek(chapter.start) } label: { HStack { Text(chapter.title).multilineTextAlignment(.leading); Spacer(); Text(AudiobookTimeline.time(chapter.end-chapter.start)).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth:.infinity, minHeight:44) }.foregroundStyle(model.books.chapter?.start == chapter.start ? Color.green : Color.primary)
             }
         case "Up Next":
             Toggle("Continue to the next queued book", isOn:Binding(get:{ model.books.preferences.continuous }, set:{ enabled in var value = model.books.preferences; value.continuous = enabled; Task { await model.books.updatePreferences(value) } }))
