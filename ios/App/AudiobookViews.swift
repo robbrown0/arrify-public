@@ -163,12 +163,13 @@ struct AudiobookPlayer: View {
     let model: AppModel
     @State private var tab = "Chapters"
     @State private var seeking: Double?
+    @State private var keepLocal = false
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing:20) {
                     if let book = model.books.book {
-                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(maxWidth:320).aspectRatio(1, contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:18))
+                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230, height:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230).clipShape(RoundedRectangle(cornerRadius:18))
                         VStack(alignment:.leading, spacing:8) {
                             Text(book.author).foregroundStyle(.secondary)
                             Text(book.title).font(.title.bold())
@@ -197,6 +198,7 @@ struct AudiobookPlayer: View {
                         if model.books.conflict {
                             Text("Your earlier offline place is kept on this device.").font(.footnote)
                             Button("Resume server position") { model.books.play(book, useRemote:true) }
+                            Button("Keep this device’s position") { keepLocal = true }
                         }
                         Picker("Book details", selection:$tab) { Text("Chapters").tag("Chapters"); Text("Up Next").tag("Up Next"); Text("Bookmarks").tag("Bookmarks") }.pickerStyle(.segmented)
                         panel(book)
@@ -209,6 +211,9 @@ struct AudiobookPlayer: View {
                     ToolbarItem(placement:.topBarTrailing) { Button { Task { await model.books.addBookmark() } } label: { Image(systemName:"bookmark").frame(width:44, height:44) }.accessibilityLabel("Save bookmark") }
                 }
         }.onChange(of:tab) { if tab == "Up Next" { Task { await model.books.refreshQueue() } } }
+            .confirmationDialog("Replace the saved listening position with this device’s position?", isPresented:$keepLocal, titleVisibility:.visible) {
+                Button("Keep this device’s position") { Task { await model.books.keepLocalPosition() } }
+            }
     }
     @ViewBuilder private func panel(_ book: Audiobook) -> some View {
         switch tab {

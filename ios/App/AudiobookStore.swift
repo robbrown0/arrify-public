@@ -80,7 +80,8 @@ import CryptoKit
             MainActor.assumeIsolated { self?.tick(seconds) }
         }
         notifications.append(NotificationCenter.default.addObserver(forName:.AVPlayerItemDidPlayToEndTime, object:nil, queue:.main) { @Sendable [weak self] note in
-            MainActor.assumeIsolated { if let self, (note.object as? AVPlayerItem) === self.player.currentItem { self.ended() } }
+            let identity = (note.object as? AVPlayerItem).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated { if let self, identity == self.player.currentItem.map(ObjectIdentifier.init) { self.ended() } }
         })
         notifications.append(NotificationCenter.default.addObserver(forName:AVAudioSession.interruptionNotification, object:nil, queue:.main) { @Sendable [weak self] note in
             let kind = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
@@ -171,11 +172,16 @@ import CryptoKit
             let account = self.accountGeneration
             do {
                 await self.synchronize(force:true)
-                if self.pending[value.id]?.dirty == true && !useRemote { self.preparing = false; self.conflict = true; self.message = "Your offline position needs to be saved before continuing."; return }
-                if useRemote { self.pending.removeValue(forKey:value.id); self.persist() }
+                if self.pending[value.id]?.dirty == true && !useRemote {
+                    if self.conflict { self.preparing = false; self.message = "Your place changed on another device. Choose which position to keep."; return }
+                    // Connectivity failure is not a progress conflict. Let the
+                    // downloaded fallback keep playing from the durable journal.
+                    throw URLError(.notConnectedToInternet)
+                }
                 let musicState = try await self.api.state()
                 let result = try await self.api.beginAudiobook(value.id, deviceId:self.music?.deviceId ?? "", revision:musicState.queueRevision, requestId:ticket.uuidString.lowercased(), restart:restart, useRemote:useRemote, previousLease:previousLease)
                 guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
+                if useRemote { self.pending.removeValue(forKey:value.id); self.persist() }
                 self.install(result.book, manifest:result, position:result.position, offline:false)
                 try await self.open(at:result.position, token:ticket)
                 await self.refreshQueue()
@@ -357,6 +363,22 @@ import CryptoKit
         }
     }
     func networkAvailable() async { retryAt = .distantPast; await synchronizePreferences(); await synchronize() }
+    func keepLocalPosition() async {
+        guard let book, let old = pending[book.id] else { return }
+        do {
+            let remote = try await api.audiobook(book.id)
+            guard remote.sourceRevision == old.checkpoint.sourceRevision else {
+                message = "This book’s edition changed. Your earlier position is kept on this device."; return
+            }
+            var value = old
+            value.checkpoint.sessionId = UUID().uuidString.lowercased()
+            value.checkpoint.baseRemoteStamp = remote.progress?.lastUpdate ?? 0
+            value.checkpoint.seq = 1; value.lease = nil; value.dirty = true
+            pending[book.id] = value; persist(); conflict = false; retryAt = .distantPast
+            await synchronize(force:true)
+            if pending[book.id]?.dirty != true { play(remote) }
+        } catch { message = "Connect to choose which position to keep. Your offline place is saved." }
+    }
     func observe(_ state: PlaybackState) {
         guard active else { return }
         if let epoch = manifest?.musicEpoch, state.ownerEpoch < epoch { return }

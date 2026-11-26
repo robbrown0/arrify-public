@@ -133,14 +133,16 @@ import CryptoKit
     }
     func pause(_ id: String) async {
         guard let session, let root else { return }
+        let ticket = epoch
         for task in await session.allTasks where task.taskDescription?.hasPrefix(id + "/") == true {
             if let download = task as? URLSessionDownloadTask {
                 let name = task.taskDescription ?? ""
-                download.cancel { data in
-                    if let data { try? data.write(to:root.appending(path:name + ".resume"), options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication]) }
-                }
+                let data = await download.cancelByProducingResumeData()
+                guard epoch == ticket, let transfer = records[id]?.transferId else { return }
+                if let data, name.hasPrefix(id + "/" + transfer + "/") { try? data.write(to:root.appending(path:name + ".resume"), options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication]) }
             }
         }
+        guard epoch == ticket else { return }
         working.remove(id)
     }
     func remove(_ id: String) async {
