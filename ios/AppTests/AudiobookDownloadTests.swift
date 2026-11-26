@@ -6,7 +6,7 @@ import ArrifyCore
 final class AudiobookDownloadTests: XCTestCase {
     @MainActor func testCompleteBookSurvivesStoreRecreationAndExplicitErasure() async throws {
         let api = try await makeAPI()
-        let first = AudiobookDownloads(api:api, configuration:configuration)
+        let first = AudiobookDownloads(api:api, configuration:Self.configuration)
         await first.download("book-one")
         for _ in 0..<300 where !first.complete("book-one") && first.errors["book-one"] == nil { try await Task.sleep(for:.milliseconds(20)) }
         XCTAssertTrue(first.complete("book-one"), first.errors["book-one"] ?? "Download did not finish")
@@ -16,7 +16,7 @@ final class AudiobookDownloadTests: XCTestCase {
         let playable = try await AVURLAsset(url:file).load(.isPlayable)
         XCTAssertTrue(playable, "Completed files must be usable by native offline playback")
         first.checkpoint("book-one", position:0.75, remoteStamp:123)
-        let restored = AudiobookDownloads(api:api, configuration:configuration)
+        let restored = AudiobookDownloads(api:api, configuration:Self.configuration)
         await restored.configure()
         XCTAssertTrue(restored.complete("book-one"))
         XCTAssertEqual(restored.records["book-one"]?.lastPosition, 0.75)
@@ -27,7 +27,7 @@ final class AudiobookDownloadTests: XCTestCase {
     }
     @MainActor func testFailedHTTPTransferNeverBecomesAnOfflineBook() async throws {
         let api = try await makeAPI(fail:true)
-        let downloads = AudiobookDownloads(api:api, configuration:configuration)
+        let downloads = AudiobookDownloads(api:api, configuration:Self.configuration)
         await downloads.download("book-one")
         for _ in 0..<300 where downloads.working.contains("book-one") { try await Task.sleep(for:.milliseconds(20)) }
         XCTAssertFalse(downloads.complete("book-one")); XCTAssertNotNil(downloads.errors["book-one"])
@@ -38,7 +38,7 @@ final class AudiobookDownloadTests: XCTestCase {
         try await api.login(endpoint:"https://book-download.invalid", username:"fixture", password:"fixture", deviceName:"Test")
         return api
     }
-    @MainActor private func configuration(_ identifier: String) -> URLSessionConfiguration {
+    private static let configuration: @MainActor @Sendable (String) -> URLSessionConfiguration = { _ in
         let value = URLSessionConfiguration.ephemeral; value.protocolClasses = [BookAudioProtocol.self]; return value
     }
 }
