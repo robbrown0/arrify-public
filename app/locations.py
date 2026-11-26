@@ -42,7 +42,10 @@ class Locations:
 
     def apply(self):
         m=self.lib.music
-        roots={x['id']:self.resolve(x['path'],False) for x in self.state['items']}
+        # Exact mount roots are already trusted operator configuration. Keep
+        # their lexical paths at startup; file access resolves them later.
+        # Saved subfolders retain canonical containment validation.
+        roots={x['id']:MOUNTS[x['path']] if x['path'] in MOUNTS else self.resolve(x['path'],False) for x in self.state['items']}
         with m.lock:
             old=m.base_sources
             m.base_sources=roots

@@ -20,6 +20,15 @@ class Library:
     def reindex(self):pass
 
 class LocationTests(unittest.TestCase):
+    def test_startup_preserves_saved_catalog_without_resolving_mount_roots(self):
+        with tempfile.TemporaryDirectory() as d:
+            lib=Library();self.addCleanup(lib.music.db.close)
+            lib.music.db.execute("INSERT INTO tracks(source,available) VALUES('unr01',1)")
+            with patch('app.locations.Path.resolve',side_effect=AssertionError('NAS lookup during startup')):
+                Locations(lib,d)
+            self.assertEqual(lib.music.base_sources,{'nas01':'/music/nas01','unr01':'/music/unr01'})
+            self.assertEqual(lib.music.db.execute('SELECT sum(available) FROM tracks').fetchone()[0],2)
+
     def test_validation(self):
         for path in ['/data','/etc','/mnt/nas-01-music/../secrets','relative',None]:
             with self.assertRaises(ValueError):Locations.resolve(path,False)
