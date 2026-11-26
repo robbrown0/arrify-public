@@ -1,7 +1,10 @@
 .git
 __pycache__
 *.pyc
-docs
+docs/**
+!docs/
+!docs/releases/
+!docs/releases/*.md
 .env
 .env.*
 *.p8

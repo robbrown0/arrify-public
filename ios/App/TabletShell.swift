@@ -36,6 +36,7 @@ struct TabletShell: View {
                         navigation("Liked songs", "checkmark.circle.fill")
                         navigation("Playlists", "music.note.list")
                         navigation("Moods", "circle.lefthalf.filled")
+                        if model.books.visible { navigation("Audiobooks", "book.closed") }
                         navigation("Channels", "antenna.radiowaves.left.and.right")
                         ForEach(model.library.overview?.items.filter { $0.section == "personal" } ?? [], id: \.identity) { item in
                             navigation(item.name, "music.note.list", key: item.identity)
@@ -46,7 +47,7 @@ struct TabletShell: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 12) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField(searchKind == "all" ? "Search your music" : "Search \(searchKind == "tracks" ? "songs" : searchKind)", text: $query).focused($searching)
+                        TextField(searchKind == "all" ? (model.books.visible ? "Search music and audiobooks" : "Search your music") : "Search \(searchKind == "tracks" ? "songs" : searchKind)", text: $query).focused($searching)
                             .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
                             .accessibilityIdentifier("tabletSearch")
                             .simultaneousGesture(TapGesture().onEnded { searchRoot = UUID(); destination = "Search" })
@@ -65,11 +66,11 @@ struct TabletShell: View {
                 // Keep navigation/scroll content from intercepting taps in the sidebar.
                 .contentShape(.interaction, Rectangle())
             }
-            if model.playback.needsTakeover {
+            if !model.books.active && model.playback.needsTakeover {
                 PlaybackTakeoverBanner(playback: model.playback)
                     .padding(.horizontal, 16).padding(.top, 8)
             }
-            if let message = model.playback.message {
+            if !model.books.active, let message = model.playback.message {
                 HStack {
                     Text(message).font(.footnote)
                         .accessibilityIdentifier("playbackStatusMessage")
@@ -81,7 +82,8 @@ struct TabletShell: View {
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal, 16).padding(.bottom, 8)
             }
-            if model.playback.track != nil {
+            if model.books.active { AudiobookMiniPlayer(model:model).padding(.horizontal,16).padding(.vertical,8) }
+            else if model.playback.track != nil {
                 TabletPlayerBar(playback: model.playback, expand: expandPlayer)
             } else {
                 EmptyPlayerView { searching = false; libraryRoot = UUID(); destination = "Library" }
@@ -131,6 +133,7 @@ struct TabletShell: View {
                 case "Songs": BrowserScreen(model: model, title: "Songs", kind: "tracks", externalQuery: query).id(songsRoot)
                 case "Albums": BrowserScreen(model: model, title: "Albums", kind: "albums", externalQuery: query)
                 case "Artists": BrowserScreen(model: model, title: "Artists", kind: "artists", externalQuery: query)
+                case "Audiobooks": AudiobookShelf(model:model)
                 case "Channels": CollectionScreen(model: model, section: "channels", title: "Channels")
                 case "Playlists": PlaylistLibraryView(model: model)
                 default:

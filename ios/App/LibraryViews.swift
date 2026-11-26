@@ -59,6 +59,7 @@ struct LibraryHome: View {
                     NavigationLink { BrowserScreen(model: model, title: "Albums", kind: "albums") } label: { Label("Albums", systemImage: "square.stack") }
                     NavigationLink { BrowserScreen(model: model, title: "Artists", kind: "artists") } label: { Label("Artists", systemImage: "music.mic") }
                     NavigationLink { PlaylistLibraryView(model: model) } label: { Label("Playlists", systemImage: "music.note.list") }
+                    if model.books.visible { NavigationLink { AudiobookShelf(model:model) } label: { Label("Audiobooks", systemImage:"book.closed") } }
                     NavigationLink { MoodScreen(model: model) } label: { Label("Moods", systemImage: "circle.lefthalf.filled") }
                 }.font(.title3).listRowBackground(Color.white.opacity(0.04))
                 if let overview = model.library.overview {
@@ -863,6 +864,7 @@ struct SearchScopePicker: View {
 struct AllSearchResults: View {
     let model: AppModel
     let query: String
+    @State private var bookResults: [Audiobook] = []
     @State private var songs: LibraryBrowser
     @State private var albums: LibraryBrowser
     @State private var artists: LibraryBrowser
@@ -886,22 +888,41 @@ struct AllSearchResults: View {
                 }
                 entitySection("Albums", browser: albums)
                 entitySection("Artists", browser: artists)
-                if !songs.loading && !albums.loading && !artists.loading && songs.total + albums.total + artists.total == 0 && songs.error == nil && albums.error == nil && artists.error == nil {
+                if !bookResults.isEmpty {
+                    Section("Audiobooks") {
+                        ForEach(bookResults) { book in
+                            NavigationLink { AudiobookDetail(model:model, initial:book) } label: {
+                                HStack(spacing:12) {
+                                    RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:56, height:56).clipShape(RoundedRectangle(cornerRadius:8))
+                                    VStack(alignment:.leading) { Text(book.title).font(.headline); Text(book.author).font(.subheadline).foregroundStyle(.secondary) }
+                                }.frame(minHeight:60)
+                            }
+                        }
+                    }
+                }
+                if !songs.loading && !albums.loading && !artists.loading && bookResults.isEmpty && songs.total + albums.total + artists.total == 0 && songs.error == nil && albums.error == nil && artists.error == nil {
                     ContentUnavailableView("No matches", systemImage: "magnifyingglass", description: Text("Try another name."))
                 }
             }
         }.scrollContentBackground(.hidden).background(Color.black)
             .navigationTitle("Search").navigationBarTitleDisplayMode(.inline)
             .task(id: query) {
-                songs.resetSearch(); albums.resetSearch(); artists.resetSearch()
+                songs.resetSearch(); albums.resetSearch(); artists.resetSearch(); bookResults = []
                 guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                 do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
                 songs.sort = "relevance"; albums.sort = "relevance"; artists.sort = "relevance"
                 async let s: Void = songs.load(query: query)
                 async let a: Void = albums.load(query: query)
                 async let r: Void = artists.load(query: query)
+                async let b: [Audiobook] = searchBooks()
                 _ = await (s, a, r)
+                let books = await b
+                if !Task.isCancelled { bookResults = books }
             }
+    }
+    private func searchBooks() async -> [Audiobook] {
+        guard model.books.visible else { return [] }
+        return (try? await model.api.audiobookLibrary(query:query).items) ?? []
     }
     private var songSource: LibrarySource {
         let options = ["q": query, "sort": "relevance"]
@@ -985,6 +1006,20 @@ struct HomeScreen: View {
                             NavigationLink("Albums") { BrowserScreen(model: model, title: "Albums", kind: "albums") }
                             NavigationLink("Artists") { BrowserScreen(model: model, title: "Artists", kind: "artists") }
                         }.frame(minHeight: 44)
+                    }
+                    if model.books.visible && !model.books.resumeBooks.isEmpty {
+                        VStack(alignment:.leading, spacing:16) {
+                            Text("Continue listening").font(.title2.bold())
+                            ForEach(model.books.resumeBooks.prefix(4)) { book in
+                                Button { model.books.play(book) } label: {
+                                    HStack(spacing:16) {
+                                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:72, height:72).clipShape(RoundedRectangle(cornerRadius:10))
+                                        VStack(alignment:.leading, spacing:5) { Text(book.title).font(.headline); Text(book.author).font(.subheadline).foregroundStyle(.secondary); Text(AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary) }
+                                        Spacer(); Image(systemName:"play.circle.fill").font(.largeTitle)
+                                    }.frame(maxWidth:.infinity, minHeight:80).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
+                            }
+                        }
                     }
                     if let overview = model.library.overview {
                         recentSongs(overview.recentTracks ?? [])

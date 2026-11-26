@@ -101,6 +101,15 @@ def ensure_no_other_review(api, app, build):
         if candidate['id'] != build and review_state in ('WAITING_FOR_REVIEW', 'IN_REVIEW'):
             raise RuntimeError('Another build is awaiting beta review; withdraw it in App Store Connect before submitting this build')
 
+def build_notes(number, version):
+    if not re.fullmatch(r'[1-9][0-9]*', number) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+        raise ValueError('Specify an exact build number and app version')
+    path = Path(__file__).resolve().parents[1] / 'docs' / 'releases' / (version+'-'+number+'.md')
+    if not path.is_file(): return 'Please test browsing, playback, background audio, Lock Screen controls, AirPlay, and reconnecting after a network interruption.'
+    value = '\n'.join(line for line in path.read_text().splitlines() if not line.startswith('#')).strip()
+    if not value or len(value) > 4000: raise ValueError('Build-specific beta notes must contain 1 to 4000 characters')
+    return value
+
 def main():
     number = os.environ['BUILD_NUMBER']; version = os.environ['APP_VERSION']
     if not re.fullmatch(r'[1-9][0-9]*', number) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
@@ -116,6 +125,11 @@ def main():
         expected = {'First Light', 'Open Windows', 'Bright Steps', 'Quiet Water', 'Evening Drift', 'Last Lantern'}
         if catalog.get('total') != 6 or {x.get('title') for x in catalog.get('items', [])} != expected or any(x.get('artist') != 'Arrify Studio' for x in catalog.get('items', [])):
             raise RuntimeError('Review account must contain only the six original demo tracks')
+        if int(number) >= 42:
+            books = request(DEMO+'/api/v1/audiobooks/library', token=pair['access_token'])
+            titles = {item.get('title') for item in books.get('items', [])}
+            if books.get('total') != 2 or titles != {'Welcome to Arrify', 'A Guide to Listening'} or any(item.get('author') != 'Arrify' for item in books.get('items', [])):
+                raise RuntimeError('Review account must expose only the two generated audiobook samples')
     finally:
         request(DEMO+'/api/v1/native/sessions/revoke', 'POST', {'session_id': pair['session_id']}, pair['access_token'])
     token = signing_token()
@@ -138,20 +152,21 @@ def main():
     detail = api(f'/v1/apps/{app}/betaAppReviewDetail')['data']
     notes = ('Review server: '+DEMO+'. On the sign-in screen replace the Server address with this URL, then use the supplied review login. '
              'Open Library > Songs and play First Light by Arrify Studio. The isolated server contains six original synthesized instrumentals across Daylight and Afterglow albums, original artwork, two demo channels, and Feel Good / Unwind mood playlists. No commercial recordings or external music services are used on the demo server. '
+             'For Audiobooks, open Library > Audiobooks. The isolated review library contains two short generated narration samples with chapters. Try narration speed, bookmarks, sleep timer, Up Next, download/offline playback, and switching back to music. Private audiobook libraries are not exposed on this server. '
              'Test browsing, search, next/previous, shuffle, repeat, seeking, background audio, lock-screen controls, and AirPlay. Privacy policy: https://arrify.robnets.com/privacy. The policy is also linked on sign-in and in Settings. Other users connect to their own Arrify server and approved account. No purchase or subscription is required. Account deletion: Settings > Account > Delete account, current password, permanent confirmation. Pending accounts can use Delete an existing account on sign-in. Deletion is real and irreversible, including for the review account.')
     attrs = {'contactFirstName': config['first_name'], 'contactLastName': config['last_name'], 'contactEmail': config['email'], 'contactPhone': config['phone'],
              'demoAccountRequired': True, 'demoAccountName': config['username'], 'demoAccountPassword': config['password'], 'notes': notes}
     api('/v1/betaAppReviewDetails/'+detail['id'], 'PATCH', resource('betaAppReviewDetails', attrs, detail['id']))
     localizations = api(f'/v1/apps/{app}/betaAppLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'description': 'Arrify is a personal music player for an Arrify server. Browse songs, albums, artists, playlists, channels, and moods; listen with background playback, lock-screen controls, and AirPlay.', 'feedbackEmail': config['email'], 'privacyPolicyUrl': 'https://arrify.robnets.com/privacy'}
+    attrs = {'description': 'Arrify is a personal music and audiobook player for an Arrify server. Browse music and optional Audiobookshelf libraries, listen with background playback, Lock Screen controls, and AirPlay, and download books for offline listening.', 'feedbackEmail': config['email'], 'privacyPolicyUrl': 'https://arrify.robnets.com/privacy'}
     if localized:
         api('/v1/betaAppLocalizations/'+localized['id'], 'PATCH', resource('betaAppLocalizations', attrs, localized['id']))
     else:
         api('/v1/betaAppLocalizations', 'POST', resource('betaAppLocalizations', {**attrs, 'locale':'en-US'}, relationships={'app':relation('apps', app)}))
     localizations = api(f'/v1/builds/{build}/betaBuildLocalizations')['data']
     localized = next((x for x in localizations if x['attributes']['locale']=='en-US'), None)
-    attrs = {'whatsNew': 'Home and saved songs now retry brief connection failures quietly before showing a warning. When the local server address is unavailable, reads and interrupted sign-in recovery use the verified public address. Loaded Home content stays visible while reconnecting. Home pull-to-refresh also refreshes saved songs, and the full-screen player has a working saved-songs Retry button. Playback preparation quietly recovers temporary failures, and cache downloads can retry using the verified alternate address. Previous artwork clears when a new title arrives. Please test Wi-Fi/cellular changes, VPN interruptions, going offline and reconnecting, Home refresh, and the player. Fast cached playback transitions and session revocation remain supported.'}
+    attrs = {'whatsNew': build_notes(number, version)}
     if localized:
         api('/v1/betaBuildLocalizations/'+localized['id'], 'PATCH', resource('betaBuildLocalizations', attrs, localized['id']))
     else:

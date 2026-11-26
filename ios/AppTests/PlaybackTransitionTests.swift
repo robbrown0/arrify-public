@@ -2,9 +2,28 @@ import XCTest
 import UIKit
 import ArrifyCore
 @preconcurrency import AVFoundation
+@preconcurrency import MediaPlayer
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
+    @MainActor func testAudiobookHandoffPreservesSystemMetadataAndCachedMusicSuccessors() async throws {
+        let (player, _) = try await fixture(cachedNext:true)
+        defer { player.stop() }
+        let queued = player.player.items().count
+        player.suspendForAudiobook()
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle:"Audiobook fixture"]
+        await player.reconcile(report:false)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyTitle] as? String,"Audiobook fixture")
+        XCTAssertEqual(player.player.items().count,queued)
+        await player.send("resume")
+        for _ in 0..<100 where !player.isPlaying { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertTrue(player.isPlaying)
+        let started = ProcessInfo.processInfo.systemUptime
+        await player.send("next")
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime-started,0.5)
+        XCTAssertEqual(player.state?.currentTrackId,2)
+    }
     override func setUp() {
         super.setUp()
         executionTimeAllowance = 60

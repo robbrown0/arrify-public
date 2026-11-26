@@ -5,15 +5,15 @@
  const id=saved?.id||String(Date.now())+'-'+Math.random().toString(36).slice(2);
  let depth=saved?.id===id&&Number.isSafeInteger(saved.depth)?Math.max(0,saved.depth):0;
  let layers=[],pending=false,routing=false,afterBack=null,url=location.href;
- const dialogs=['now-playing-dialog','apple-full-player','spotify-full-player'];
+ const dialogs=['now-playing-dialog','apple-full-player','spotify-full-player','audiobook-player'];
  const route=()=>location.hash.slice(1)||'home';
- function parent(){const [view,detail]=route().split('/');if(detail){if(view==='library')return'library';if(['albums','artists','browse','admin','party'].includes(view))return view;if(view==='personal')return'library/playlists';if(view==='collection')return'home';if(view==='radio')return'browse'}return'home'}
+ function parent(){const [view,detail]=route().split('/');if(detail){if(view==='library')return'library';if(['albums','artists','browse','admin','party','audiobooks'].includes(view))return view;if(view==='personal')return'library/playlists';if(view==='collection')return'home';if(view==='radio')return'browse'}return'home'}
  function paint(){button.disabled=!layers.length&&depth===0&&route()==='home';button.setAttribute('aria-label',layers.length?'Close current view':depth>0?'Go back':'Back to '+parent().replace('/',' '));button.title='Back'}
  function stamp(push=false){history[push?'pushState':'replaceState']({...history.state,[key]:{id,depth,layers:[...layers]}},'');paint()}
  function read(){const list=[];if(document.body.classList.contains('search-focused'))list.push('search');for(const name of dialogs){const d=document.getElementById(name);if(d?.open){list.push(name);if(d.classList.contains('queue-sheet-open'))list.push(name+':queue')}}return list}
  function apply(target){
   const search=target.includes('search');document.body.classList.toggle('search-focused',search);if(!search&&document.activeElement?.id==='search')document.activeElement.blur();
-  for(const name of dialogs){let d=document.getElementById(name);if(target.includes(name)&&!d?.open){const trigger=name==='now-playing-dialog'?'#now-open':name==='apple-full-player'?'[data-apple-expand]':'[data-spotify-expand]';document.querySelector(trigger)?.click();d=document.getElementById(name)}if(!d?.open)continue;
+  for(const name of dialogs){let d=document.getElementById(name);if(target.includes(name)&&!d?.open){const trigger=name==='audiobook-player'?'#book-dock [data-book-action="expand"]':name==='now-playing-dialog'?'#now-open':name==='apple-full-player'?'[data-apple-expand]':'[data-spotify-expand]';document.querySelector(trigger)?.click();d=document.getElementById(name)}if(!d?.open)continue;
    if(!target.includes(name)){d.close();continue}const queue=target.includes(name+':queue');if(queue!==d.classList.contains('queue-sheet-open')){const selector=name==='now-playing-dialog'?(queue?'#np-show-queue':'#np-back-playing'):name==='apple-full-player'?(queue?'[data-apple-queue]':'[data-apple-back]'):(queue?'[data-spotify-queue]':'[data-spotify-back]');d.querySelector(selector)?.click()}
   }
  }

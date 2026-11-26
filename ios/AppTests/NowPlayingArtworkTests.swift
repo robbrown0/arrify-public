@@ -304,6 +304,10 @@ extension NowPlayingArtworkTests {
         XCTAssertEqual(metadata.first { $0.identifier == .commonIdentifierAlbumName }?.stringValue, "Album")
         XCTAssertEqual(metadata.first { $0.identifier == .commonIdentifierArtwork }?.dataValue, jpeg)
         XCTAssertFalse(ReceiverMetadata.make(track: track, artwork: nil).contains { $0.identifier == .commonIdentifierArtwork })
+        let book = ReceiverMetadata.make(title:"A Story", artist:"Author", album:"Chapter 2", artwork:jpeg)
+        XCTAssertEqual(book.first { $0.identifier == .commonIdentifierTitle }?.stringValue, "A Story")
+        XCTAssertEqual(book.first { $0.identifier == .commonIdentifierAlbumName }?.stringValue, "Chapter 2")
+        XCTAssertEqual(book.first { $0.identifier == .commonIdentifierArtwork }?.dataValue, jpeg)
     }
     @MainActor func testArtworkResizesToReceiverBoundsWithoutDistortingAspect() {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 200, height: 100)).image { context in

@@ -3,6 +3,50 @@ final class LaunchTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
+    @MainActor func testAudiobookShelfPlayerAndOptionalSettings() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout:30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout:20))
+        app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Audiobooks"].firstMatch.waitForExistence(timeout:20))
+        app.buttons["Audiobooks"].firstMatch.tap()
+        let book = app.buttons["audiobook-book-one"]
+        XCTAssertTrue(book.waitForExistence(timeout:20)); book.tap()
+        XCTAssertTrue(app.buttons["listenAudiobook"].waitForExistence(timeout:10)); app.buttons["listenAudiobook"].tap()
+        let control = app.buttons["audiobookPlayPause"]
+        XCTAssertTrue(control.waitForExistence(timeout:20))
+        let playing = XCTNSPredicateExpectation(predicate:NSPredicate(format:"label == %@", "Pause audiobook"), object:control)
+        XCTAssertEqual(XCTWaiter.wait(for:[playing], timeout:20), .completed)
+        app.buttons["Skip forward 30 seconds"].tap()
+        let cursor = app.sliders["audiobookPosition"]
+        let advanced = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in
+            guard let text = cursor.value as? String else { return false }
+            let parts = text.split(separator:":").compactMap { Int($0) }
+            return parts.count == 2 && parts[0]*60+parts[1] >= 70
+        }, object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[advanced], timeout:10), .completed)
+        control.tap()
+        let paused = XCTNSPredicateExpectation(predicate:NSPredicate(format:"label == %@", "Play audiobook"), object:control)
+        XCTAssertEqual(XCTWaiter.wait(for:[paused], timeout:10), .completed)
+        app.buttons["Save bookmark"].tap()
+        app.buttons["Bookmarks"].tap()
+        XCTAssertTrue(app.buttons.containing(.staticText, identifier:"The next chapter").firstMatch.waitForExistence(timeout:10))
+        app.buttons["Up Next"].tap()
+        let continuous = app.switches["Continue to the next queued book"]
+        if !continuous.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(continuous.waitForExistence(timeout:10)); XCTAssertEqual(continuous.value as? String,"0")
+        let attachment = XCTAttachment(screenshot:app.screenshot()); attachment.name = "Audiobook player"; attachment.lifetime = .keepAlways; add(attachment)
+        app.buttons["Close audiobook player"].tap()
+        XCTAssertTrue(app.buttons["audiobookMiniPlayer"].waitForExistence(timeout:10))
+        app.buttons["audiobookMiniPlayer"].tap()
+        XCTAssertTrue(app.buttons["audiobookPlayPause"].waitForExistence(timeout:10))
+    }
     @MainActor func testSongsInitialFailureAndVisiblePageRetry() { checkCatalogPaging("Songs") }
     @MainActor func testAlbumsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Albums") }
     @MainActor func testArtistsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Artists") }
@@ -61,7 +105,14 @@ final class LaunchTests: XCTestCase {
             if retryFullyVisible() { break }
             list.swipeUp(velocity: .fast)
         }
-        XCTAssertTrue(retryFullyVisible(), "Reaching the boundary must show the next-page retry")
+        // Inserting the failure footer during a fling changes the content bounds.
+        // Let that layout settle, then bring the actual Retry row into view.
+        let visibleRetry = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in retryFullyVisible() }, object:nil)
+        if XCTWaiter.wait(for:[visibleRetry], timeout:2) != .completed {
+            list.swipeUp(velocity:.slow)
+        }
+        let settledRetry = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in retryFullyVisible() }, object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[settledRetry], timeout:5), .completed, "Reaching the boundary must show the next-page retry")
         // The frame is verified inside the list; avoid UIKit's transient invalid
         // suggested activation point while the newly inserted footer settles.
         retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()

@@ -11,6 +11,10 @@ on:
         description: Rerun iPad qualification after a simulator infrastructure failure
         type: boolean
         default: false
+      audiobooks_only:
+        description: Audiobook download, session, handoff, player, and catalog boundary checks
+        type: boolean
+        default: false
       read_recovery_only:
         description: Playback app regressions plus Home and saved-song recovery UI checks
         type: boolean
@@ -54,7 +58,7 @@ jobs:
         if: matrix.device == 'iPhone' || inputs.ipad_only || inputs.volume_alignment_only
         run: bash ios/tools/prepare_entitlements.sh build/device/Build/Products/Release-iphoneos/Arrify.app ios/App/Arrify.entitlements
       - name: Qualify playback app regressions
-        if: ${{ !inputs.volume_alignment_only && !inputs.navigation_refresh_only && !inputs.read_recovery_only }}
+        if: ${{ !inputs.volume_alignment_only && !inputs.navigation_refresh_only && !inputs.read_recovery_only && !inputs.audiobooks_only }}
         env:
           DEVICE_FAMILY: ${{ matrix.device }}
         run: |
@@ -66,9 +70,13 @@ jobs:
           VOLUME_ONLY: ${{ inputs.volume_alignment_only }}
           NAVIGATION_ONLY: ${{ inputs.navigation_refresh_only }}
           RECOVERY_ONLY: ${{ inputs.read_recovery_only }}
+          AUDIOBOOKS_ONLY: ${{ inputs.audiobooks_only }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
           ONLY_TESTS=(-only-testing:ArrifyUITests)
+          if [ "$AUDIOBOOKS_ONLY" = "true" ]; then
+            ONLY_TESTS=(-only-testing:ArrifyAppTests/AudiobookDownloadTests -only-testing:ArrifyAppTests/AudiobookSessionTests -only-testing:ArrifyAppTests/PlaybackTransitionTests/testAudiobookHandoffPreservesSystemMetadataAndCachedMusicSuccessors -only-testing:ArrifyUITests/LaunchTests/testAudiobookShelfPlayerAndOptionalSettings -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testAirPlayMetadataEmbedsArtworkAndReplacesOldCover -only-testing:ArrifyUITests/LaunchTests/testArtistsSelectDistinctItemsAndVisiblePageRetry)
+          fi
           if [ "$VOLUME_ONLY" = "true" ]; then
             ONLY_TESTS=(-only-testing:ArrifyAppTests/NowPlayingArtworkTests/testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testTabletVolumeUsesNativeHeightCenteredInControlRow -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible)
           fi

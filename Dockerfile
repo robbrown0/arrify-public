@@ -35,6 +35,7 @@ COPY tests /audit/tests
 COPY contracts /audit/contracts
 COPY web /audit/web
 COPY tools /audit/tools
+COPY docs/releases /audit/docs/releases
 COPY ops/catalog/artist-name-aliases-20261102.json /audit/ops/catalog/artist-name-aliases-20261102.json
 COPY VERSION /audit/VERSION
 ENV PYTHONPATH=/audit:/audit/vendor:/audit/request-bridge
