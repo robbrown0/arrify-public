@@ -29,7 +29,7 @@ final class ServerRouterTests: XCTestCase {
         try await client.login(endpoint:"https://public.test",homeEndpoint:"https://home.test",username:"test",password:"test",deviceName:"test")
         let before = await transport.homeProofs
         await transport.setArtworkFailure()
-        do { _ = try await client.artwork("1"); XCTFail("Image timeout expected") } catch is URLError {}
+        do { _ = try await client.artwork(1); XCTFail("Image timeout expected") } catch is URLError {}
         _ = try await client.catalog(query:"")
         let after = await transport.homeProofs; XCTAssertEqual(after,before)
         let connection = await client.connection(); XCTAssertTrue(connection.connected); XCTAssertTrue(connection.home); XCTAssertFalse(connection.degraded)
