@@ -28,7 +28,7 @@ class Audiobooks:
         self.lock = threading.RLock()
         self.db = sqlite3.connect(root / 'audiobooks.db', check_same_thread=False, isolation_level=None)
         self.db.row_factory = sqlite3.Row
-        self.db.execute('PRAGMA journal_mode=WAL'); self.db.execute('PRAGMA synchronous=FULL')
+        self.db.execute('PRAGMA journal_mode=WAL'); self.db.execute('PRAGMA synchronous=FULL'); self.db.execute('PRAGMA secure_delete=ON')
         for name in ('preferences', 'state'):
             self.db.execute(f'CREATE TABLE IF NOT EXISTS {name}(user_id INTEGER PRIMARY KEY,payload TEXT NOT NULL)')
         self.db.execute('''CREATE TABLE IF NOT EXISTS checkpoints(user_id INTEGER,book_id TEXT,payload TEXT NOT NULL,

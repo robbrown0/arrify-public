@@ -67,6 +67,20 @@ def scrub(data, backups, requests=None):
             db.execute('VACUUM')
             count += 1
         finally:db.close()
+    for path in Path(backups).rglob('audiobooks.db'):
+        if path.resolve() == (Path(data)/'audiobooks/audiobooks.db').resolve():
+            raise ValueError('Backup root must not contain the live audiobook database')
+        db = sqlite3.connect(path)
+        try:
+            db.execute('PRAGMA secure_delete=ON')
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            with db:
+                for table in ('preferences', 'state', 'checkpoints', 'downloads', 'offline_receipts', 'provider_accounts'):
+                    if table in tables:
+                        column = 'arrify_id' if table == 'provider_accounts' else 'user_id'
+                        db.executemany(f'DELETE FROM {table} WHERE {column}=?', [(uid,) for uid in ids])
+            db.execute('PRAGMA wal_checkpoint(TRUNCATE)'); db.execute('VACUUM')
+        finally: db.close()
     return count
 
 

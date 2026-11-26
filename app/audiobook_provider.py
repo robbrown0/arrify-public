@@ -64,6 +64,7 @@ class AudiobookProvider:
             if bootstrap.stat().st_mode & 0o077: raise ValueError('Audiobook bootstrap requires private permissions.')
             value = json.loads(bootstrap.read_text())
             self.save_config({**value, 'origin': origin(value['origin']), 'enabled': bool(value.get('enabled', False))})
+            bootstrap.unlink()  # The encrypted database copy replaces one-time plaintext setup.
 
     def config(self):
         with self.lock: row = self.db.execute('SELECT payload FROM provider_config WHERE id=1').fetchone()

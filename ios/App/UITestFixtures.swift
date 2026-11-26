@@ -1,6 +1,7 @@
 #if DEBUG
 import Foundation
 import ArrifyCore
+@preconcurrency import AVFoundation
 
 /// Deterministic simulator-only fixtures, excluded from Release/TestFlight builds.
 @MainActor struct UITestAudioSession: PlaybackAudioSession {
@@ -15,6 +16,10 @@ actor UITestStore: CredentialStore {
     func clear() { credential = nil }
 }
 actor UITestTransport: HTTPTransport {
+    private var bookPreferences: [String:Any] = ["visible":true,"continuous":false,"speed":1.0,"back_seconds":30,"forward_seconds":30]
+    private var bookPosition = 40.0
+    private var bookDevice = ""
+    private var bookMarks: [[String:Any]] = []
     private var owner: String? = (ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1") ? "other-device" : nil
     private var playing = ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1"
     private var currentTrack = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_LIST"] == "1" ? 75 : 1
@@ -33,6 +38,26 @@ actor UITestTransport: HTTPTransport {
     private var recoveryFailures: [String: Int] = [:]
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
+        if path.hasPrefix("/api/v1/audiobooks/"), ProcessInfo.processInfo.environment["ARRIFY_UI_AUDIOBOOKS"] == "1" {
+            let body = (try? JSONSerialization.jsonObject(with:request.httpBody ?? Data())) as? [String:Any] ?? [:]
+            if path.hasSuffix("/preferences"), request.httpMethod == "POST" { bookPreferences.merge(body) { _,new in new } }
+            if path.hasSuffix("/play") { bookDevice = body["device_id"] as? String ?? ""; owner = bookDevice; playing = false }
+            if path.hasSuffix("/progress") { bookPosition = body["position"] as? Double ?? bookPosition }
+            if path.hasSuffix("/bookmark") { bookMarks.append(["time":body["position"] ?? bookPosition,"title":body["title"] ?? "Bookmark"]) }
+            let book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Good Story","author":"A Writer","narrator":"A Reader","series":"","description":"A story worth listening to.","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":120,"progress":["currentTime":bookPosition,"lastUpdate":0,"isFinished":false],
+                "parts":[["index":0,"start":0,"duration":120,"size_bytes":1920044,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+String(repeating:"a",count:43)+"/0"]],
+                "chapters":[["title":"Beginning","start":0,"end":60],["title":"The next chapter","start":60,"end":120]],"bookmarks":bookMarks]
+            let result: [String:Any]
+            if path.hasSuffix("/status") { result = ["enabled":true,"preferences":bookPreferences] }
+            else if path.hasSuffix("/library") { result = ["libraries":[["id":"books","name":"Books"]],"library_id":"books","items":[book],"total":1,"next_page":NSNull()] }
+            else if path.hasSuffix("/continue") { result = ["items":[book]] }
+            else if path.contains("/book/") { result = book }
+            else if path.hasSuffix("/play") || path.hasSuffix("/download") { result = ["book":book,"position":bookPosition,"lease":String(repeating:"a",count:43),"revision":1,"queue":[],"preferences":bookPreferences,"music_epoch":1,"music_intent":1] }
+            else if path.hasSuffix("/state") { result = ["book_id":"book-one","lease":String(repeating:"a",count:43),"device_id":bookDevice,"active":true,"position":bookPosition,"revision":1,"queue":[],"preferences":bookPreferences] }
+            else if path.hasSuffix("/preferences") { result = bookPreferences }
+            else { result = ["saved":true,"pending":false,"active":true,"remote_stamp":0] }
+            return HTTPResult(status:200,data:try JSONSerialization.data(withJSONObject:result))
+        }
         if ProcessInfo.processInfo.environment["ARRIFY_UI_READ_RECOVERY"] == "1", request.httpMethod == "GET",
            ["/api/v1/native/library", "/api/v1/native/favorites"].contains(path) {
             let failures = recoveryFailures[path, default: 0]
@@ -183,6 +208,17 @@ actor UITestTransport: HTTPTransport {
             ? value.replacingOccurrences(of: "Just Like a Pill", with: "A Very Long Song Title That Wraps Onto Two Lines in the Expanded Player During Keyboard Restoration")
             : value
         return HTTPResult(status: 200, data: Data(response.utf8))
+    }
+}
+@MainActor enum UITestAudiobookAudio {
+    static func make() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        let format = AVAudioFormat(standardFormatWithSampleRate:8000, channels:1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat:format, frameCapacity:8000*120)!
+        buffer.frameLength = buffer.frameCapacity
+        buffer.floatChannelData![0].initialize(repeating:0, count:Int(buffer.frameLength))
+        let file = try AVAudioFile(forWriting:url, settings:[AVFormatIDKey:kAudioFormatLinearPCM, AVSampleRateKey:8000, AVNumberOfChannelsKey:1, AVLinearPCMBitDepthKey:16, AVLinearPCMIsFloatKey:false, AVLinearPCMIsBigEndianKey:false])
+        try file.write(from:buffer); return url
     }
 }
 #endif

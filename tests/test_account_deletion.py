@@ -98,6 +98,12 @@ class AccountDeletionTests(unittest.TestCase):
         from tools.erase_account_backups import scrub
         root = Path(self.tmp.name)/'backups'; root.mkdir()
         db = sqlite3.connect(root/'accounts.db'); self.a.db.backup(db); db.close()
+        books = root/'audiobooks'; books.mkdir()
+        with sqlite3.connect(books/'audiobooks.db') as db:
+            db.execute('CREATE TABLE provider_accounts(arrify_id INTEGER PRIMARY KEY,payload TEXT)')
+            db.execute('CREATE TABLE checkpoints(user_id INTEGER,book_id TEXT,payload TEXT)')
+            db.executemany('INSERT INTO provider_accounts VALUES(?,?)', [(self.uid,'deleted-private-credential'),(999,'retained')])
+            db.executemany('INSERT INTO checkpoints VALUES(?,?,?)', [(self.uid,'book','deleted-progress'),(999,'book','retained')])
         self.a.delete_account('long-test-password', user_id=self.uid)
         requests = Path(self.tmp.name)/'requests'; (requests/'inbox').mkdir(parents=True)
         item = requests/'inbox'/'one.json';item.write_text(json.dumps({'requested_by':self.uid,'selection':{'title':'Song'}}))
@@ -108,6 +114,9 @@ class AccountDeletionTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT username FROM users').fetchall(), [('other',)])
             self.assertEqual(db.execute('SELECT email FROM profiles').fetchall(), [('other@example.invalid',)])
             self.assertEqual(db.execute('SELECT setup_complete FROM account_lifecycle').fetchone()[0], 1)
+        with sqlite3.connect(books/'audiobooks.db') as db:
+            self.assertEqual(db.execute('SELECT arrify_id,payload FROM provider_accounts').fetchall(), [(999,'retained')])
+            self.assertEqual(db.execute('SELECT user_id FROM checkpoints').fetchall(), [(999,)])
         self.assertEqual(scrub(self.tmp.name, root), 1)
 
     def test_owned_parties_and_guests_are_erased(self):

@@ -38,7 +38,14 @@ import AVKit
         favorites = FavoritesStore(api: api)
         library = LibraryStore(api: api)
         artwork = playback.artworkStore
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["ARRIFY_UI_AUDIOBOOKS"] == "1" {
+            let audio = try? UITestAudiobookAudio.make()
+            books = AudiobookStore(api:api, music:playback, audioSession:UITestAudioSession(), localMedia:{ _,_ in audio })
+        } else { books = AudiobookStore(api:api, music:playback) }
+        #else
         books = AudiobookStore(api:api, music:playback)
+        #endif
         playback.onExplicitMusic = { [weak books] in books?.stopForMusic() }
         playback.onPlaybackState = { [weak books] state in books?.observe(state) }
         playback.externalControl = { [weak books] action, position in books?.remote(action, position:position) ?? false }
@@ -222,7 +229,7 @@ struct MainView: View {
         }.onChange(of: showPlayer) { PlaybackDiagnostics.record("player-presented=\(showPlayer)") }.onOpenURL { url in if url.scheme == "arrify", url.host == "player" { showPlayer = true } }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
-        .fullScreenCover(isPresented: $model.books.presented) { AudiobookPlayer(model:model) }
+        .fullScreenCover(isPresented: Binding(get:{ model.books.presented }, set:{ model.books.presented = $0 })) { AudiobookPlayer(model:model) }
         .task { await model.refreshBranding(); await model.favorites.refresh() }
         .task(id: scenePhase == .active && (model.library.needsRecovery || model.favorites.needsRecovery)) {
             guard scenePhase == .active else { return }

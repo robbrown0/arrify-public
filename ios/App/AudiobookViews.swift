@@ -18,8 +18,8 @@ struct AudiobookShelf: View {
                 Text("Your next good listen").font(.subheadline).foregroundStyle(.secondary)
                 ScrollView(.horizontal, showsIndicators:false) {
                     HStack {
-                        ForEach([("all","All books"),("started","In progress"),("finished","Finished"),("downloads","Downloaded")], id:\.0) { value, label in
-                            Button(label) { filter = value }.buttonStyle(.bordered).tint(filter == value ? .green : .gray)
+                        ForEach(["all", "started", "finished", "downloads"], id:\.self) { value in
+                            Button(filterTitle(value)) { filter = value }.buttonStyle(.bordered).tint(filter == value ? Color.green : Color.gray)
                         }
                     }
                 }
@@ -59,6 +59,7 @@ struct AudiobookShelf: View {
         if filter == "downloads" { return model.books.downloads.records.values.map { $0.manifest.book }.filter { query.isEmpty || ($0.title + " " + $0.author).localizedCaseInsensitiveContains(query) }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
         return items
     }
+    private func filterTitle(_ value: String) -> String { ["all":"All books", "started":"In progress", "finished":"Finished", "downloads":"Downloaded"][value] ?? value }
     private func load(more: Bool = false) async {
         guard filter != "downloads" else { message = nil; return }
         let search = query, selected = filter, currentLibrary = library
@@ -103,7 +104,7 @@ struct AudiobookDetail: View {
         }.background(Color.black).navigationTitle("Audiobook").navigationBarTitleDisplayMode(.inline)
             .task {
                 do { detail = try await model.api.audiobook(initial.id) }
-                catch { detail = model.books.downloads.records[initial.id]?.manifest.book; if detail == nil { error = "Connect to load this book’s chapters." } }
+                catch { detail = model.books.downloads.records[initial.id]?.manifest.book; if detail == nil { self.error = "Connect to load this book’s chapters." } }
             }
     }
     private var plainDescription: String { book.description.replacingOccurrences(of:"<[^>]*>", with:" ", options:.regularExpression) }
@@ -155,7 +156,7 @@ struct AudiobookPlayer: View {
                         }.frame(maxWidth:.infinity, alignment:.leading)
                         Slider(value:Binding(get:{ seeking ?? model.books.position }, set:{ seeking = $0 }), in:0...max(1,book.duration)) { editing in
                             if !editing, let target = seeking { model.books.seek(target); seeking = nil }
-                        }.accessibilityLabel("Book listening position").accessibilityIdentifier("audiobookPosition")
+                        }.accessibilityLabel("Book listening position").accessibilityValue(AudiobookTimeline.time(model.books.position)).accessibilityIdentifier("audiobookPosition")
                         HStack { Text(AudiobookTimeline.time(model.books.position)); Spacer(); Text("−" + AudiobookTimeline.time(book.duration-model.books.position)) }.font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         HStack(spacing:36) {
                             Button { model.books.seek(model.books.position-Double(model.books.preferences.backSeconds)) } label: { VStack { Image(systemName:"gobackward").font(.title); Text("\(model.books.preferences.backSeconds)").font(.caption) }.frame(width:60, height:60) }.accessibilityLabel("Skip backward \(model.books.preferences.backSeconds) seconds")

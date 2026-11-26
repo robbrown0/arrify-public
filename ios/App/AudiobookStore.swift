@@ -15,6 +15,7 @@ import CryptoKit
     let downloads: AudiobookDownloads
     private weak var music: PlaybackCoordinator?
     private let audioSession: any PlaybackAudioSession
+    private let localMedia: ((Audiobook, AudiobookPart) -> URL?)?
     private var player = AVPlayer()
     private var observer: Any?
     private var notifications: [NSObjectProtocol] = []
@@ -62,8 +63,9 @@ import CryptoKit
     var sleepChoice = "off"
     var chapter: AudiobookChapter? { AudiobookTimeline.chapter(book?.chapters ?? [], at:position) }
     var visible: Bool { enabled && preferences.visible }
-    init(api: APIClient, music: PlaybackCoordinator, audioSession: (any PlaybackAudioSession)? = nil) {
+    init(api: APIClient, music: PlaybackCoordinator, audioSession: (any PlaybackAudioSession)? = nil, localMedia: ((Audiobook, AudiobookPart) -> URL?)? = nil) {
         self.api = api; self.music = music; downloads = AudiobookDownloads(api:api)
+        self.localMedia = localMedia
         self.audioSession = audioSession ?? SystemPlaybackAudioSession()
         observer = player.addPeriodicTimeObserver(forInterval:CMTime(seconds:0.5, preferredTimescale:600), queue:.main) { @Sendable [weak self] time in
             let seconds = time.seconds
@@ -196,7 +198,7 @@ import CryptoKit
     private func open(at target: Double, token: UUID) async throws {
         guard let book, let selected = AudiobookTimeline.part(book.parts ?? [], at:target) else { throw APIError.invalidEndpoint }
         var address: URL
-        if let local = downloads.file(book, part:selected) { address = local }
+        if let local = localMedia?(book, selected) ?? downloads.file(book, part:selected) { address = local }
         else {
             guard let path = selected.url else { throw APIError.invalidEndpoint }
             address = try await api.audiobookMediaURL(path)
