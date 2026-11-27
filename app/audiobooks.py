@@ -353,7 +353,14 @@ class Audiobooks:
                      'lease':secrets.token_urlsafe(32), 'anchor':anchor, 'expires':self.now()+3600,
                      'position':number(book['progress'].get('currentTime'), book['duration']), 'revision':0}
             with self.lock:
-                self.db.execute("DELETE FROM downloads WHERE user_id=? AND (json_extract(payload,'$.expires')<=? OR json_extract(payload,'$.book_id')=?)", (uid, self.now(), book['id']))
+                # Another device can download the same unchanged edition. Only
+                # replace this session's grant, or grants for an obsolete edition.
+                self.db.execute("""DELETE FROM downloads WHERE user_id=? AND
+                    (json_extract(payload,'$.expires')<=? OR
+                     (json_extract(payload,'$.book_id')=? AND
+                      (json_extract(payload,'$.anchor')=? OR
+                       json_extract(payload,'$.book.source_revision') IS NOT ?)))""",
+                    (uid, self.now(), book['id'], anchor, book['source_revision']))
                 count = self.db.execute('SELECT count(*) FROM downloads WHERE user_id=?', (uid,)).fetchone()[0]
                 if count >= 4: raise BookError('Finish or cancel another book download first.', 409)
                 self.db.execute('INSERT INTO downloads VALUES(?,?,?)', (state['lease'], uid, json.dumps(state)))

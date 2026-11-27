@@ -363,6 +363,27 @@ class AudiobookTests(unittest.TestCase):
         with self.assertRaises(BookError): self.books.provider.configure({'password':'replacement', 'enabled':False})
         self.assertEqual(self.books.provider.config(), before)
 
+    def test_downloading_on_another_device_preserves_the_first_devices_grant(self):
+        first = self.books.download(1, {'book_id':'book-one'}, self.token, 'web')
+        second_token = self.a.login('readerone', 'a-strong-password')
+        second = self.books.download(1, {'book_id':'book-one'}, second_token, 'web')
+        self.assertNotEqual(first['lease'], second['lease'])
+        self.books.stream(first['lease'],0); self.books.stream(second['lease'],0)
+        self.a.db.execute('DELETE FROM sessions WHERE digest=?', (self.a.digest(second_token),))
+        self.books.stream(first['lease'],0)
+        with self.assertRaises(BookError): self.books.stream(second['lease'],0)
+
+    def test_replacing_an_edition_revokes_old_download_grants_on_other_devices(self):
+        first = self.books.download(1, {'book_id':'book-one'}, self.token, 'web')
+        old = self.fixture.item
+        def changed(book_id='book-one'):
+            item = old(book_id); item['updatedAt'] = 100; return item
+        self.fixture.item = changed
+        second_token = self.a.login('readerone', 'a-strong-password')
+        second = self.books.download(1, {'book_id':'book-one'}, second_token, 'web')
+        self.books.stream(second['lease'],0)
+        with self.assertRaises(BookError): self.books.stream(first['lease'],0)
+
     def test_resume_download_reuses_url_but_changed_edition_does_not(self):
         first = self.books.download(1, {'book_id':'book-one'}, self.token, 'web')
         self.assertEqual(self.books.download(1, {'book_id':'book-one'}, self.token, 'web')['lease'], first['lease'])
