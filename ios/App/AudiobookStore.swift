@@ -587,12 +587,16 @@ import CryptoKit
                 guard !offline, manifest != nil else {
                     message = "The server couldn’t be reached. Pause playback before removing this download."; return
                 }
-                streamingOverride = token
+                // Replacing an item emits zero-time ticks before the seek.
+                // Keep those preparation ticks out of the durable progress journal.
+                preparing = true; streamingOverride = token
                 do { try await open(at:position, token:token) }
                 catch {
                     streamingOverride = nil
                     guard account == accountGeneration, token == generation else { return }
                     try? await open(at:position, token:token)
+                    guard account == accountGeneration, token == generation else { return }
+                    preparing = false
                     message = "The download was kept because streaming could not start."; return
                 }
                 if streamingOverride == token { streamingOverride = nil }
