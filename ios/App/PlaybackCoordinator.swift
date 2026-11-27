@@ -681,6 +681,8 @@ import Network
             let syncStarted = ProcessInfo.processInfo.systemUptime
             PlaybackDiagnostics.event("navigation-sync-start pending=\(cachedTransitions.count)")
             while cachedSyncTask != nil {
+                guard requestGeneration == sessionGeneration else { return }
+                if navigation, controlRevision != navigationRevision { finishNavigation(); return }
                 // One acknowledged transition can authorize a refreshed cache window.
                 // A manual skip need not wait for every later acknowledgement if its
                 // exact successor is now verified locally and the journal has room.
@@ -701,6 +703,7 @@ import Network
                 finishNavigation(); return
             }
         }
+        if navigation, controlRevision != navigationRevision { finishNavigation(); return }
         while commandInFlight {
             do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
             guard requestGeneration == sessionGeneration else { return }
