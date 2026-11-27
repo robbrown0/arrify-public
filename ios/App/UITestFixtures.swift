@@ -229,15 +229,27 @@ actor UITestTransport: HTTPTransport {
     }
 }
 @MainActor enum UITestAudiobookAudio {
-    static func make(seconds: Double = 120) throws -> URL {
+    static func data(seconds: Double = 120) -> Data {
         precondition(seconds.isFinite && seconds > 0 && seconds <= 600)
+        let frames = Int((8000*seconds).rounded()), payload = UInt32(frames*2)
+        precondition(frames > 0)
+        var data = Data(); data.reserveCapacity(44+Int(payload))
+        func append<T: FixedWidthInteger>(_ value: T) {
+            var little = value.littleEndian
+            withUnsafeBytes(of:&little) { data.append(contentsOf:$0) }
+        }
+        // Write a finalized PCM WAV header before exposing any bytes. AVAudioFile
+        // writers can defer header finalization until their Objective-C lifetime ends.
+        data.append(contentsOf:"RIFF".utf8); append(UInt32(36)+payload)
+        data.append(contentsOf:"WAVEfmt ".utf8); append(UInt32(16))
+        append(UInt16(1)); append(UInt16(1)); append(UInt32(8000)); append(UInt32(16000))
+        append(UInt16(2)); append(UInt16(16)); data.append(contentsOf:"data".utf8); append(payload)
+        data.append(Data(count:Int(payload)))
+        return data
+    }
+    static func make(seconds: Double = 120) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
-        let format = AVAudioFormat(standardFormatWithSampleRate:8000, channels:1)!
-        let buffer = AVAudioPCMBuffer(pcmFormat:format, frameCapacity:AVAudioFrameCount(8000*seconds))!
-        buffer.frameLength = buffer.frameCapacity
-        buffer.floatChannelData![0].initialize(repeating:0, count:Int(buffer.frameLength))
-        let file = try AVAudioFile(forWriting:url, settings:[AVFormatIDKey:kAudioFormatLinearPCM, AVSampleRateKey:8000, AVNumberOfChannelsKey:1, AVLinearPCMBitDepthKey:16, AVLinearPCMIsFloatKey:false, AVLinearPCMIsBigEndianKey:false])
-        try file.write(from:buffer); return url
+        try data(seconds:seconds).write(to:url,options:.atomic); return url
     }
 }
 #endif
