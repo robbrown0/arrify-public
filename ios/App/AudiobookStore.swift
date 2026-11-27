@@ -304,15 +304,19 @@ import CryptoKit
                         }
                     }
                     guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
-                    let cursor = chapterStart ?? AudiobookResume.position(remote:local.progress, local:record.lastPosition,
-                        localStamp:record.remoteStamp, pending:self.pending[value.id], restart:restart, finished:record.finished == true)
-                    self.install(local, manifest:nil, position:cursor, offline:true)
-                    stage = "local-open"
-                    try await self.open(at:cursor, token:ticket)
-                    guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
-                    PlaybackDiagnostics.event("audiobook-start-ready source=local ms=\(Int(Date().timeIntervalSince(started)*1000))")
-                    await self.connectLocalPlayback(token:ticket, account:account)
-                    return
+                    // A download can be removed while the bounded resume read is
+                    // suspended. Recheck before installing its captured manifest.
+                    if self.downloads.complete(value.id) {
+                        let cursor = chapterStart ?? AudiobookResume.position(remote:local.progress, local:record.lastPosition,
+                            localStamp:record.remoteStamp, pending:self.pending[value.id], restart:restart, finished:record.finished == true)
+                        self.install(local, manifest:nil, position:cursor, offline:true)
+                        stage = "local-open"
+                        try await self.open(at:cursor, token:ticket)
+                        guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
+                        PlaybackDiagnostics.event("audiobook-start-ready source=local ms=\(Int(Date().timeIntervalSince(started)*1000))")
+                        await self.connectLocalPlayback(token:ticket, account:account)
+                        return
+                    }
                 }
                 stage = "progress"
                 if useRemote {
@@ -625,7 +629,7 @@ import CryptoKit
     func markUnread(_ value: Audiobook) async throws -> Audiobook {
         guard !unreadBooks.contains(value.id) else { throw AudiobookPlaybackIssue.progressPending }
         let account = accountGeneration
-        if active, book?.id == value.id { pause() }
+        if book?.id == value.id { pause() }
         unreadBooks.insert(value.id)
         defer { if account == accountGeneration { unreadBooks.remove(value.id) } }
         // Finish a previously submitted write before issuing the explicit reset.

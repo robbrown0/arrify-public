@@ -137,6 +137,58 @@ final class AudiobookDownloadTests: XCTestCase {
         XCTAssertEqual(downloads.records["book-one"]?.book.progress?.isFinished,false)
         XCTAssertEqual(audio.activations,0)
     }
+    @MainActor func testRemovingDownloadDuringResumeReadFallsThroughToStreaming() async throws {
+        let transport = DownloadContractTransport(fail:false)
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://book-download.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let downloads = AudiobookDownloads(api:api,configuration:Self.configuration)
+        await downloads.download("book-one")
+        for _ in 0..<300 where !downloads.complete("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        let book = try XCTUnwrap(downloads.records["book-one"]?.book)
+        let file = try UITestAudiobookAudio.make()
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession())
+        let audio = DownloadPlaybackAudio()
+        let books = AudiobookStore(api:api,music:music,audioSession:audio,localMedia:{ _,_ in file },downloads:downloads)
+        defer { books.clear(); music.stop(); try? FileManager.default.removeItem(at:file) }
+        await books.restore(); await transport.holdNextBookRead()
+        books.play(book)
+        await transport.waitForBookRead()
+        await books.removeDownload(book.id)
+        await transport.releaseBookRead()
+        for _ in 0..<500 where !books.playing { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertGreaterThan(audio.activations,0)
+        XCTAssertTrue(books.playing,books.message ?? "Streaming did not start")
+        XCTAssertFalse(books.offline)
+        XCTAssertNotNil(books.manifest)
+        XCTAssertFalse(downloads.complete(book.id))
+        XCTAssertNil(downloads.records[book.id])
+    }
+    @MainActor func testMarkUnreadCancelsDownloadedStartupWaitingForResumeRead() async throws {
+        let transport = DownloadContractTransport(fail:false)
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://book-download.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let downloads = AudiobookDownloads(api:api,configuration:Self.configuration)
+        await downloads.download("book-one")
+        for _ in 0..<300 where !downloads.complete("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        let book = try XCTUnwrap(downloads.records["book-one"]?.book)
+        let file = try UITestAudiobookAudio.make()
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession())
+        let audio = DownloadPlaybackAudio()
+        let books = AudiobookStore(api:api,music:music,audioSession:audio,localMedia:{ _,_ in file },downloads:downloads)
+        defer { books.clear(); music.stop(); try? FileManager.default.removeItem(at:file) }
+        await books.restore(); await transport.holdNextBookRead()
+        books.play(book)
+        await transport.waitForBookRead()
+        _ = try await books.markUnread(book)
+        await transport.releaseBookRead()
+        try await Task.sleep(for:.milliseconds(100))
+        XCTAssertEqual(audio.activations,0)
+        XCTAssertFalse(books.active)
+        XCTAssertFalse(books.playing)
+        XCTAssertFalse(books.preparing)
+        XCTAssertEqual(books.position,0)
+        XCTAssertTrue(downloads.complete(book.id))
+    }
     @MainActor private func makeAPI(fail: Bool = false, empty: Bool = false) async throws -> APIClient {
         let api = APIClient(transport:DownloadContractTransport(fail:fail, empty:empty), store:UITestStore())
         try await api.login(endpoint:"https://book-download.invalid", username:"fixture", password:"fixture", deviceName:"Test")
@@ -153,6 +205,16 @@ private actor DownloadContractTransport: HTTPTransport {
     private var remoteStamp = 0.0
     private(set) var downloadRequests = 0
     func serverPosition(_ position: Double,stamp: Double) { remotePosition = position; remoteStamp = stamp }
+    private var holdBookRead = false
+    private var bookReadWaiting = false
+    private var bookReadWaiter: CheckedContinuation<Void,Never>?
+    private var bookReadObserver: CheckedContinuation<Void,Never>?
+    func holdNextBookRead() { holdBookRead = true }
+    func waitForBookRead() async {
+        if bookReadWaiting { return }
+        await withCheckedContinuation { bookReadObserver = $0 }
+    }
+    func releaseBookRead() { bookReadWaiter?.resume(); bookReadWaiter = nil }
     private var blocked = false
     private var waiter: CheckedContinuation<Void,Never>?
     func blockProgress() { blocked = true }
@@ -174,6 +236,11 @@ private actor DownloadContractTransport: HTTPTransport {
             let lease = String(repeating:fail ? "b" : empty ? "c" : "a", count:43)
             let book: [String:Any] = ["id":"book-one","library_id":"books","title":"Downloaded story","author":"Author","narrator":"Reader","series":"","description":"","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":1,
                 "parts":[["index":0,"start":0,"duration":1,"size_bytes":BookAudioProtocol.audio.count,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+lease+"/0"]],"chapters":[["title":"Chapter","start":0,"end":1]],"progress":["currentTime":remotePosition,"lastUpdate":remoteStamp,"isFinished":false]]
+            if path.contains("/book/"), holdBookRead {
+                holdBookRead = false
+                await withCheckedContinuation { bookReadWaiter = $0; bookReadWaiting = true; bookReadObserver?.resume(); bookReadObserver = nil }
+                bookReadWaiting = false
+            }
             object = path.contains("/book/") ? book : ["book":book,"position":remotePosition,"lease":lease,"revision":0,"preferences":["visible":true,"continuous":false,"speed":1,"back_seconds":30,"forward_seconds":30]]
         } else if path.hasSuffix("/audiobooks/status") {
             object = ["enabled":true,"preferences":["visible":true,"continuous":false,"speed":1,"back_seconds":30,"forward_seconds":30]]
