@@ -192,19 +192,28 @@ final class PlaybackTransitionTests: XCTestCase {
     @MainActor func testThreeCachedSkipsContinueOfflineAndReconcileInOrder() async throws {
         let (player, transport) = try await fixture(cachedNext: true, windowSize: 4)
         defer { player.stop() }
-        await transport.failTransitions(true)
         for expected in 2...4 {
-            for _ in 0..<200 where player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
+            for _ in 0..<500 where player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
             let start = ProcessInfo.processInfo.systemUptime
-            await player.send("next")
-            XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 0.5)
+            var completed = false
+            let skip = Task { await player.send("next"); completed = true }
+            for _ in 0..<500 where !completed { try await Task.sleep(for:.milliseconds(10)) }
+            guard completed else {
+                await transport.allowTransitionsImmediately(); await transport.releaseNext(); await skip.value
+                XCTFail("Cached navigation waited for a blocked server acknowledgement"); return
+            }
+            let elapsed = ProcessInfo.processInfo.systemUptime-start
+            let commits = await transport.nextCommits
+            XCTAssertEqual(commits,0,"All three local skips must complete before any acknowledgement")
+            print("NEXT_LATENCY cached-offline command_ms=\(Int(elapsed*1000)) acknowledgements=\(commits)")
             XCTAssertEqual(player.state?.currentTrackId, expected)
             await player.reconcile()
             XCTAssertEqual(player.state?.currentTrackId, expected)
+            await skip.value
         }
         let last = player.player.currentItem
         await transport.allowTransitionsImmediately()
-        await transport.failTransitions(false)
+        await transport.releaseNext()
         for _ in 0..<200 {
             await player.reconcile()
             if await transport.nextCommits == 3 { break }

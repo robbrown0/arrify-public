@@ -1241,6 +1241,7 @@ import Network
     /// Called at end-of-item, before any network await. Only completed local
     /// files from the last authorized window qualify; unknown songs never do.
     private func advanceCachedSuccessor(automatic: Bool = true) -> Bool {
+        let started = ProcessInfo.processInfo.systemUptime
         guard cachedTransitions.count < 3, !cachedReconcileRequired, !busy, !recovering, let before = state,
               permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: before.playing, mediaReady: true),
               ownsOutput, profile == loadedProfile, let id = before.upcomingTrackIds?.first,
@@ -1259,6 +1260,7 @@ import Network
             guard let self, self.preparationGeneration == token else { return }
             self.failPreparation()
         }
+        let queueStarted = ProcessInfo.processInfo.systemUptime
         let item: AVPlayerItem
         if let next = player.items().dropFirst().first, queuedTracks[ObjectIdentifier(next)] == id,
            next.status != .failed, (next.asset as? AVURLAsset)?.url == file {
@@ -1268,6 +1270,7 @@ import Network
             item = AVPlayerItem(url: file)
             player.removeAllItems(); queuedTracks = [ObjectIdentifier(item): id]; player.insert(item, after: nil)
         }
+        let queueFinished = ProcessInfo.processInfo.systemUptime
         state = after
         track = cachedMetadata[id]
         artwork = nil; receiverArtwork = nil; systemArtwork = nil
@@ -1286,7 +1289,11 @@ import Network
         position = 0; duration = 0; busy = false; playbackFailed = false; recoveryUsed = false
         resetProgressClock(); message = nil
         // Audio session remains active through a natural transition.
-        player.play(); publishNowPlaying()
+        let playStarted = ProcessInfo.processInfo.systemUptime
+        player.play()
+        let playFinished = ProcessInfo.processInfo.systemUptime
+        publishNowPlaying()
+        let metadataFinished = ProcessInfo.processInfo.systemUptime
         prepareTask = Task { [weak self] in
             guard let self else { return }
             defer { if self.preparationGeneration == token { self.finishPreparationBackgroundTask() } }
@@ -1296,7 +1303,7 @@ import Network
                 self.failPreparation()
             }
         }
-        PlaybackDiagnostics.event("cached-transition local pending=\(cachedTransitions.count)")
+        PlaybackDiagnostics.event("cached-transition local pending=\(cachedTransitions.count) ms=\(Int((metadataFinished-started)*1000)) queue-ms=\(Int((queueFinished-queueStarted)*1000)) play-ms=\(Int((playFinished-playStarted)*1000)) metadata-ms=\(Int((metadataFinished-playFinished)*1000))")
         return true
     }
 
