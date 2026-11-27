@@ -128,3 +128,11 @@ mark-unread/no-op-sync tests and chapter/unread UI checks require fresh native
 qualification. The previous ac7 iPad run failed an existing buffered-music Pause/
 activation test; the parent e30 passed both full native/UI matrices. Do not call
 this latest tree qualified until its fresh results pass.
+
+Visual review of the qualified parent iPad screenshots confirmed the author ->
+series -> numbered-book hierarchy and player spacing. Missing audiobook covers
+now use a book symbol; the generic music fallback is unchanged. Background book
+transfers use low task priority after initial playback. Unread reset also updates
+the local shelf and rejects delayed detail reads that could restore stale UI
+progress. The new chapter/unread UI regression includes that delayed-read race.
+These latest visual/behavior changes still require their new iPhone/iPad results.

@@ -21,6 +21,8 @@ actor UITestTransport: HTTPTransport {
     private var bookDevice = ""
     private var bookEpoch = 1
     private var bookMarks: [[String:Any]] = []
+    private var bookReadCount = 0
+    private var oldBookRead: CheckedContinuation<Void,Never>?
     private var owner: String? = (ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1") ? "other-device" : nil
     private var playing = ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1"
     private var currentTrack = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_LIST"] == "1" ? 75 : 1
@@ -48,7 +50,8 @@ actor UITestTransport: HTTPTransport {
             let body = (try? JSONSerialization.jsonObject(with:request.httpBody ?? Data())) as? [String:Any] ?? [:]
             if path.hasSuffix("/preferences"), request.httpMethod == "POST" { bookPreferences.merge(body) { _,new in new } }
             if path.hasSuffix("/play") { bookDevice = body["device_id"] as? String ?? ""; owner = bookDevice; playing = false; bookEpoch += 1 }
-            if path.hasSuffix("/progress") { bookPosition = body["position"] as? Double ?? bookPosition }
+            if path.hasSuffix("/progress") || path.hasSuffix("/offline-progress") { bookPosition = body["position"] as? Double ?? bookPosition }
+            if path.hasSuffix("/offline-progress") { oldBookRead?.resume(); oldBookRead = nil }
             if path.hasSuffix("/bookmark") { bookMarks.append(["time":body["position"] ?? bookPosition,"title":body["title"] ?? "Bookmark"]) }
             let book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Good Story","author":"A Writer","narrator":"A Reader","series":"Stories","authors":[["id":"writer-one","name":"A Writer"]],"series_entries":[["id":"series-one","name":"Stories","sequence":"2.5"]],"published_year":"2024","description":"A story worth listening to.","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":120,"progress":["currentTime":bookPosition,"lastUpdate":0,"isFinished":false],
                 "parts":[["index":0,"start":0,"duration":120,"size_bytes":1920044,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+String(repeating:"a",count:43)+"/0"]],
@@ -59,7 +62,14 @@ actor UITestTransport: HTTPTransport {
             else if path.hasSuffix("/authors") { result = ["items":[["id":"writer-one","name":"A Writer"]],"library_id":"books","total":1] }
             else if path.hasSuffix("/series") { result = ["items":[["id":"series-one","name":"Stories"]],"library_id":"books","total":1] }
             else if path.hasSuffix("/continue") { result = ["items":[book]] }
-            else if path.contains("/book/") { result = book }
+            else if path.contains("/book/") {
+                bookReadCount += 1
+                if bookReadCount == 1, ProcessInfo.processInfo.environment["ARRIFY_UI_UNREAD_READ_RACE"] == "1" {
+                    await withCheckedContinuation { oldBookRead = $0 }
+                    try? await Task.sleep(for:.milliseconds(500))
+                }
+                result = book
+            }
             else if path.hasSuffix("/play") || path.hasSuffix("/download") { result = ["book":book,"position":bookPosition,"lease":String(repeating:"a",count:43),"revision":1,"queue":[],"preferences":bookPreferences,"music_epoch":bookEpoch,"music_intent":1] }
             else if path.hasSuffix("/state") { result = ["book_id":"book-one","lease":String(repeating:"a",count:43),"device_id":bookDevice,"active":true,"position":bookPosition,"revision":1,"queue":[],"preferences":bookPreferences] }
             else if path.hasSuffix("/preferences") { result = bookPreferences }

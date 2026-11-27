@@ -63,6 +63,11 @@ import CryptoKit
         }
     }
     func retry() async { await load(more:failedMore) }
+    func applyProgress(_ book: Audiobook) {
+        if ["started","finished"].contains(filter), (book.progress?.currentTime ?? 0) == 0, book.progress?.isFinished != true {
+            items.removeAll { $0.id == book.id }
+        } else if let index = items.firstIndex(where:{ $0.id == book.id }) { items[index] = book }
+    }
     func reconnect() async {
         let owner = account, key = requestKey
         var attempt = 0
@@ -634,6 +639,7 @@ import CryptoKit
         downloads.checkpoint(value.id,position:0,remoteStamp:receipt.remoteStamp,finished:false)
         fresh.progress = AudiobookProgress(currentTime:0,lastUpdate:receipt.remoteStamp ?? fresh.progress?.lastUpdate ?? 0,isFinished:false)
         continueListening.removeAll { $0.id == value.id }
+        shelf.applyProgress(fresh)
         if book?.id == value.id {
             active = false; wantsPlayback = false; playing = false; preparing = false; manifest = nil
             player.pause(); player.replaceCurrentItem(with:nil); currentURL = nil; position = 0; book = fresh; conflict = false

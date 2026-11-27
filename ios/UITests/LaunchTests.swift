@@ -97,6 +97,7 @@ final class LaunchTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
         app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
+        app.launchEnvironment["ARRIFY_UI_UNREAD_READ_RACE"] = "1"
         app.launch()
         XCTAssertTrue(app.textFields["username"].waitForExistence(timeout:30))
         app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
@@ -124,6 +125,9 @@ final class LaunchTests: XCTestCase {
         let reset = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in !app.buttons["Play from beginning"].exists },object:nil)
         XCTAssertEqual(XCTWaiter.wait(for:[reset],timeout:20),.completed)
         XCTAssertFalse(app.buttons["Play from beginning"].exists)
+        let stale = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in app.buttons["Play from beginning"].exists },object:nil)
+        stale.isInverted = true
+        XCTAssertEqual(XCTWaiter.wait(for:[stale],timeout:2),.completed)
     }
     @MainActor func testSongsInitialFailureAndVisiblePageRetry() { checkCatalogPaging("Songs") }
     @MainActor func testAlbumsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Albums") }

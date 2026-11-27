@@ -150,6 +150,7 @@ struct AudiobookDetail: View {
     @State private var detail: Audiobook?
     @State private var error: String?
     @State private var markingUnread = false
+    @State private var detailGeneration = UUID()
     private var book: Audiobook { detail ?? initial }
     var body: some View {
         ScrollView {
@@ -177,7 +178,7 @@ struct AudiobookDetail: View {
                 downloadControls
                 if (book.progress?.currentTime ?? 0) > 0 { Button("Play from beginning") { model.books.play(book, restart:true) } }
                 Button {
-                    markingUnread = true; error = nil
+                    markingUnread = true; error = nil; detailGeneration = UUID()
                     Task {
                         defer { markingUnread = false }
                         do { detail = try await model.books.markUnread(book) }
@@ -202,8 +203,16 @@ struct AudiobookDetail: View {
             }.padding(24)
         }.background(Color.black).navigationTitle("Audiobook").navigationBarTitleDisplayMode(.inline)
             .task {
-                do { detail = try await model.api.audiobook(initial.id) }
-                catch { detail = model.books.downloads.records[initial.id]?.manifest.book; if detail == nil { self.error = "Connect to load this book’s chapters." } }
+                let generation = detailGeneration
+                do {
+                    let value = try await model.api.audiobook(initial.id)
+                    guard generation == detailGeneration, !Task.isCancelled else { return }
+                    detail = value
+                } catch {
+                    guard generation == detailGeneration, !Task.isCancelled else { return }
+                    detail = model.books.downloads.records[initial.id]?.book
+                    if detail == nil { self.error = "Connect to load this book’s chapters." }
+                }
             }
     }
     private var plainDescription: String { book.description.replacingOccurrences(of:"<[^>]*>", with:" ", options:.regularExpression) }
