@@ -149,11 +149,13 @@ struct AudiobookDetail: View {
     let initial: Audiobook
     @State private var detail: Audiobook?
     @State private var error: String?
+    @State private var markingUnread = false
     private var book: Audiobook { detail ?? initial }
     var body: some View {
         ScrollView {
             VStack(alignment:.leading, spacing:20) {
-                RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(maxWidth:300).aspectRatio(1, contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:16)).frame(maxWidth:.infinity)
+                RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(maxWidth:300).aspectRatio(1, contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:16))
+                    .overlay(alignment:.bottomTrailing) { AudiobookDownloadIndicator(downloads:model.books.downloads,book:book).padding(10) }.frame(maxWidth:.infinity)
                 Text(book.title).font(.largeTitle.bold())
                 if let authors = book.authors, !authors.isEmpty {
                     ForEach(authors) { author in NavigationLink(author.name) { AudiobookScopedShelf(model:model, name:author.name, library:book.libraryId, author:author.id) }.font(.title3) }
@@ -166,6 +168,7 @@ struct AudiobookDetail: View {
                 Text(AudiobookTimeline.time(book.duration)).foregroundStyle(.secondary)
                 Button { model.books.play(book) } label: { Label(listenTitle, systemImage:"play.fill").frame(maxWidth:.infinity, minHeight:44) }.buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("listenAudiobook")
+                    .disabled(markingUnread)
                 HStack {
                     Button("Play next") { Task { await model.books.queueBook(book.id, action:"next") } }
                     Spacer()
@@ -173,12 +176,27 @@ struct AudiobookDetail: View {
                 }.frame(minHeight:44)
                 downloadControls
                 if (book.progress?.currentTime ?? 0) > 0 { Button("Play from beginning") { model.books.play(book, restart:true) } }
+                Button {
+                    markingUnread = true; error = nil
+                    Task {
+                        defer { markingUnread = false }
+                        do { detail = try await model.books.markUnread(book) }
+                        catch { self.error = AudiobookPlaybackIssue.classify(error).message }
+                    }
+                } label: {
+                    HStack { if markingUnread { ProgressView() }; Label("Mark as unread",systemImage:"arrow.counterclockwise") }.frame(minHeight:44)
+                }.disabled(markingUnread).accessibilityIdentifier("markAudiobookUnread")
                 if let error { Text(error).foregroundStyle(.secondary) }
                 if let message = model.books.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
                 Text(plainDescription).textSelection(.enabled)
                 if let chapters = book.chapters {
                     Text("Chapters").font(.title2.bold())
-                    ForEach(chapters) { chapter in HStack { Text(chapter.title); Spacer(); Text(AudiobookTimeline.time(chapter.end-chapter.start)).foregroundStyle(.secondary) }.frame(minHeight:44) }
+                    ForEach(chapters) { chapter in
+                        AudiobookChapterRow(chapter:chapter, current:model.books.book?.id == book.id && model.books.chapter?.id == chapter.id, playing:model.books.playing) {
+                            if model.books.active, model.books.book?.id == book.id { model.books.seek(chapter.start,resumePlayback:true) }
+                            else { model.books.play(book,startingAt:chapter.start) }
+                        }
+                    }
                 }
             }.padding(24)
         }.background(Color.black).navigationTitle("Audiobook").navigationBarTitleDisplayMode(.inline)
@@ -234,6 +252,7 @@ struct AudiobookPlayer: View {
                 VStack(spacing:20) {
                     if let book = model.books.book {
                         RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230, height:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230).clipShape(RoundedRectangle(cornerRadius:18))
+                            .overlay(alignment:.bottomTrailing) { AudiobookDownloadIndicator(downloads:model.books.downloads,book:book).padding(10) }
                         VStack(alignment:.leading, spacing:8) {
                             Text(book.author).foregroundStyle(.secondary)
                             Text(book.title).font(.title.bold())
@@ -283,7 +302,7 @@ struct AudiobookPlayer: View {
         switch tab {
         case "Chapters":
             ForEach(book.chapters ?? []) { chapter in
-                Button { model.books.seek(chapter.start) } label: { HStack { Text(chapter.title).multilineTextAlignment(.leading); Spacer(); Text(AudiobookTimeline.time(chapter.end-chapter.start)).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth:.infinity, minHeight:44) }.foregroundStyle(model.books.chapter?.start == chapter.start ? Color.green : Color.primary)
+                AudiobookChapterRow(chapter:chapter,current:model.books.chapter?.id == chapter.id,playing:model.books.playing) { model.books.seek(chapter.start,resumePlayback:true) }
             }
         case "Up Next":
             Toggle("Continue to the next queued book", isOn:Binding(get:{ model.books.preferences.continuous }, set:{ enabled in var value = model.books.preferences; value.continuous = enabled; Task { await model.books.updatePreferences(value) } }))
@@ -312,11 +331,41 @@ struct AudiobookPlayer: View {
     }
 }
 
+private struct AudiobookChapterRow: View {
+    let chapter: AudiobookChapter
+    let current: Bool
+    let playing: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action:action) {
+            HStack(spacing:12) {
+                Image(systemName:current ? (playing ? "waveform" : "pause.circle.fill") : "play.circle")
+                    .frame(width:24).accessibilityHidden(true)
+                VStack(alignment:.leading,spacing:3) {
+                    Text(chapter.title).multilineTextAlignment(.leading)
+                    if current { Text(playing ? "Playing" : "Current chapter · Paused").font(.caption) }
+                }
+                Spacer()
+                Text(AudiobookTimeline.time(chapter.end-chapter.start)).font(.caption).foregroundStyle(.secondary)
+            }.padding(.horizontal,10).frame(maxWidth:.infinity,minHeight:52)
+                .background(current ? Color.green.opacity(0.12) : Color.clear,in:RoundedRectangle(cornerRadius:10))
+        }.buttonStyle(.plain).foregroundStyle(current ? Color.green : Color.primary)
+            .accessibilityLabel("Play chapter: " + chapter.title)
+            .accessibilityValue(current ? (playing ? "Playing" : "Paused") : "")
+            .accessibilityAddTraits(current ? .isSelected : [])
+            .accessibilityIdentifier("audiobookChapter-\(chapter.start)")
+    }
+}
+
 struct AudiobookSettings: View {
     @Bindable var books: AudiobookStore
     var body: some View {
         Form {
             Toggle("Show Audiobooks", isOn:Binding(get:{ books.preferences.visible }, set:{ update(visible:$0) }))
+            Section {
+                Toggle("Download when listening",isOn:$books.automaticDownloads)
+                Text("Start listening immediately and save the book on this device in the background. Downloads may use cellular data. Paused downloads stay paused.").font(.footnote).foregroundStyle(.secondary)
+            }
             Section("Skip intervals") {
                 Picker("Backward", selection:Binding(get:{ books.preferences.backSeconds }, set:{ update(back:$0) })) { ForEach([10,15,20,30,60,90], id:\.self) { Text("\($0) seconds").tag($0) } }
                 Picker("Forward", selection:Binding(get:{ books.preferences.forwardSeconds }, set:{ update(forward:$0) })) { ForEach([10,15,20,30,60,90], id:\.self) { Text("\($0) seconds").tag($0) } }
@@ -344,6 +393,23 @@ private struct AudiobookDownloadStatus: View {
             else if downloads.working.contains(book.id) { Text("Downloading · \(Int(downloads.fraction(book.id)*100))%") }
             else if downloads.records[book.id] != nil { Label("Download paused", systemImage:"pause.circle") }
         }.font(.caption)
+    }
+}
+private struct AudiobookDownloadIndicator: View {
+    let downloads: AudiobookDownloads
+    let book: Audiobook
+    var body: some View {
+        ZStack {
+            Circle().fill(.ultraThinMaterial)
+            if downloads.working.contains(book.id) {
+                Circle().stroke(Color.primary.opacity(0.2),lineWidth:3).padding(3)
+                Circle().trim(from:0,to:CGFloat(downloads.fraction(book.id))).stroke(Color.green,style:StrokeStyle(lineWidth:3,lineCap:.round)).rotationEffect(.degrees(-90)).padding(3)
+                Image(systemName:"arrow.down").font(.caption.bold())
+            } else {
+                Image(systemName:downloads.complete(book.id) ? "checkmark.circle.fill" : downloads.records[book.id] == nil ? "arrow.down.circle" : "pause.circle")
+                    .font(.title3).foregroundStyle(downloads.complete(book.id) ? Color.green : Color.primary)
+            }
+        }.frame(width:36,height:36).accessibilityHidden(true)
     }
 }
 private struct AudiobookShelfRow: View {

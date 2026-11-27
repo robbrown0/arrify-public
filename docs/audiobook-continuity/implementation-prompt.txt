@@ -33,3 +33,28 @@ https://help.audible.com/s/article/title-is-missing?language=en_US
 https://help.libbyapp.com/en-us/6285.htm
 https://prologue.audio/
 https://api.audiobookshelf.org/
+
+Additional accepted requirements (Nov 27; preserve alongside all the above):
+- Clearly highlight the currently playing chapter, distinguish its paused state,
+  and allow direct chapter selection from book details and the player.
+- Provide Mark as unread without starting audio or removing downloaded files.
+  Reset position and finished state through the acknowledged progress protocol;
+  preserve other books, bookmarks and unrelated pending history.
+- Follow Audible's documented tap-to-listen / background-download pattern rather
+  than waiting for a full book download: resume promptly, then automatically
+  download after audio starts, with a clear progress ring, downloaded/paused
+  indicators, Pause/Resume download controls and an automatic-download setting.
+  Disclose cellular use. Never auto-resume a download the user explicitly paused.
+  Reference: https://help.audible.co.uk/s/article/download-titles
+- Verify clean downloaded copies adopt newer remote rewinds; unchanged paused
+  heartbeats must not create competing writes; first intent still sends seq 1.
+  Bound clean-position reads without waiting for uncooperative cancellation,
+  fence late account/selection results, and respect known library-access denials.
+- These additional source changes are pending fresh native qualification; inspect
+  current CI rather than assuming earlier green runs qualify the latest tree.
+
+Other authorized parallel work: music discovery date handling is isolated in
+PR #69 and its helper-only deployment. Native music Next performance is isolated
+in PR #70 with a requested TestFlight release. Preserve both efforts and report
+their validation/deployment status separately. Do not silently include unqualified
+audiobook changes in the native music TestFlight release.

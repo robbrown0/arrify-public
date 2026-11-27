@@ -115,6 +115,47 @@ final class AudiobookSessionTests: XCTestCase {
         XCTAssertTrue(books.playing, books.message ?? "Explicit server position must open a new session")
         XCTAssertFalse(books.conflict); XCTAssertLessThan(books.position,10)
     }
+    @MainActor func testUnchangedPausedPositionDoesNotWriteOrConflictWithAnotherDevice() async throws {
+        let transport = BookSessionTransport()
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://fixture.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession())
+        await transport.owner(music.deviceId)
+        let file = try UITestAudiobookAudio.make()
+        let books = AudiobookStore(api:api,music:music,audioSession:BookSessionAudio(),localMedia:{ _,_ in file })
+        defer { books.clear(); music.stop(); try? FileManager.default.removeItem(at:file) }
+        await books.restore(); let book = try await api.audiobook("book-one")
+        books.play(book)
+        for _ in 0..<500 where !books.playing { try await Task.sleep(for:.milliseconds(20)) }
+        books.pause(); await books.synchronize(force:true,bookID:book.id)
+        let before = await transport.progressRequests
+        await transport.conflictProgress()
+        books.seek(books.position)
+        for _ in 0..<500 where books.preparing { try await Task.sleep(for:.milliseconds(20)) }
+        await books.synchronize(force:true,bookID:book.id)
+        let after = await transport.progressRequests
+        XCTAssertEqual(after,before)
+        XCTAssertFalse(books.conflict)
+        XCTAssertFalse(books.playing)
+    }
+    @MainActor func testMarkUnreadResetsProgressWithoutStartingPlayback() async throws {
+        let transport = BookSessionTransport()
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://fixture.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession())
+        let audio = BookSessionAudio()
+        let books = AudiobookStore(api:api,music:music,audioSession:audio)
+        defer { books.clear(); music.stop() }
+        await books.restore()
+        let original = try await api.audiobook("book-one")
+        let result = try await books.markUnread(original)
+        XCTAssertEqual(result.progress?.currentTime,0)
+        XCTAssertEqual(result.progress?.isFinished,false)
+        XCTAssertEqual(audio.activations,0)
+        XCTAssertFalse(books.active)
+        let resets = await transport.offlinePositions
+        XCTAssertEqual(resets,[0])
+    }
 
 }
 @MainActor private final class BookPartRequests {
@@ -130,6 +171,8 @@ final class AudiobookSessionTests: XCTestCase {
     func invalidate() { active = false }
 }
 private actor BookSessionTransport: HTTPTransport {
+    private(set) var progressRequests = 0
+    private(set) var offlinePositions: [Double] = []
     let base = CallResumeTransitionTransport()
     let session = UUID().uuidString.lowercased()
     let multipart: Bool
@@ -146,6 +189,7 @@ private actor BookSessionTransport: HTTPTransport {
         let path = request.url!.path
         if path.hasSuffix("/play"), let body = request.httpBody,
            let object = try? JSONSerialization.jsonObject(with:body) as? [String:Any], object["use_remote"] as? Bool == true { rejectProgress = false }
+        if path.hasSuffix("/offline-progress") || path.hasSuffix("/progress") { progressRequests += 1 }
         if rejectProgress && (path.hasSuffix("/offline-progress") || path.hasSuffix("/progress")) {
             return HTTPResult(status:409,data:Data(#"{"error":{"code":"audiobook_conflict","message":"Your place changed on another device."}}"#.utf8))
         }
@@ -164,6 +208,8 @@ private actor BookSessionTransport: HTTPTransport {
             book["chapters"] = [["title":"Prologue","start":0,"end":1],["title":"Chapter One","start":1,"end":1.5]]
         }
         let object: [String:Any]
+        if path.hasSuffix("/offline-progress"), let data = request.httpBody,
+           let payload = try JSONSerialization.jsonObject(with:data) as? [String:Any], let position = payload["position"] as? Double { offlinePositions.append(position) }
         if path.contains("/book/") {
             if holdRead { await withCheckedContinuation { waiter = $0 } }
             object = book

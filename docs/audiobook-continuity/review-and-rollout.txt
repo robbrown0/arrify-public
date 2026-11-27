@@ -13,7 +13,7 @@ position; that is evidence of retained progress, not proof of the earlier race.
 
 Delivered behavior
 ==================
-- Compatible complete downloads start locally before progress/ownership reads.
+- Compatible complete downloads make a one-second bounded fresh-position read when the journal is clean, then open local audio. Progress/ownership writes do not gate availability; a missed deadline falls back to the durable local cursor.
   Local playback journals its position and reconciles when the server returns.
   Known conflicts retain both histories; intentional rewinds never use max(position).
 - Concurrent synchronization callers await shared work; forced selected-book work
@@ -99,3 +99,32 @@ Record device, network conditions and tap-to-audio measurements before and after
 Retain the prior image and beta build. If qualification fails, revert the deployment
 and distribute the prior app build without restoring older listening progress or
 book files over newer user data. These changes add no server schema migration.
+
+Additional Nov 27 continuity and listening UX corrections
+- Clean downloaded copies consult newer server progress briefly; dirty local
+  history still requires conflict-safe reconciliation. A late cancelled read
+  cannot begin playback. Known access denial stops local playback.
+- Unchanged paused heartbeats no longer manufacture dirty history. Initial
+  intents, rewinds, play/pause and finished changes still produce checkpoints.
+- Chapter rows visibly distinguish Playing from Current chapter / Paused, support
+  direct chapter playback from details, and retain the native seek fences.
+- Mark as unread uses the existing conflict-aware offline-progress protocol to
+  reset canonical position/finished state without taking playback ownership,
+  starting audio, deleting downloads or erasing bookmarks. Dirty history is
+  discarded only after acknowledgement; failed resets preserve it.
+- Listen begins playback at the synchronized cursor, then automatically downloads
+  in the background after actual audio advances. Completed local parts can serve
+  later chapter/part transitions; the current stream is never interrupted just
+  to switch its source. Visible download progress/check/paused indicators and
+  Pause/Resume controls remain. A device setting disables automatic downloads.
+  User-paused partial downloads remain paused. Cellular use is disclosed there.
+
+Current Audible download guidance explicitly describes immediate streaming with
+background download: https://help.audible.co.uk/s/article/download-titles
+This supports the interaction pattern; it is not a claim that Arrify has matched
+Audible's measured responsiveness or visual quality.
+New Core deadline/checkpoint tests, native downloaded-resume/automatic-download/
+mark-unread/no-op-sync tests and chapter/unread UI checks require fresh native
+qualification. The previous ac7 iPad run failed an existing buffered-music Pause/
+activation test; the parent e30 passed both full native/UI matrices. Do not call
+this latest tree qualified until its fresh results pass.

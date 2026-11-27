@@ -76,6 +76,46 @@ final class AudiobookDownloadTests: XCTestCase {
         XCTAssertFalse(downloads.complete("book-one")); XCTAssertNil(downloads.file(book,part:part))
         downloads.clear(); await api.logout()
     }
+    @MainActor func testCleanDownloadedCopyAdoptsNewerServerPositionBeforePlayback() async throws {
+        let transport = DownloadContractTransport(fail:false)
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://book-download.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let downloads = AudiobookDownloads(api:api,configuration:Self.configuration)
+        await downloads.download("book-one")
+        for _ in 0..<300 where !downloads.complete("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        downloads.checkpoint("book-one",position:0.2,remoteStamp:100)
+        await transport.serverPosition(0.4,stamp:200)
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession())
+        let audio = DownloadPlaybackAudio()
+        let books = AudiobookStore(api:api,music:music,audioSession:audio,downloads:downloads)
+        defer { books.clear(); music.stop() }
+        await books.restore(); let stale = try XCTUnwrap(downloads.records["book-one"]?.manifest.book)
+        books.play(stale)
+        for _ in 0..<500 where audio.activations == 0 { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertGreaterThan(audio.activations,0)
+        XCTAssertEqual(books.position,0.4,accuracy:0.1)
+        books.pause()
+    }
+    @MainActor func testListeningAutomaticallyDownloadsAfterAudioStarts() async throws {
+        let transport = DownloadContractTransport(fail:false)
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://book-download.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let downloads = AudiobookDownloads(api:api,configuration:Self.configuration)
+        let file = try UITestAudiobookAudio.make()
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession())
+        let books = AudiobookStore(api:api,music:music,audioSession:DownloadPlaybackAudio(),localMedia:{ _,_ in file },downloads:downloads)
+        let previous = books.automaticDownloads
+        defer { books.automaticDownloads = previous; books.clear(); music.stop(); try? FileManager.default.removeItem(at:file) }
+        books.automaticDownloads = true
+        await books.restore(); let book = try await api.audiobook("book-one")
+        books.play(book)
+        for _ in 0..<500 where !books.playing { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertTrue(books.playing)
+        for _ in 0..<500 where !downloads.complete("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertTrue(downloads.complete("book-one"),downloads.errors["book-one"] ?? "Automatic download did not finish")
+        let count = await transport.downloadRequests
+        XCTAssertEqual(count,1)
+    }
     @MainActor private func makeAPI(fail: Bool = false, empty: Bool = false) async throws -> APIClient {
         let api = APIClient(transport:DownloadContractTransport(fail:fail, empty:empty), store:UITestStore())
         try await api.login(endpoint:"https://book-download.invalid", username:"fixture", password:"fixture", deviceName:"Test")
@@ -87,6 +127,11 @@ final class AudiobookDownloadTests: XCTestCase {
 }
 
 private actor DownloadContractTransport: HTTPTransport {
+    private let base = CallResumeTransitionTransport()
+    private var remotePosition = 0.0
+    private var remoteStamp = 0.0
+    private(set) var downloadRequests = 0
+    func serverPosition(_ position: Double,stamp: Double) { remotePosition = position; remoteStamp = stamp }
     private var blocked = false
     private var waiter: CheckedContinuation<Void,Never>?
     func blockProgress() { blocked = true }
@@ -103,12 +148,17 @@ private actor DownloadContractTransport: HTTPTransport {
             object = ["server_id":"book-download-test", "features":["rotating_refresh","refresh_recovery_v1","native_media_manifest_v1","native_catalog_v1","native_playback_v1"]]
         } else if path.hasSuffix("sessions") || path.hasSuffix("refresh") {
             object = ["access_token":"fixture", "refresh_token":"fixture", "expires_in":3600,"refresh_expires_in":86400,"session_id":session]
-        } else if path.hasSuffix("/audiobooks/download") {
+        } else if path.hasSuffix("/audiobooks/download") || path.hasSuffix("/audiobooks/play") || path.contains("/audiobooks/book/") {
+            if path.hasSuffix("/download") { downloadRequests += 1 }
             let lease = String(repeating:fail ? "b" : empty ? "c" : "a", count:43)
             let book: [String:Any] = ["id":"book-one","library_id":"books","title":"Downloaded story","author":"Author","narrator":"Reader","series":"","description":"","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":1,
-                "parts":[["index":0,"start":0,"duration":1,"size_bytes":BookAudioProtocol.audio.count,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+lease+"/0"]],"chapters":[["title":"Chapter","start":0,"end":1]],"progress":["currentTime":0,"lastUpdate":0,"isFinished":false]]
-            object = ["book":book,"position":0,"lease":lease,"revision":0,"preferences":["visible":true,"continuous":false,"speed":1,"back_seconds":30,"forward_seconds":30]]
-        } else { object = ["ok":true] }
+                "parts":[["index":0,"start":0,"duration":1,"size_bytes":BookAudioProtocol.audio.count,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+lease+"/0"]],"chapters":[["title":"Chapter","start":0,"end":1]],"progress":["currentTime":remotePosition,"lastUpdate":remoteStamp,"isFinished":false]]
+            object = path.contains("/book/") ? book : ["book":book,"position":remotePosition,"lease":lease,"revision":0,"preferences":["visible":true,"continuous":false,"speed":1,"back_seconds":30,"forward_seconds":30]]
+        } else if path.hasSuffix("/audiobooks/status") {
+            object = ["enabled":true,"preferences":["visible":true,"continuous":false,"speed":1,"back_seconds":30,"forward_seconds":30]]
+        } else if path.hasSuffix("/offline-progress") || path.hasSuffix("/audiobooks/progress") { object = ["saved":true,"pending":false,"active":true,"remote_stamp":remoteStamp] }
+        else if !path.contains("/audiobooks/") { return try await base.send(request) }
+        else { object = ["ok":true] }
         return HTTPResult(status:200,data:try JSONSerialization.data(withJSONObject:object))
     }
 }

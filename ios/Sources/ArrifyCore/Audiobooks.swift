@@ -126,6 +126,9 @@ public struct AudiobookJournalEntry: Codable, Sendable {
     public init(checkpoint: AudiobookCheckpoint, lease: String?, playing: Bool, dirty: Bool) {
         self.checkpoint = checkpoint; self.lease = lease; self.playing = playing; self.dirty = dirty
     }
+    public func needsCheckpoint(position: Double, playing: Bool, finished: Bool) -> Bool {
+        checkpoint.seq == 0 || abs(position-checkpoint.position) > 0.001 || self.playing != playing || checkpoint.finished != finished
+    }
     /// A delayed response cannot erase a later seek or a newly opened session.
     @discardableResult public mutating func acknowledge(session: String, sequence: Int, remoteStamp: Double?) -> Bool {
         guard checkpoint.sessionId == session, sequence <= checkpoint.seq else { return false }
@@ -163,6 +166,48 @@ public enum AudiobookTimeline {
         await current.value
         if identity == token { task = nil }
         return true
+    }
+}
+
+/// A clean downloaded checkpoint can briefly consult the server without making
+/// local playback depend on an unresponsive read or its cancellation handler.
+@MainActor public enum AudiobookReadDeadline {
+    public static func load<Value: Sendable>(timeout: Duration = .seconds(1),
+        wait: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for:$0) },
+        operation: @escaping @Sendable () async throws -> Value) async throws -> Value {
+        let race = AudiobookReadRace<Value>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                race.install(continuation)
+                race.attach(Task { @MainActor in
+                    do { try Task.checkCancellation(); race.resolve(.success(try await operation())) }
+                    catch { race.resolve(.failure(error)) }
+                })
+                race.attach(Task { @MainActor in
+                    do { try await wait(timeout); race.resolve(.failure(URLError(.timedOut))) }
+                    catch { race.resolve(.failure(error)) }
+                })
+            }
+        } onCancel: {
+            Task { @MainActor in race.resolve(.failure(CancellationError())) }
+        }
+    }
+}
+@MainActor private final class AudiobookReadRace<Value: Sendable> {
+    private var continuation: CheckedContinuation<Value, any Error>?
+    private var result: Result<Value, any Error>?
+    private var workers: [Task<Void,Never>] = []
+    func install(_ continuation: CheckedContinuation<Value, any Error>) {
+        if let result { continuation.resume(with:result) } else { self.continuation = continuation }
+    }
+    func attach(_ task: Task<Void,Never>) {
+        if result != nil { task.cancel() } else { workers.append(task) }
+    }
+    func resolve(_ result: Result<Value, any Error>) {
+        guard self.result == nil else { return }
+        self.result = result; continuation?.resume(with:result); continuation = nil
+        let tasks = workers; workers = []
+        for task in tasks { task.cancel() }
     }
 }
 
