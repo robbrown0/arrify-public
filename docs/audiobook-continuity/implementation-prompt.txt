@@ -63,4 +63,4 @@ Final startup/UI contracts:
 - Recheck downloaded-file availability after the bounded position read. Removing a download during that read must fall through to a server grant before audio activates.
 - Mark as unread must cancel pending startup for that book even before playback becomes active. Releasing an old metadata read must never restart it.
 - The entire 52-point chapter row, including the empty space between title and duration, must accept taps. The UI regression verifies an accessible target at least 44 points high and taps that empty area.
-- Validate all of these together with the merged music Next changes. The book branch is staged source; do not merge or publish its server/client changes without the user's approval. The separate music TestFlight release is authorized and remains separate.
+- Validate all of these together with the merged music Next changes. The book branch is staged source; do not deploy or publish its server/client changes without the user's approval. The separate music TestFlight release is authorized and remains separate.
