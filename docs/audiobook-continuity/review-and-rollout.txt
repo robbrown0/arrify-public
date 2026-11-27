@@ -136,3 +136,24 @@ transfers use low task priority after initial playback. Unread reset also update
 the local shelf and rejects delayed detail reads that could restore stale UI
 progress. The new chapter/unread UI regression includes that delayed-read race.
 These latest visual/behavior changes still require their new iPhone/iPad results.
+
+Combined source integration, 2026-11-27
+The follow-up branch now retains all primary commits and integrates main
+bd3b9c408cb7cd88173724fe0c65069651a170e5 (qualified native Next plus deployed
+discovery fix). PR68 targets main and supersedes the earlier stacked PR67.
+The public diff contains the audiobook work; existing music/discovery fixes
+remain intact. No live source tree or production book state was changed.
+
+Two startup races are fenced: recheck complete files after the awaited position
+read, and cancel a target book's pending startup when marking it unread. A held
+stream-grant regression proves removed local audio cannot activate first.
+Shelf and detail generations reject late reads after an acknowledged reset.
+The chapter UI test exposed a PlainButton hit-area bug: the full label looked
+tappable but its empty center did not accept taps. An explicit rectangular
+content shape covers the 52-point row; the regression taps its empty area.
+
+Before this integration, the reviewed backend passed 774 tests and the book
+client passed 60 Core/118 app tests on both device configurations. The earlier
+chapter UI failure is not waived. Full combined backend/Core/app/UI checks and
+final screenshot review remain required; final results belong in PR68.
+Production audiobook rollout remains staged pending explicit approval.
