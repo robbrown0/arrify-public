@@ -300,9 +300,10 @@ final class PlaybackTransitionTests: XCTestCase {
         }
         await transport.removeUpcomingOnAcknowledgement()
         await transport.releaseNext()
-        for _ in 0..<200 where player.showsPauseControl { try await Task.sleep(for:.milliseconds(10)) }
+        for _ in 0..<200 where player.message != "The queue changed. Tap Play to continue." { try await Task.sleep(for:.milliseconds(10)) }
         let requests = await transport.nextRequests
         XCTAssertEqual(requests,1,"A changed queue must reject the remaining local journal before another command")
+        XCTAssertEqual(player.message,"The queue changed. Tap Play to continue.")
         XCTAssertEqual(player.player.rate,0)
         XCTAssertFalse(player.showsPauseControl)
         await transport.releaseNext()
