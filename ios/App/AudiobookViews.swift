@@ -111,7 +111,7 @@ struct AudiobookShelf: View {
             .buttonStyle(.bordered).tint(selected ? Color.green : Color.gray)
     }
     private var displayed: [Audiobook] {
-        if shelf.filter == "downloads" { return model.books.downloads.records.values.map { $0.manifest.book }.filter { shelf.query.isEmpty || ($0.title + " " + $0.author).localizedCaseInsensitiveContains(shelf.query) }.sorted { left, right in
+        if shelf.filter == "downloads" { return model.books.downloads.records.values.map { $0.book }.filter { shelf.query.isEmpty || ($0.title + " " + $0.author).localizedCaseInsensitiveContains(shelf.query) }.sorted { left, right in
             switch savedSort {
             case "author": return left.author.localizedStandardCompare(right.author) == .orderedAscending
             case "release": return (left.publishedYear ?? "") > (right.publishedYear ?? "")

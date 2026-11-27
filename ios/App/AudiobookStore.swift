@@ -637,6 +637,8 @@ import CryptoKit
         if book?.id == value.id {
             active = false; wantsPlayback = false; playing = false; preparing = false; manifest = nil
             player.pause(); player.replaceCurrentItem(with:nil); currentURL = nil; position = 0; book = fresh; conflict = false
+            part = nil; systemArtwork = nil; receiverArtwork = nil; audioSession.invalidate()
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         }
         automaticDownloadCandidate = automaticDownloadCandidate == value.id ? nil : automaticDownloadCandidate
         persist(); message = nil

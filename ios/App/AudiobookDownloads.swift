@@ -11,6 +11,13 @@ import CryptoKit
         var lastPosition: Double?
         var remoteStamp: Double?
         var finished: Bool?
+        var book: Audiobook {
+            var value = manifest.book
+            if let lastPosition {
+                value.progress = AudiobookProgress(currentTime:lastPosition,lastUpdate:remoteStamp ?? value.progress?.lastUpdate ?? 0,isFinished:finished ?? value.progress?.isFinished ?? false)
+            }
+            return value
+        }
     }
     private let api: APIClient
     private let configuration: @MainActor (String) -> URLSessionConfiguration
