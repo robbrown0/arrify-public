@@ -290,6 +290,23 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertEqual(player.player.rate, 0)
         XCTAssertFalse(player.showsPauseControl)
     }
+    @MainActor func testChangedAcknowledgedTailStopsBeforeSendingStaleTransitions() async throws {
+        let (player, transport) = try await fixture(cachedNext: true, windowSize: 4)
+        defer { player.stop() }
+        for expected in 2...4 {
+            for _ in 0..<500 where player.navigationPending { try await Task.sleep(for:.milliseconds(10)) }
+            await player.send("next")
+            XCTAssertEqual(player.state?.currentTrackId,expected)
+        }
+        await transport.removeUpcomingOnAcknowledgement()
+        await transport.releaseNext()
+        for _ in 0..<200 where player.showsPauseControl { try await Task.sleep(for:.milliseconds(10)) }
+        let requests = await transport.nextRequests
+        XCTAssertEqual(requests,1,"A changed queue must reject the remaining local journal before another command")
+        XCTAssertEqual(player.player.rate,0)
+        XCTAssertFalse(player.showsPauseControl)
+        await transport.releaseNext()
+    }
 
     @MainActor func testUncachedStartupPreemptsReadAheadUntilAudioAdvances() async throws {
         let probe = StartupCacheProbe()
@@ -979,7 +996,9 @@ actor CallResumeTransitionTransport: HTTPTransport {
     private var current = 1
     private var windowSize = 2
     private var rollingWindow = false
+    private var removeAcknowledgedUpcoming = false
     func useRollingWindow() { rollingWindow = true }
+    func removeUpcomingOnAcknowledgement() { removeAcknowledgedUpcoming = true }
     private var immediateTransitions = false
     private var rejectedTransitions = false
     func setWindowSize(_ value: Int) { windowSize = value }
@@ -1034,7 +1053,7 @@ actor CallResumeTransitionTransport: HTTPTransport {
             "server_time": revision, "queue_revision": revision, "owner_device_id": owner,
             "owner_epoch": 1, "intent": revision, "playing": playing, "observed": "playing",
             "seek_target_seconds": 0, "seek_intent": current, "play_id": current,
-            "upcoming_track_ids": current < windowSize ? Array((current + 1)...min(windowSize, rollingWindow ? current + 3 : windowSize)) : []
+            "upcoming_track_ids": removeAcknowledgedUpcoming && nextCommits > 0 ? [] : current < windowSize ? Array((current + 1)...min(windowSize, rollingWindow ? current + 3 : windowSize)) : []
         ] as [String: Any]))
     }
     func send(_ request: URLRequest) async throws -> HTTPResult {

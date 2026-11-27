@@ -1342,6 +1342,16 @@ import Network
                         self.state = PlaybackState.merging(projected, into: self.state)
                         self.aheadTask?.cancel(); self.aheadTask = nil; self.aheadCompletedRevision = nil
                         self.startReadAhead()
+                    } else {
+                        // The acknowledged tail no longer admits the local journal.
+                        // Stop before sending or playing another stale successor.
+                        self.cachedTransitions = []; self.cachedReconcileRequired = true
+                        self.aheadTask?.cancel(); self.aheadTask = nil
+                        self.player.pause(); self.permission.userPause(); self.cancelRecovery()
+                        self.finishNavigation(); self.message = "The queue changed. Tap Play to continue."
+                        self.publishNowPlaying()
+                        PlaybackDiagnostics.event("cached-transition tail-changed")
+                        return
                     }
                     PlaybackDiagnostics.event("cached-transition acknowledged")
                 }
