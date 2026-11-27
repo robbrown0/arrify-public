@@ -41,14 +41,16 @@ import CryptoKit
                 if let data = try? Data(contentsOf:file), let value = try? JSONDecoder().decode(Record.self, from:data) { records[value.manifest.book.id] = value }
             }
             let identifier = "com.robnets.arrify.books." + key
-            let handler = BookDownloadDelegate(root:directory, identifier:identifier, progress:{ [weak self] book, received, expected in
+            let handler = BookDownloadDelegate(root:directory, identifier:identifier, progress:{ [weak self] name, received, expected in
                 Task { @MainActor in
-                    guard let self, self.epoch == ticket else { return }
+                    let parts = name.split(separator:"/"); guard parts.count == 3 else { return }; let book = String(parts[0])
+                    guard let self, self.epoch == ticket, self.records[book]?.transferId == String(parts[1]) else { return }
                     self.transferProgress[book] = (received, expected)
                 }
-            }) { [weak self] book, error in
+            }) { [weak self] name, error in
                 Task { @MainActor in
-                    guard let self, self.epoch == ticket else { return }
+                    let parts = name.split(separator:"/"); guard parts.count == 3 else { return }; let book = String(parts[0])
+                    guard let self, self.epoch == ticket, self.records[book]?.transferId == String(parts[1]) else { return }
                     self.working.remove(book); self.errors[book] = error
                     self.transferProgress.removeValue(forKey:book)
                     self.revision += 1
@@ -213,7 +215,7 @@ private final class BookDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
         let now = Date.timeIntervalSinceReferenceDate
         guard valid, let name = name(downloadTask), now-(progressAt[downloadTask.taskIdentifier] ?? 0) >= 0.25 else { return }
         progressAt[downloadTask.taskIdentifier] = now
-        progress(String(name.split(separator:"/")[0]), max(0,totalBytesWritten), max(0,totalBytesExpectedToWrite))
+        progress(name, max(0,totalBytesWritten), max(0,totalBytesExpectedToWrite))
     }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         lock.lock(); defer { lock.unlock() }; guard valid, let name = name(downloadTask),
@@ -226,18 +228,17 @@ private final class BookDownloadDelegate: NSObject, URLSessionDownloadDelegate, 
             try FileManager.default.moveItem(at:location, to:destination)
             try FileManager.default.setAttributes([.protectionKey:FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath:destination.path)
             try? FileManager.default.removeItem(at:root.appending(path:name + ".resume"))
-        } catch { completion(String(name.split(separator:"/")[0]), "Download paused. Check device storage.") }
+        } catch { completion(name, "Download paused. Check device storage.") }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
         lock.lock(); defer { lock.unlock() }; guard valid, let name = name(task) else { return }
         progressAt.removeValue(forKey:task.taskIdentifier)
-        let book = String(name.split(separator:"/")[0])
         if let data = (error as NSError?)?.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
             try? data.write(to:root.appending(path:name + ".resume"), options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication])
         }
         let code = (task.response as? HTTPURLResponse)?.statusCode ?? 0
         let message = error == nil && (200..<300).contains(code) && FileManager.default.fileExists(atPath:root.appending(path:name).path) ? nil : "Download paused. Your completed parts are saved."
-        completion(book, message)
+        completion(name, message)
     }
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
         Task { @MainActor [identifier] in AudiobookBackgroundEvents.finish(identifier) }

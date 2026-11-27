@@ -160,6 +160,15 @@ class AudiobookTests(unittest.TestCase):
             self.assertEqual(result['next_page'],2)
             self.assertTrue(user.call_args_list[1].args[2].endswith('/filterdata'))
 
+    def test_author_series_include_only_the_selected_library(self):
+        with patch.object(self.books.provider, 'user') as user:
+            user.side_effect = [{'libraries':[{'id':'books','mediaType':'book'}]}, {'series':[
+                {'id':'series-one','name':'Stories','items':[{'libraryId':'books'}]},
+                {'id':'private-series','name':'Other books','items':[{'libraryId':'private'}]}]}]
+            result = self.books.groups(1, 'series', author='writer')
+            self.assertEqual([x['id'] for x in result['items']], ['series-one'])
+            self.assertIn('library=books',user.call_args_list[1].args[2])
+
     def test_metadata_preserves_author_series_numbers_and_date_precision(self):
         item = self.fixture.item(); item['addedAt'] = 123
         item['media']['metadata'].update(authors=[{'id':'writer','name':'Writer'}],

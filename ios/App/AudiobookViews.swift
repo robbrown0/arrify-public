@@ -16,7 +16,7 @@ struct AudiobookShelf: View {
         if downloaded { return displayed.isEmpty }
         return shelf.hasLoaded && !shelf.loading && displayed.isEmpty && shelf.message == nil
     }
-    private var taskKey: String { shelf.requestKey + ":" + String(scenePhase == .active) }
+    private var taskKey: String { shelf.requestKey + ":" + section + ":" + String(scenePhase == .active) }
     private var recoveryKey: String { taskKey + ":" + String(shelf.needsRecovery) }
     var body: some View {
         ScrollView {
@@ -29,7 +29,15 @@ struct AudiobookShelf: View {
                     if shelf.filter == "all", shelf.query.isEmpty, !model.books.resumeBooks.isEmpty {
                         Text("Continue listening").font(.title2.bold())
                         ScrollView(.horizontal, showsIndicators:false) {
-                            HStack(alignment:.top, spacing:16) { ForEach(model.books.resumeBooks) { book in AudiobookShelfCard(model:model, book:book).frame(width:155) } }
+                            HStack(alignment:.top, spacing:16) { ForEach(model.books.resumeBooks) { book in
+                                Button { model.books.play(book) } label: {
+                                    VStack(alignment:.leading, spacing:7) {
+                                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).aspectRatio(1,contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:12))
+                                        Text(book.title).font(.headline).lineLimit(2)
+                                        Text("Resume · " + AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary)
+                                    }.frame(width:155,alignment:.leading)
+                                }.buttonStyle(.plain).accessibilityIdentifier("continue-audiobook-" + book.id)
+                            } }
                         }
                     }
                     ScrollView(.horizontal, showsIndicators:false) { filterButtons }
@@ -45,7 +53,7 @@ struct AudiobookShelf: View {
                     recoveryStatus
                     bookGrid
                 } else {
-                    AudiobookGroupBrowser(model:model, kind:section, library:shelf.library, query:shelf.query)
+                    AudiobookGroupBrowser(model:model, kind:section, library:shelf.library, query:shelf.query).id(section + shelf.library)
                 }
                 if section == "books" && showsLoading { ProgressView().frame(maxWidth:.infinity) }
                 if section == "books" && showsEmpty { emptyShelf }
@@ -184,7 +192,7 @@ struct AudiobookDetail: View {
     @ViewBuilder private var downloadControls: some View {
         let downloads = model.books.downloads
         if downloads.complete(book.id) {
-            HStack { Label("Downloaded", systemImage:"checkmark.circle.fill").foregroundStyle(.green); Spacer(); Button("Remove download", role:.destructive) { Task { await downloads.remove(book.id) } } }.frame(minHeight:44)
+            HStack { Label("Downloaded", systemImage:"checkmark.circle.fill").foregroundStyle(.green); Spacer(); Button("Remove download", role:.destructive) { Task { await model.books.removeDownload(book.id) } } }.frame(minHeight:44)
         } else if downloads.working.contains(book.id) {
             VStack(alignment:.leading) {
                 ProgressView(value:downloads.fraction(book.id))
@@ -341,6 +349,7 @@ private struct AudiobookDownloadStatus: View {
 private struct AudiobookShelfRow: View {
     let model: AppModel
     let book: Audiobook
+    var selectedSeries: String = ""
     var body: some View {
         NavigationLink { AudiobookDetail(model:model, initial:book) } label: {
             HStack(alignment:.center, spacing:16) {
@@ -348,7 +357,7 @@ private struct AudiobookShelfRow: View {
                 VStack(alignment:.leading, spacing:5) {
                     Text(book.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
                     Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                    if let series = book.seriesEntries?.first { Text(series.label).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                    if let series = book.seriesEntries?.first(where:{ $0.id == selectedSeries }) ?? book.seriesEntries?.first { Text(series.label).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
                     Text(book.progress?.isFinished == true ? "Finished" : AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary)
                     AudiobookDownloadStatus(downloads:model.books.downloads, book:book)
                 }.frame(maxWidth:.infinity, alignment:.leading)
@@ -362,13 +371,14 @@ private struct AudiobookGroupBrowser: View {
     let kind: String
     let library: String
     let query: String
+    var author: String = ""
     @State private var items: [AudiobookPerson] = []
     @State private var next: Int?
     @State private var loaded = false
     @State private var loading = false
     @State private var message: String?
     @State private var identity = UUID()
-    private var key: String { kind + "\u{0}" + library + "\u{0}" + query }
+    private var key: String { kind + "\u{0}" + library + "\u{0}" + query + "\u{0}" + author }
     var body: some View {
         LazyVStack(spacing:0) {
             ForEach(items) { item in
@@ -392,7 +402,7 @@ private struct AudiobookGroupBrowser: View {
         defer { if identity == ticket { loading = false } }
         do {
             if !query.isEmpty { try await Task.sleep(for:.milliseconds(250)) }
-            let result = try await model.api.audiobookGroups(kind, library:library, page:more ? next ?? 0 : 0, query:query)
+            let result = try await model.api.audiobookGroups(kind, library:library, page:more ? next ?? 0 : 0, query:query, author:author)
             guard identity == ticket, !Task.isCancelled else { return }
             items = more ? items + result.items : result.items; next = result.nextPage; loaded = true
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
@@ -410,20 +420,15 @@ private struct AudiobookScopedShelf: View {
         if !series.isEmpty { store.sort = "sequence" }
         _shelf = State(initialValue:store)
     }
-    private var series: [AudiobookSeries] {
-        var values: [String:AudiobookSeries] = [:]
-        for book in shelf.items { for value in book.seriesEntries ?? [] { values[value.id] = value } }
-        return values.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
     var body: some View {
         ScrollView {
             LazyVStack(alignment:.leading, spacing:18) {
-                if !shelf.author.isEmpty && !series.isEmpty {
+                if !shelf.author.isEmpty {
                     Text("Series").font(.title2.bold())
-                    ForEach(series) { value in NavigationLink(value.name) { AudiobookScopedShelf(model:model, name:value.name, library:shelf.library, series:value.id) }.frame(minHeight:44) }
-                    Text("Books").font(.title2.bold())
+                    AudiobookGroupBrowser(model:model, kind:"series", library:shelf.library, query:"", author:shelf.author)
+                    Text("All books").font(.title2.bold())
                 }
-                ForEach(shelf.items) { book in AudiobookShelfRow(model:model, book:book) }
+                ForEach(shelf.items) { book in AudiobookShelfRow(model:model, book:book, selectedSeries:shelf.series) }
                 if shelf.loading { ProgressView().frame(maxWidth:.infinity) }
                 if let message = shelf.message { Text(message).foregroundStyle(.secondary); Button("Try again") { Task { await shelf.retry() } } }
                 if shelf.hasLoaded && shelf.items.isEmpty && !shelf.loading && shelf.message == nil { ContentUnavailableView("No books yet", systemImage:"books.vertical", description:Text("Available books in this library will appear here.")) }

@@ -27,6 +27,28 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(reconnecting.waitForNonExistence(timeout:15),"Recovery continues while this screen is visible")
         XCTAssertTrue(book.exists)
     }
+    @MainActor func testAudiobookAuthorSeriesNavigationAndBookNumbers() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout:30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout:20)); app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Audiobooks"].firstMatch.waitForExistence(timeout:20)); app.buttons["Audiobooks"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["audiobook-book-one"].waitForExistence(timeout:20))
+        let sections = app.segmentedControls["audiobookBrowseSections"]
+        sections.buttons["Authors"].tap()
+        XCTAssertTrue(app.buttons["A Writer"].waitForExistence(timeout:15)); app.buttons["A Writer"].tap()
+        XCTAssertTrue(app.buttons["Stories"].firstMatch.waitForExistence(timeout:15))
+        let author = XCTAttachment(screenshot:app.screenshot()); author.name = "Audiobook author and series"; author.lifetime = .keepAlways; add(author)
+        app.buttons["Stories"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Book 2.5 · Stories"].firstMatch.waitForExistence(timeout:15))
+        let series = XCTAttachment(screenshot:app.screenshot()); series.name = "Audiobook numbered series"; series.lifetime = .keepAlways; add(series)
+        app.buttons["audiobook-book-one"].tap()
+        XCTAssertTrue(app.staticTexts["Published 2024"].waitForExistence(timeout:10))
+    }
     @MainActor func testAudiobookShelfPlayerAndOptionalSettings() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"

@@ -215,7 +215,7 @@ class Audiobooks:
         return {'libraries': allowed, 'library_id': selected, 'items': books, 'total': total, 'next_page': next_page,
                 'preferences': self.preferences(uid)}
 
-    def groups(self, uid, kind, library_id=None, page=0, query=''):
+    def groups(self, uid, kind, library_id=None, page=0, query='', author=None):
         if kind not in ('authors', 'series'): raise BookError('Invalid audiobook grouping.', 400)
         self.provider.require()
         libraries = self.provider.user(uid, 'GET', '/api/libraries').get('libraries', [])
@@ -225,8 +225,14 @@ class Audiobooks:
         if type(page) is not int or not 0 <= page <= 10000: raise BookError('Invalid library page.', 400)
         # Filter data contains names and IDs, not audio tracks or full book objects.
         # The provider transport bounds the response at 8 MiB.
-        result = self.provider.user(uid, 'GET', '/api/libraries/' + selected + '/filterdata')
-        rows = result.get(kind, [])
+        if author:
+            if kind != 'series': raise BookError('Choose an author to browse series.', 400)
+            author = identifier(author)
+            result = self.provider.user(uid, 'GET', '/api/authors/' + author + '?' + urllib.parse.urlencode({'include':'items,series', 'library':selected}))
+            rows = [x for x in result.get('series', []) if any(item.get('libraryId') == selected for item in x.get('items', []))]
+        else:
+            result = self.provider.user(uid, 'GET', '/api/libraries/' + selected + '/filterdata')
+            rows = result.get(kind, [])
         query = str(query).strip().casefold()[:200]
         values = [{'id': identifier(x['id']), 'name': str(x.get('name', ''))[:500]} for x in rows
                   if x.get('id') and query in str(x.get('name', '')).casefold()]

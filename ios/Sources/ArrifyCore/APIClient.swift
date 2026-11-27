@@ -451,10 +451,10 @@ public actor APIClient {
         c.queryItems = [.init(name:"q", value:query), .init(name:"library", value:library), .init(name:"page", value:String(page)), .init(name:"filter", value:filter), .init(name:"sort", value:sort), .init(name:"author", value:author), .init(name:"series", value:series)]
         return try await call(c.string!)
     }
-    public func audiobookGroups(_ kind: String, library: String = "", page: Int = 0, query: String = "") async throws -> AudiobookGroups {
+    public func audiobookGroups(_ kind: String, library: String = "", page: Int = 0, query: String = "", author: String = "") async throws -> AudiobookGroups {
         guard ["authors", "series"].contains(kind) else { throw APIError.invalidEndpoint }
         var c = URLComponents(); c.path = "/api/v1/audiobooks/" + kind
-        c.queryItems = [.init(name:"library", value:library), .init(name:"page", value:String(page)), .init(name:"q", value:query)]
+        c.queryItems = [.init(name:"library", value:library), .init(name:"page", value:String(page)), .init(name:"q", value:query), .init(name:"author", value:author)]
         return try await call(c.string!)
     }
     public func continueAudiobooks() async throws -> [Audiobook] {

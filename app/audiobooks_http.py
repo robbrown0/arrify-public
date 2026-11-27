@@ -43,7 +43,7 @@ def dispatch(handler, path, data=None):
             query = parse_qs(urlsplit(handler.path).query)
             try: page = int(query.get('page', ['0'])[0])
             except ValueError: raise BookError('Invalid library page.', 400) from None
-            result = books.groups(uid, path.rsplit('/', 1)[1], query.get('library', [None])[0], page, query.get('q', [''])[0])
+            result = books.groups(uid, path.rsplit('/', 1)[1], query.get('library', [None])[0], page, query.get('q', [''])[0], query.get('author', [None])[0])
         elif path == '/api/v1/audiobooks/continue' and data is None:
             result = books.continue_listening(uid)
         elif path == '/api/v1/audiobooks/state' and data is None:

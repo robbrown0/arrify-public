@@ -50,12 +50,14 @@ actor UITestTransport: HTTPTransport {
             if path.hasSuffix("/play") { bookDevice = body["device_id"] as? String ?? ""; owner = bookDevice; playing = false; bookEpoch += 1 }
             if path.hasSuffix("/progress") { bookPosition = body["position"] as? Double ?? bookPosition }
             if path.hasSuffix("/bookmark") { bookMarks.append(["time":body["position"] ?? bookPosition,"title":body["title"] ?? "Bookmark"]) }
-            let book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Good Story","author":"A Writer","narrator":"A Reader","series":"","description":"A story worth listening to.","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":120,"progress":["currentTime":bookPosition,"lastUpdate":0,"isFinished":false],
+            let book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Good Story","author":"A Writer","narrator":"A Reader","series":"Stories","authors":[["id":"writer-one","name":"A Writer"]],"series_entries":[["id":"series-one","name":"Stories","sequence":"2.5"]],"published_year":"2024","description":"A story worth listening to.","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":120,"progress":["currentTime":bookPosition,"lastUpdate":0,"isFinished":false],
                 "parts":[["index":0,"start":0,"duration":120,"size_bytes":1920044,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+String(repeating:"a",count:43)+"/0"]],
                 "chapters":[["title":"Beginning","start":0,"end":60],["title":"The next chapter","start":60,"end":120]],"bookmarks":bookMarks]
             let result: [String:Any]
             if path.hasSuffix("/status") { result = ["enabled":true,"preferences":bookPreferences] }
             else if path.hasSuffix("/library") { result = ["libraries":[["id":"books","name":"Books"]],"library_id":"books","items":[book],"total":1,"next_page":NSNull()] }
+            else if path.hasSuffix("/authors") { result = ["items":[["id":"writer-one","name":"A Writer"]],"library_id":"books","total":1] }
+            else if path.hasSuffix("/series") { result = ["items":[["id":"series-one","name":"Stories"]],"library_id":"books","total":1] }
             else if path.hasSuffix("/continue") { result = ["items":[book]] }
             else if path.contains("/book/") { result = book }
             else if path.hasSuffix("/play") || path.hasSuffix("/download") { result = ["book":book,"position":bookPosition,"lease":String(repeating:"a",count:43),"revision":1,"queue":[],"preferences":bookPreferences,"music_epoch":bookEpoch,"music_intent":1] }

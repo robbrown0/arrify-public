@@ -97,6 +97,7 @@ import CryptoKit
     private struct SavedPreferences: Codable { let value: AudiobookPreferences; let pending: Bool }
     private var part: AudiobookPart?
     private var currentURL: URL?
+    private var streamingOverride: UUID?
     private var wantsPlayback = false
     private let syncGate = AudiobookSyncGate()
     private var syncIssues: [String: AudiobookPlaybackIssue] = [:]
@@ -328,11 +329,11 @@ import CryptoKit
     }
     private func open(at target: Double, token: UUID) async throws {
         guard let book, let selected = AudiobookTimeline.part(book.parts ?? [], at:target) else { throw APIError.invalidEndpoint }
-        if part?.index == selected.index, let item = player.currentItem, item.status == .readyToPlay {
+        if streamingOverride != token, part?.index == selected.index, let item = player.currentItem, item.status == .readyToPlay {
             try await seekAndPlay(selected:selected, target:target, token:token); return
         }
         var address: URL
-        if let local = localMedia?(book, selected) ?? downloads.file(book, part:selected) { address = local }
+        if streamingOverride != token, let local = localMedia?(book, selected) ?? downloads.file(book, part:selected) { address = local }
         else {
             guard let path = selected.url else { throw APIError.invalidEndpoint }
             address = try await api.audiobookMediaURL(path)
@@ -377,10 +378,11 @@ import CryptoKit
     }
 
     func pause() {
+        let hadPlaybackIntent = wantsPlayback || playing || preparing
         if interrupted { resumeAfterInterruption = false }
         wantsPlayback = false; generation = UUID(); operation?.cancel(); operation = nil
         player.pause(); playing = false; preparing = false
-        if active { save(); publish(); Task { await synchronize() } }
+        if active { if hadPlaybackIntent { save() }; publish(); Task { await synchronize() } }
     }
     func resume() {
         guard active, let book else { return }; message = nil
@@ -440,11 +442,11 @@ import CryptoKit
     }
     func synchronize(force: Bool = false, bookID: String? = nil) async {
         let account = accountGeneration
-        await syncGate.run { [weak self] in await self?.synchronizePass(force:force, bookID:bookID, account:account) }
+        let performed = await syncGate.run { [weak self] in await self?.synchronizePass(force:force, bookID:bookID, account:account) }
         guard account == accountGeneration, !Task.isCancelled else { return }
         // A caller may have joined a heartbeat snapshot that did not contain its
         // latest checkpoint. Drain once more, preserving sequence acknowledgements.
-        if force, let bookID, pending[bookID]?.dirty == true {
+        if force, let bookID, pending[bookID]?.dirty == true, !performed || syncIssues[bookID] == nil {
             await syncGate.run { [weak self] in await self?.synchronizePass(force:true, bookID:bookID, account:account) }
         }
     }
@@ -521,6 +523,11 @@ import CryptoKit
             guard token == generation, account == accountGeneration, !Task.isCancelled else { return }
             let result = try await begin(book.id, deviceId:music?.deviceId ?? "", revision:state.queueRevision, requestId:token.uuidString.lowercased())
             guard token == generation, account == accountGeneration, !Task.isCancelled else { return }
+            guard result.book.sourceRevision == book.sourceRevision else {
+                pause(); conflict = true; message = "This book’s edition changed. Your earlier position is saved."; return
+            }
+            // Refresh the fenced streaming URLs without reopening local audio.
+            self.book = result.book
             // Keep the local player and cursor; acquiring ownership never seeks.
             manifest = result; offline = false; pending[book.id]?.lease = result.lease
             persist(); save()
@@ -554,6 +561,33 @@ import CryptoKit
         if let manifest, state.ownerDeviceId != music?.deviceId || state.ownerEpoch != manifest.musicEpoch || state.intent != manifest.musicIntent {
             pause(); pending[book?.id ?? ""]?.lease = nil; persist(); message = "Playback moved. Your audiobook place is saved."
         } else if offline, state.playing, state.ownerDeviceId != music?.deviceId { pause(); message = "Another device is playing. Your offline place is saved." }
+    }
+    func removeDownload(_ id: String) async {
+        let account = accountGeneration, token = generation
+        if active, book?.id == id, currentURL?.isFileURL == true {
+            if !wantsPlayback {
+                pause(); active = false; manifest = nil; player.replaceCurrentItem(with:nil)
+            } else {
+                await synchronize(force:true, bookID:id)
+                await connectLocalPlayback(token:token, account:account)
+                guard account == accountGeneration, token == generation, !Task.isCancelled else { return }
+                guard !offline, manifest != nil else {
+                    message = "The server couldn’t be reached. Pause playback before removing this download."; return
+                }
+                streamingOverride = token
+                do { try await open(at:position, token:token) }
+                catch {
+                    streamingOverride = nil
+                    guard account == accountGeneration, token == generation else { return }
+                    try? await open(at:position, token:token)
+                    message = "The download was kept because streaming could not start."; return
+                }
+                if streamingOverride == token { streamingOverride = nil }
+                guard account == accountGeneration, token == generation, !Task.isCancelled else { return }
+            }
+        }
+        guard account == accountGeneration else { return }
+        await downloads.remove(id)
     }
     func stopForMusic() {
         pause(); active = false; presented = false; book = nil; manifest = nil

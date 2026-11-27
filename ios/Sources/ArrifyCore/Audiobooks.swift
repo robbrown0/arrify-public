@@ -155,13 +155,14 @@ public enum AudiobookTimeline {
     private var identity = UUID()
     public init() {}
     public func reset() { identity = UUID(); task?.cancel(); task = nil }
-    public func run(_ operation: @escaping @MainActor () async -> Void) async {
-        if let task { await task.value; return }
+    @discardableResult public func run(_ operation: @escaping @MainActor () async -> Void) async -> Bool {
+        if let task { await task.value; return false }
         let token = UUID(); identity = token
         let current = Task { @MainActor in await operation() }
         task = current
         await current.value
         if identity == token { task = nil }
+        return true
     }
 }
 
