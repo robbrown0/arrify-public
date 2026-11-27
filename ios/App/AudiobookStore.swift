@@ -64,8 +64,11 @@ import CryptoKit
     }
     func retry() async { await load(more:failedMore) }
     func applyProgress(_ book: Audiobook) {
+        generation = UUID(); loading = false
         if ["started","finished"].contains(filter), (book.progress?.currentTime ?? 0) == 0, book.progress?.isFinished != true {
             items.removeAll { $0.id == book.id }
+            next = nil
+            Task { [weak self] in await self?.load() }
         } else if let index = items.firstIndex(where:{ $0.id == book.id }) { items[index] = book }
     }
     func reconnect() async {

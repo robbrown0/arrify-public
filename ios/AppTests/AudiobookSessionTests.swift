@@ -156,6 +156,23 @@ final class AudiobookSessionTests: XCTestCase {
         let resets = await transport.offlinePositions
         XCTAssertEqual(resets,[0])
     }
+    @MainActor func testDelayedShelfReadCannotUndoAcknowledgedUnreadProgress() async throws {
+        let transport = BookSessionTransport()
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://fixture.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let shelf = AudiobookShelfStore(api:api)
+        await shelf.load()
+        XCTAssertEqual(shelf.items.first?.progress?.currentTime,40)
+        await transport.holdLibraryRead()
+        let refresh = Task { await shelf.load() }
+        await transport.waitForLibraryRead()
+        var reset = try await api.audiobook("book-one")
+        reset.progress = AudiobookProgress(currentTime:0,lastUpdate:1,isFinished:false)
+        shelf.applyProgress(reset)
+        await transport.releaseLibraryRead(); await refresh.value
+        XCTAssertEqual(shelf.items.first?.progress?.currentTime,0)
+        XCTAssertFalse(shelf.loading)
+    }
 
 }
 @MainActor private final class BookPartRequests {
@@ -173,6 +190,13 @@ final class AudiobookSessionTests: XCTestCase {
 private actor BookSessionTransport: HTTPTransport {
     private(set) var progressRequests = 0
     private(set) var offlinePositions: [Double] = []
+    private var holdLibrary = false
+    private var libraryWaiting = false
+    private var libraryWaiter: CheckedContinuation<Void,Never>?
+    private var libraryObserver: CheckedContinuation<Void,Never>?
+    func holdLibraryRead() { holdLibrary = true }
+    func waitForLibraryRead() async { if !libraryWaiting { await withCheckedContinuation { libraryObserver = $0 } } }
+    func releaseLibraryRead() { holdLibrary = false; libraryWaiter?.resume(); libraryWaiter = nil }
     let base = CallResumeTransitionTransport()
     let session = UUID().uuidString.lowercased()
     let multipart: Bool
@@ -210,7 +234,15 @@ private actor BookSessionTransport: HTTPTransport {
         let object: [String:Any]
         if path.hasSuffix("/offline-progress"), let data = request.httpBody,
            let payload = try JSONSerialization.jsonObject(with:data) as? [String:Any], let position = payload["position"] as? Double { offlinePositions.append(position) }
-        if path.contains("/book/") {
+        if path.hasSuffix("/library") {
+            var stale = book; stale["progress"] = ["currentTime":40,"lastUpdate":0,"isFinished":false]
+            if holdLibrary {
+                libraryWaiting = true; libraryObserver?.resume(); libraryObserver = nil
+                await withCheckedContinuation { libraryWaiter = $0 }
+            }
+            object = ["libraries":[["id":"books","name":"Books"]],"library_id":"books","items":[stale],"total":1]
+        }
+        else if path.contains("/book/") {
             if holdRead { await withCheckedContinuation { waiter = $0 } }
             object = book
         }
