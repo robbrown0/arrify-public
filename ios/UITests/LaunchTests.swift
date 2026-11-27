@@ -118,8 +118,9 @@ final class LaunchTests: XCTestCase {
         for _ in 0..<5 where !playingChapter.isHittable { app.swipeUp() }
         XCTAssertTrue(playingChapter.waitForExistence(timeout:10))
         let selected = XCTNSPredicateExpectation(predicate:NSPredicate(format:"value == %@","Playing"),object:playingChapter)
-        XCTAssertEqual(XCTWaiter.wait(for:[selected],timeout:20),.completed)
+        let result = XCTWaiter.wait(for:[selected],timeout:20)
         let screenshot = XCTAttachment(screenshot:app.screenshot()); screenshot.name = "Playing chapter and download indicator"; screenshot.lifetime = .keepAlways; add(screenshot)
+        XCTAssertEqual(result,.completed,"Chapter selected=\(playingChapter.isSelected), value=\(String(describing:playingChapter.value)), player=\(player.label)")
         app.buttons["Close audiobook player"].tap()
         let unread = app.buttons["markAudiobookUnread"]
         for _ in 0..<5 where !unread.isHittable { app.swipeUp() }
