@@ -428,7 +428,7 @@ import CryptoKit
         if active { if hadPlaybackIntent { save() }; publish(); Task { await synchronize() } }
     }
     func resume() {
-        guard active, let book else { return }; message = nil
+        guard active, let book, !unreadBooks.contains(book.id) else { return }; message = nil
         if conflict { presented = true; return }
         wantsPlayback = true; let ticket = UUID(); generation = ticket; preparing = true
         lastAudioProgress = Date()
@@ -453,7 +453,7 @@ import CryptoKit
         }
     }
     func seek(_ target: Double, resumePlayback: Bool = false) {
-        guard let book else { return }; let wasPlaying = wantsPlayback || resumePlayback
+        guard let book, !unreadBooks.contains(book.id) else { return }; let wasPlaying = wantsPlayback || resumePlayback
         pause(); finishing = false; position = min(book.duration, max(0,target)); save(); wantsPlayback = wasPlaying
         let ticket = UUID(); generation = ticket; preparing = true
         operation = Task { [weak self] in
@@ -638,7 +638,7 @@ import CryptoKit
             active = false; wantsPlayback = false; playing = false; preparing = false; manifest = nil
             player.pause(); player.replaceCurrentItem(with:nil); currentURL = nil; position = 0; book = fresh; conflict = false
             part = nil; systemArtwork = nil; receiverArtwork = nil; audioSession.invalidate()
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            if music?.state?.playing != true { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
         }
         automaticDownloadCandidate = automaticDownloadCandidate == value.id ? nil : automaticDownloadCandidate
         persist(); message = nil

@@ -32,7 +32,7 @@ struct AudiobookShelf: View {
                             HStack(alignment:.top, spacing:16) { ForEach(model.books.resumeBooks) { book in
                                 Button { model.books.play(book) } label: {
                                     VStack(alignment:.leading, spacing:7) {
-                                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).aspectRatio(1,contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:12))
+                                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").aspectRatio(1,contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:12))
                                         Text(book.title).font(.headline).lineLimit(2)
                                         Text("Resume · " + AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary)
                                     }.frame(width:155,alignment:.leading)
@@ -131,7 +131,7 @@ private struct AudiobookShelfCard: View {
     var body: some View {
         NavigationLink { AudiobookDetail(model:model, initial:book) } label: {
             VStack(alignment:.leading, spacing:7) {
-                RemoteCover(path:book.cover, title:book.title, artwork:model.artwork)
+                RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed")
                     .aspectRatio(1, contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:12))
                 Text(book.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
                 Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
@@ -154,7 +154,7 @@ struct AudiobookDetail: View {
     var body: some View {
         ScrollView {
             VStack(alignment:.leading, spacing:20) {
-                RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(maxWidth:300).aspectRatio(1, contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:16))
+                RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(maxWidth:300).aspectRatio(1, contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:16))
                     .overlay(alignment:.bottomTrailing) { AudiobookDownloadIndicator(downloads:model.books.downloads,book:book).padding(10) }.frame(maxWidth:.infinity)
                 Text(book.title).font(.largeTitle.bold())
                 if let authors = book.authors, !authors.isEmpty {
@@ -186,6 +186,7 @@ struct AudiobookDetail: View {
                 } label: {
                     HStack { if markingUnread { ProgressView() }; Label("Mark as unread",systemImage:"arrow.counterclockwise") }.frame(minHeight:44)
                 }.disabled(markingUnread).accessibilityIdentifier("markAudiobookUnread")
+                    .accessibilityHint("Reset the saved position to the beginning. Keep downloads and bookmarks.")
                 if let error { Text(error).foregroundStyle(.secondary) }
                 if let message = model.books.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
                 Text(plainDescription).textSelection(.enabled)
@@ -230,7 +231,7 @@ struct AudiobookMiniPlayer: View {
             HStack(spacing:12) {
                 Button { model.books.presented = true } label: {
                     HStack(spacing:12) {
-                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:52, height:52).clipShape(RoundedRectangle(cornerRadius:8))
+                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(width:52, height:52).clipShape(RoundedRectangle(cornerRadius:8))
                         VStack(alignment:.leading) { Text(book.title).font(.headline).lineLimit(1); Text(model.books.chapter?.title ?? book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
                     }.frame(maxWidth:.infinity, alignment:.leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("Open audiobook player").accessibilityIdentifier("audiobookMiniPlayer")
@@ -251,7 +252,7 @@ struct AudiobookPlayer: View {
             ScrollView {
                 VStack(spacing:20) {
                     if let book = model.books.book {
-                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230, height:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230).clipShape(RoundedRectangle(cornerRadius:18))
+                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(width:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230, height:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230).clipShape(RoundedRectangle(cornerRadius:18))
                             .overlay(alignment:.bottomTrailing) { AudiobookDownloadIndicator(downloads:model.books.downloads,book:book).padding(10) }
                         VStack(alignment:.leading, spacing:8) {
                             Text(book.author).foregroundStyle(.secondary)
@@ -419,7 +420,7 @@ private struct AudiobookShelfRow: View {
     var body: some View {
         NavigationLink { AudiobookDetail(model:model, initial:book) } label: {
             HStack(alignment:.center, spacing:16) {
-                RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:76,height:76).clipShape(RoundedRectangle(cornerRadius:10))
+                RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(width:76,height:76).clipShape(RoundedRectangle(cornerRadius:10))
                 VStack(alignment:.leading, spacing:5) {
                     Text(book.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
                     Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)

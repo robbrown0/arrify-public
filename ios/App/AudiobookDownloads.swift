@@ -162,7 +162,8 @@ import CryptoKit
             let task: URLSessionDownloadTask
             if let data = try? Data(contentsOf:resume) { task = session.downloadTask(withResumeData:data) }
             else { task = session.downloadTask(with:url) }
-            task.taskDescription = name; working.insert(id); task.resume()
+            task.taskDescription = name; task.priority = URLSessionTask.lowPriority
+            working.insert(id); task.resume()
         } catch { errors[id] = "Download paused. Check available device storage." }
     }
     func pause(_ id: String) async {
