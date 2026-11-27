@@ -346,18 +346,27 @@ import Network
                 self.playerStateChanged()
             }
         }
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { @Sendable [weak self] time in
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { @Sendable [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                guard self.ownsOutput else { return }
-                if !self.recovering && self.resumeCheckpoint == nil { self.position = time.seconds.isFinite ? time.seconds : 0 }
-                let seconds = self.player.currentItem?.duration.seconds ?? 0
-                self.duration = seconds.isFinite ? seconds : 0
+                guard self.updatePlaybackTimeline() else { return }
                 PlaybackDiagnostics.record("playback-tick position=\(self.position) duration=\(self.duration)")
                 self.publishNowPlaying()
                 if self.player.currentItem?.status == .failed { self.recoverServerRoute() }
             }
         }
+    }
+    @discardableResult
+    func updatePlaybackTimeline() -> Bool {
+        guard ownsOutput, let item = player.currentItem,
+              queuedTracks[ObjectIdentifier(item)] == state?.currentTrackId else { return false }
+        // A queued timer callback can carry the preceding item's time. Read
+        // both values from the current, identity-checked item at execution time.
+        let sample = item.currentTime().seconds
+        if sample.isFinite, !recovering, resumeCheckpoint == nil { position = max(0, sample) }
+        let length = item.duration.seconds
+        duration = length.isFinite ? max(0, length) : 0
+        return true
     }
     private func playerStateChanged() {
         rowOutputIsPlaying = isPlaying
@@ -539,10 +548,7 @@ import Network
                   !endedInFlight, !commandInFlight, !Task.isCancelled else { return }
             if report, ownsOutput, permission.enabled, loadedKey != nil, loadedKey == desiredKey,
                let current = player.currentItem, queuedTracks[ObjectIdentifier(current)] == state?.currentTrackId {
-                let sample = player.currentTime().seconds
-                if sample.isFinite, !recovering, resumeCheckpoint == nil { position = max(0, sample) }
-                let length = current.duration.seconds
-                if length.isFinite { duration = max(0, length) }
+                updatePlaybackTimeline()
                 var heartbeat = PlaybackCommand(action: "heartbeat", deviceId: deviceId)
                 heartbeat.ownerEpoch = state?.ownerEpoch; heartbeat.intent = state?.intent
                 heartbeat.expectedCurrent = state?.currentTrackId; heartbeat.position = position
