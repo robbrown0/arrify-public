@@ -546,7 +546,7 @@ import Network
                 var heartbeat = PlaybackCommand(action: "heartbeat", deviceId: deviceId)
                 heartbeat.ownerEpoch = state?.ownerEpoch; heartbeat.intent = state?.intent
                 heartbeat.expectedCurrent = state?.currentTrackId; heartbeat.position = position
-                heartbeat.duration = duration
+                heartbeat.duration = timeline.duration ?? 0
                 let buffered = player.currentItem?.loadedTimeRanges.compactMap { $0.timeRangeValue }.map { max(0, $0.end.seconds - position) }.max() ?? 0
                 heartbeat.buffer = BufferReport(items: cache.items, playerSeconds: Int(min(86400, max(0, buffered.isFinite ? buffered : 0))))
                 let sequence = heartbeatSequence.next()
@@ -1426,15 +1426,17 @@ import Network
     private func publishNowPlaying() {
         guard !externalOutput else { return }
         guard ownsOutput, permission.enabled, loadedKey != nil, let track else { return }
-        let signature = "\(track.id):\(artworkRevision):\(Int(duration)):\(state?.playId ?? 0)"
+        let displayTimeline = timeline
+        let signature = "\(track.id):\(artworkRevision):\(Int(displayTimeline.duration ?? 0)):\(state?.playId ?? 0)"
         guard nowPlayingGate.shouldPublish(signature: signature, position: position,
                                           rate: isPlaying ? 1 : 0, now: ProcessInfo.processInfo.systemUptime) else { return }
         var info: [String: Any] = [MPMediaItemPropertyTitle: track.title,
             MPMediaItemPropertyArtist: track.artist, MPMediaItemPropertyAlbumTitle: track.album,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
             MPNowPlayingInfoPropertyIsLiveStream: false,
-            MPMediaItemPropertyPlaybackDuration: duration, MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: displayTimeline.position,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0]
+        if let duration = displayTimeline.duration { info[MPMediaItemPropertyPlaybackDuration] = duration }
         if let systemArtwork { info[MPMediaItemPropertyArtwork] = systemArtwork }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
