@@ -70,6 +70,28 @@ import XCTest
         current.release(); _ = await second.value; await joined.value
         XCTAssertFalse(unexpected); XCTAssertTrue(joinedFinished)
     }
+    func testJoinedSyncCanImmediatelyDrainNewWorkAfterTheOwnerIsCancelled() async {
+        // Pause can cancel the original caller while its shared request is in
+        // flight. The higher-priority joiner must get a fresh slot afterward,
+        // even when it resumes before that cancelled caller does.
+        for _ in 0..<50 {
+            let gate = AudiobookSyncGate(), barrier = BookSyncBarrier()
+            let owner = Task(priority:.background) { await gate.run { await barrier.wait() } }
+            await barrier.entered()
+            var joined = false, followups = 0
+            let follower = Task(priority:.userInitiated) {
+                joined = true
+                let duplicated = await gate.run { XCTFail("Joined work must remain single-flight") }
+                XCTAssertFalse(duplicated)
+                return await gate.run { followups += 1 }
+            }
+            while !joined { await Task.yield() }
+            owner.cancel(); barrier.release()
+            let drained = await follower.value; _ = await owner.value
+            XCTAssertTrue(drained,"A completed request cannot occupy the next save's slot")
+            XCTAssertEqual(followups,1)
+        }
+    }
     func testLatestAcknowledgedRemoteRewindWinsOverOlderDownloadPosition() {
         let remote = AudiobookProgress(currentTime:15, lastUpdate:200, isFinished:false)
         XCTAssertEqual(AudiobookResume.position(remote:remote, local:900, localStamp:100, pending:nil, restart:false, finished:false),15)
