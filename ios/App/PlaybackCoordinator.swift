@@ -82,7 +82,11 @@ import Network
             }
         }
     }
-    var progress: Double { duration.isFinite && duration > 0 && position.isFinite ? min(1, max(0, position / duration)) : 0 }
+    var timeline: PlaybackTimeline {
+        PlaybackTimeline(position: position, duration: duration,
+                         completed: ownsOutput && completedKey != nil && completedKey == loadedKey)
+    }
+    var progress: Double { timeline.progress }
     var position = 0.0
     var duration = 0.0
     var busy = false

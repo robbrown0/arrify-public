@@ -6,6 +6,21 @@ import ArrifyCore
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
+    @MainActor func testPlayingBeyondEstimatedDurationDoesNotClaimCompletionOrAdvance() async throws {
+        let (player, _) = try await fixture(cachedNext: true)
+        defer { player.stop() }
+        let item = player.player.currentItem
+        let track = player.state?.currentTrackId
+        player.position = 203
+        player.duration = 196
+        XCTAssertNil(player.timeline.remaining)
+        XCTAssertNil(player.timeline.duration)
+        XCTAssertEqual(player.progress, 0)
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertTrue(player.player.currentItem === item)
+        XCTAssertEqual(player.state?.currentTrackId, track)
+    }
+
     @MainActor func testAudiobookHandoffPreservesSystemMetadataAndCachedMusicSuccessors() async throws {
         let (player, _) = try await fixture(cachedNext:true)
         defer { player.stop() }

@@ -110,6 +110,12 @@ struct NowPlayingView: View {
                 .shadow(color: .black.opacity(0.25), radius: 20, y: 12)
         }.buttonStyle(.plain).accessibilityLabel("Show artwork")
     }
+    private var remainingTime: String {
+        guard let duration = playback.timeline.duration else { return "–:––" }
+        let seconds = seeking ? max(0, duration - seekPosition).rounded(.up) : playback.timeline.remainingDisplaySeconds
+        guard let seconds else { return "–:––" }
+        return "−" + time(seconds)
+    }
     private var controls: some View {
         VStack(spacing: 18) {
             HStack {
@@ -125,14 +131,14 @@ struct NowPlayingView: View {
             }
             if let transition = playback.transitionMessage { Text(transition).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("playbackTransition") }
             VStack(spacing: 4) {
-                Slider(value: Binding(get: { seeking ? seekPosition : min(playback.position, max(1, playback.duration)) }, set: { seekPosition = $0 }), in: 0...max(1, playback.duration)) { editing in
+                Slider(value: Binding(get: { seeking ? seekPosition : min(playback.position, max(1, playback.timeline.duration ?? 0)) }, set: { seekPosition = $0 }), in: 0...max(1, playback.timeline.duration ?? 0)) { editing in
                     if editing { seekPosition = playback.position }
                     seeking = editing
                     if !editing { Task { await playback.send("seek", seek: seekPosition) } }
-                }.disabled(playback.duration <= 0 || !playback.ownsOutput).accessibilityLabel("Playback position")
+                }.disabled(playback.timeline.duration == nil || !playback.ownsOutput).accessibilityLabel("Playback position")
                 HStack {
                     Text(time(seeking ? seekPosition : playback.position)); Spacer()
-                    Text("−" + time(max(0, playback.duration - (seeking ? seekPosition : playback.position))))
+                    Text(remainingTime)
                 }.font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.55))
             }
             HStack {
