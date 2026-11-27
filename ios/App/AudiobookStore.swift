@@ -145,6 +145,8 @@ import CryptoKit
     private(set) var bookmarks: [AudiobookBookmark] = []
     var presented = false
     var sleepChoice = "off"
+    var showsPauseControl: Bool { wantsPlayback || preparing }
+    var playbackControlLabel: String { preparing ? "Cancel opening audiobook" : showsPauseControl ? "Pause audiobook" : "Play audiobook" }
     var chapter: AudiobookChapter? { AudiobookTimeline.chapter(book?.chapters ?? [], at:position) }
     var visible: Bool { enabled && preferences.visible }
     var resumeBooks: [Audiobook] {
@@ -351,15 +353,19 @@ import CryptoKit
                 guard ticket == self.generation, account == self.accountGeneration else { return }
                 let issue = AudiobookPlaybackIssue.classify(error)
                 PlaybackDiagnostics.event("audiobook-start-failed stage=\(stage) reason=\(issue.category) ms=\(Int(Date().timeIntervalSince(started)*1000))")
-                if case .conflict = issue { self.message = issue.message; self.conflict = true; self.preparing = false; return }
-                if issue == .authentication { self.message = issue.message; self.preparing = false; return }
+                if case .conflict = issue { self.pause(); self.message = issue.message; self.conflict = true; return }
+                if issue == .authentication { self.pause(); self.message = issue.message; return }
                 if self.downloads.complete(value.id), let stored = self.downloads.records[value.id]?.manifest, value.sourceRevision == nil || value.sourceRevision == stored.book.sourceRevision {
                     let downloaded = self.downloads.records[value.id]
                     let cursor = chapterStart ?? (restart || downloaded?.finished == true ? 0 : self.pending[value.id]?.checkpoint.position ?? downloaded?.lastPosition ?? stored.book.progress?.currentTime ?? stored.position)
                     self.install(stored.book, manifest:nil, position:cursor, offline:true)
                     do { try await self.open(at:cursor, token:ticket) }
-                    catch { self.preparing = false; self.message = "This downloaded book could not be opened." }
-                } else { self.preparing = false; self.message = issue.message }
+                    catch where RequestCancellation.matches(error) || Task.isCancelled { return }
+                    catch {
+                        guard ticket == self.generation, account == self.accountGeneration else { return }
+                        self.pause(); self.message = "This downloaded book could not be opened."
+                    }
+                } else { self.pause(); self.message = issue.message }
             }
         }
     }
@@ -465,7 +471,7 @@ import CryptoKit
                 try await self.open(at:self.position, token:ticket)
             } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
                 guard ticket == self.generation else { return }
-                self.preparing = false; self.playing = false; self.message = "Your place is saved. Tap Play when the connection returns."
+                self.pause(); self.message = "Your place is saved. Tap Play when the connection returns."
             }
         }
     }
@@ -475,7 +481,7 @@ import CryptoKit
         let ticket = UUID(); generation = ticket; preparing = true
         operation = Task { [weak self] in
             do { try await self?.open(at:self?.position ?? 0, token:ticket) }
-            catch { guard let self, ticket == self.generation else { return }; self.preparing = false; self.playing = false; self.message = "Your place is saved. Tap Play to reconnect." }
+            catch { guard let self, ticket == self.generation else { return }; self.pause(); self.message = "Your place is saved. Tap Play to reconnect." }
         }
     }
     func toggle() { if wantsPlayback || preparing { pause() } else if !active, let book { play(book) } else { resume() } }

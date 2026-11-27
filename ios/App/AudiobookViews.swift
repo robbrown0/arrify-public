@@ -194,7 +194,7 @@ struct AudiobookDetail: View {
                 if let chapters = book.chapters {
                     Text("Chapters").font(.title2.bold())
                     ForEach(chapters) { chapter in
-                        AudiobookChapterRow(chapter:chapter, current:model.books.book?.id == book.id && model.books.chapter?.id == chapter.id, playing:model.books.playing) {
+                        AudiobookChapterRow(chapter:chapter, current:model.books.book?.id == book.id && model.books.chapter?.id == chapter.id, playing:model.books.playing, waiting:model.books.showsPauseControl && !model.books.playing) {
                             if model.books.active, model.books.book?.id == book.id { model.books.seek(chapter.start,resumePlayback:true) }
                             else { model.books.play(book,startingAt:chapter.start) }
                         }
@@ -245,7 +245,7 @@ struct AudiobookMiniPlayer: View {
                     }.frame(maxWidth:.infinity, alignment:.leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("Open audiobook player").accessibilityIdentifier("audiobookMiniPlayer")
                 Button { model.books.seek(model.books.position-Double(model.books.preferences.backSeconds)) } label: { Image(systemName:"gobackward").frame(width:44, height:44) }.accessibilityLabel("Skip backward")
-                Button { model.books.toggle() } label: { Image(systemName:model.books.playing || model.books.preparing ? "pause.fill" : "play.fill").frame(width:44, height:44) }.accessibilityLabel(model.books.playing ? "Pause audiobook" : "Play audiobook")
+                Button { model.books.toggle() } label: { Image(systemName:model.books.showsPauseControl ? "pause.fill" : "play.fill").frame(width:44, height:44) }.accessibilityLabel(model.books.playbackControlLabel)
             }.padding(8).background(.regularMaterial, in:RoundedRectangle(cornerRadius:16))
         }
     }
@@ -274,7 +274,7 @@ struct AudiobookPlayer: View {
                         HStack { Text(AudiobookTimeline.time(model.books.position)); Spacer(); Text("−" + AudiobookTimeline.time(book.duration-model.books.position)) }.font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         HStack(spacing:36) {
                             Button { model.books.seek(model.books.position-Double(model.books.preferences.backSeconds)) } label: { VStack { Image(systemName:"gobackward").font(.title); Text("\(model.books.preferences.backSeconds)").font(.caption) }.frame(width:60, height:60) }.accessibilityLabel("Skip backward \(model.books.preferences.backSeconds) seconds")
-                            Button { model.books.toggle() } label: { ZStack { Circle().fill(.white).frame(width:84,height:84); if model.books.preparing { ProgressView().tint(.black).scaleEffect(1.4) } else { Image(systemName:model.books.playing ? "pause.fill" : "play.fill").font(.largeTitle).foregroundStyle(.black) } } }.accessibilityLabel(model.books.preparing ? "Cancel opening audiobook" : model.books.playing ? "Pause audiobook" : "Play audiobook").accessibilityIdentifier("audiobookPlayPause")
+                            Button { model.books.toggle() } label: { ZStack { Circle().fill(.white).frame(width:84,height:84); if model.books.preparing { ProgressView().tint(.black).scaleEffect(1.4) } else { Image(systemName:model.books.showsPauseControl ? "pause.fill" : "play.fill").font(.largeTitle).foregroundStyle(.black) } } }.accessibilityLabel(model.books.playbackControlLabel).accessibilityIdentifier("audiobookPlayPause")
                             Button { model.books.seek(model.books.position+Double(model.books.preferences.forwardSeconds)) } label: { VStack { Image(systemName:"goforward").font(.title); Text("\(model.books.preferences.forwardSeconds)").font(.caption) }.frame(width:60, height:60) }.accessibilityLabel("Skip forward \(model.books.preferences.forwardSeconds) seconds")
                         }
                         HStack {
@@ -312,7 +312,7 @@ struct AudiobookPlayer: View {
         switch tab {
         case "Chapters":
             ForEach(book.chapters ?? []) { chapter in
-                AudiobookChapterRow(chapter:chapter,current:model.books.chapter?.id == chapter.id,playing:model.books.playing) { model.books.seek(chapter.start,resumePlayback:true) }
+                AudiobookChapterRow(chapter:chapter,current:model.books.chapter?.id == chapter.id,playing:model.books.playing,waiting:model.books.showsPauseControl && !model.books.playing) { model.books.seek(chapter.start,resumePlayback:true) }
             }
         case "Up Next":
             Toggle("Continue to the next queued book", isOn:Binding(get:{ model.books.preferences.continuous }, set:{ enabled in var value = model.books.preferences; value.continuous = enabled; Task { await model.books.updatePreferences(value) } }))
@@ -345,15 +345,16 @@ private struct AudiobookChapterRow: View {
     let chapter: AudiobookChapter
     let current: Bool
     let playing: Bool
+    var waiting = false
     let action: () -> Void
     var body: some View {
         Button(action:action) {
             HStack(spacing:12) {
-                Image(systemName:current ? (playing ? "waveform" : "pause.circle.fill") : "play.circle")
+                Image(systemName:current ? (playing ? "waveform" : waiting ? "ellipsis.circle" : "pause.circle.fill") : "play.circle")
                     .frame(width:24).accessibilityHidden(true)
                 VStack(alignment:.leading,spacing:3) {
                     Text(chapter.title).multilineTextAlignment(.leading)
-                    if current { Text(playing ? "Playing" : "Current chapter · Paused").font(.caption) }
+                    if current { Text(playing ? "Playing" : waiting ? "Starting…" : "Current chapter · Paused").font(.caption) }
                 }
                 Spacer()
                 Text(AudiobookTimeline.time(chapter.end-chapter.start)).font(.caption).foregroundStyle(.secondary)
@@ -361,7 +362,7 @@ private struct AudiobookChapterRow: View {
                 .background(current ? Color.green.opacity(0.12) : Color.clear,in:RoundedRectangle(cornerRadius:10))
         }.buttonStyle(.plain).foregroundStyle(current ? Color.green : Color.primary)
             .accessibilityLabel("Play chapter: " + chapter.title)
-            .accessibilityValue(current ? (playing ? "Playing" : "Paused") : "")
+            .accessibilityValue(current ? (playing ? "Playing" : waiting ? "Starting" : "Paused") : "")
             .accessibilityAddTraits(current ? .isSelected : [])
             .accessibilityIdentifier("audiobookChapter-\(chapter.start)")
     }

@@ -145,6 +145,29 @@ final class AudiobookSessionTests: XCTestCase {
         XCTAssertFalse(books.conflict)
         XCTAssertFalse(books.playing)
     }
+    @MainActor func testFailedActivationShowsPlayAndOneTapRetries() async throws {
+        let transport = BookSessionTransport()
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://fixture.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession())
+        await transport.owner(music.deviceId)
+        let file = try UITestAudiobookAudio.make()
+        let audio = FailingBookSessionAudio()
+        let books = AudiobookStore(api:api,music:music,audioSession:audio,localMedia:{ _,_ in file })
+        let previousAutomatic = books.automaticDownloads; books.automaticDownloads = false
+        defer { books.automaticDownloads = previousAutomatic; books.clear(); music.stop(); try? FileManager.default.removeItem(at:file) }
+        await books.restore(); books.play(try await api.audiobook("book-one"))
+        for _ in 0..<1000 where books.message == nil || books.preparing { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertEqual(audio.activations,1)
+        XCTAssertFalse(books.showsPauseControl)
+        XCTAssertEqual(books.playbackControlLabel,"Play audiobook")
+        books.toggle()
+        for _ in 0..<1000 where !books.playing { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertTrue(books.playing,books.message ?? "One Play tap must retry the failed open")
+        XCTAssertEqual(audio.activations,2)
+        XCTAssertTrue(books.showsPauseControl)
+        books.pause(); XCTAssertFalse(books.showsPauseControl)
+    }
     @MainActor func testMarkUnreadResetsProgressWithoutStartingPlayback() async throws {
         let transport = BookSessionTransport()
         let api = APIClient(transport:transport,store:UITestStore())
@@ -193,6 +216,12 @@ final class AudiobookSessionTests: XCTestCase {
     func activate() async throws { if !active { active = true; activations += 1 } }
     func deactivate() async throws { active = false }
     func invalidate() { active = false }
+}
+@MainActor private final class FailingBookSessionAudio: PlaybackAudioSession {
+    var activations = 0
+    func activate() async throws { activations += 1; if activations == 1 { throw URLError(.cannotConnectToHost) } }
+    func deactivate() async throws {}
+    func invalidate() {}
 }
 private actor BookSessionTransport: HTTPTransport {
     private(set) var progressRequests = 0

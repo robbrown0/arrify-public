@@ -167,3 +167,7 @@ The regression injects stale zero/90-second notices around a real seek and Pause
 then verifies an unchanged paused seek makes no server writes or conflict.
 Known chapter-end and finished-book coordinates remain canonical; a sleep-boundary
 pause does not replace that exact endpoint with a resetting AVPlayer clock.
+Play/Pause labels now follow playback intent, including buffering. Failed opens
+stop that intent so one Play tap retries, and a stale cancelled local fallback
+cannot pause a newer selection. The activation-failure regression retains this
+single-tap retry contract; chapter rows distinguish starting from a user pause.
