@@ -96,7 +96,10 @@ class Audiobooks:
         if item.get('mediaType') != 'book' or item.get('libraryId') not in self.provider.config().get('libraries', []):
             raise BookError('This audiobook is not available in your library.', 404)
         media = item.get('media', {}); meta = media.get('metadata', {})
-        meta = {**meta, 'authors': meta.get('authors') or [], 'series': meta.get('series') or []}
+        series = meta.get('series') or []
+        # Series-filtered ABS item responses replace the list with one object.
+        if isinstance(series, dict): series = [series]
+        meta = {**meta, 'authors': meta.get('authors') or [], 'series': series}
         duration = number(media.get('duration'), 86400 * 31)
         book = {'id': identifier(item['id']), 'library_id': identifier(item['libraryId']),
                 'title': str(meta.get('title') or 'Untitled audiobook')[:500],

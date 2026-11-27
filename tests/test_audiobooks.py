@@ -363,6 +363,13 @@ class AudiobookTests(unittest.TestCase):
         with self.assertRaises(BookError): self.books.provider.configure({'password':'replacement', 'enabled':False})
         self.assertEqual(self.books.provider.config(), before)
 
+    def test_series_scoped_provider_response_accepts_single_series_object(self):
+        item = self.fixture.item()
+        item['media']['metadata']['series'] = {'id':'series-one','name':'Stories','sequence':'2.5'}
+        value = self.books.metadata(item)
+        self.assertEqual(value['series_entries'], [{'id':'series-one','name':'Stories','sequence':'2.5'}])
+        self.assertEqual(value['series'], 'Stories')
+
     def test_downloading_on_another_device_preserves_the_first_devices_grant(self):
         first = self.books.download(1, {'book_id':'book-one'}, self.token, 'web')
         second_token = self.a.login('readerone', 'a-strong-password')
