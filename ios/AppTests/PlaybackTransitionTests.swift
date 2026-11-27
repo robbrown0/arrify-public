@@ -252,13 +252,15 @@ final class PlaybackTransitionTests: XCTestCase {
         let start = ProcessInfo.processInfo.systemUptime
         let fourth = Task { await player.send("next"); completed = true }
         await transport.releaseNext() // Commit only 1 -> 2. The next acknowledgement remains held.
-        for _ in 0..<500 where !completed { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<500 where !completed || player.navigationPending || !player.isPlaying { try await Task.sleep(for: .milliseconds(10)) }
         let elapsed = ProcessInfo.processInfo.systemUptime-start
         let commitsBeforeRelease = await transport.nextCommits
         XCTAssertTrue(completed, "Replenished, authorized audio must not wait for the other two acknowledgements")
+        XCTAssertFalse(player.navigationPending, "Measure real media progress, not just the command returning")
+        XCTAssertTrue(player.isPlaying)
         XCTAssertEqual(commitsBeforeRelease, 1)
         XCTAssertEqual(player.state?.currentTrackId, 5)
-        print("NEXT_LATENCY refreshed-window controlled_ms=\(Int(elapsed*1000)) held_acknowledgements=2")
+        print("NEXT_LATENCY refreshed-window actual_progress_ms=\(Int(elapsed*1000)) previous_acknowledgements_remaining=2")
         await transport.allowTransitionsImmediately(); await transport.releaseNext()
         await fourth.value
         for _ in 0..<500 { if await transport.nextCommits == 4 { break }; try await Task.sleep(for: .milliseconds(10)) }
@@ -314,13 +316,14 @@ final class PlaybackTransitionTests: XCTestCase {
         await transport.allowTransitionsImmediately()
         let start = ProcessInfo.processInfo.systemUptime
         await player.send("next")
-        for _ in 0..<500 where !installedUncached || !player.isPlaying { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<500 where !installedUncached || !player.isPlaying || player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(installedUncached)
         XCTAssertTrue(pausedAtInstall, "A full-file cache download must not compete with the uncached item startup")
         XCTAssertTrue(player.isPlaying)
+        XCTAssertFalse(player.navigationPending)
         let cancellations = await probe.cancellations
         XCTAssertGreaterThan(cancellations, 0)
-        print("NEXT_LATENCY uncached controlled_ms=\(Int((ProcessInfo.processInfo.systemUptime-start)*1000)) background_cancelled=\(cancellations)")
+        print("NEXT_LATENCY uncached actual_progress_ms=\(Int((ProcessInfo.processInfo.systemUptime-start)*1000)) background_cancelled=\(cancellations)")
         await probe.releaseDownloads()
         await background.value
     }
