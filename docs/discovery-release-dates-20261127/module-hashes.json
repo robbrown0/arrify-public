@@ -1,0 +1,14 @@
+{
+  "sources.py": {
+    "live_before": "6272afd283596c7316c27e45864a417ded5bac75e289a4a16452c51578c5abc5",
+    "candidate": "fc92644fce7a5556c658a0a8c5ea36f5c62e33998c68fd10d7bcd836736b8d96"
+  },
+  "engine.py": {
+    "live_before": "80feb662aa2813fb0496c1cc9159c1a175dc271d3035e29c9f185e7c6575d3cf",
+    "candidate": "9a85114f13bb740339cf68b62edf333c1b289c1973b8ac5cf74404b7a586f499"
+  },
+  "coverage.py": {
+    "live_before": "6e99c600b5339e8ea56170275f24c7bcbb2841745d03e939486129dc5544b655",
+    "candidate": "0c760c9c0a16faf71456a6b1bd29f4569a8789e520f8ad789f037ce6b48a9523"
+  }
+}
