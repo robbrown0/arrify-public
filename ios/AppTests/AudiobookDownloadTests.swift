@@ -150,11 +150,15 @@ final class AudiobookDownloadTests: XCTestCase {
         let audio = DownloadPlaybackAudio()
         let books = AudiobookStore(api:api,music:music,audioSession:audio,localMedia:{ _,_ in file },downloads:downloads)
         defer { books.clear(); music.stop(); try? FileManager.default.removeItem(at:file) }
-        await books.restore(); await transport.holdNextBookRead()
+        await books.restore(); await transport.holdNextBookRead(); await transport.holdNextPlay()
         books.play(book)
         await transport.waitForBookRead()
         await books.removeDownload(book.id)
         await transport.releaseBookRead()
+        await transport.waitForPlay()
+        XCTAssertEqual(audio.activations,0,"Removed local audio must not start before a streaming grant arrives")
+        XCTAssertFalse(books.active)
+        await transport.releasePlay()
         for _ in 0..<500 where !books.playing { try await Task.sleep(for:.milliseconds(20)) }
         XCTAssertGreaterThan(audio.activations,0)
         XCTAssertTrue(books.playing,books.message ?? "Streaming did not start")
@@ -215,6 +219,16 @@ private actor DownloadContractTransport: HTTPTransport {
         await withCheckedContinuation { bookReadObserver = $0 }
     }
     func releaseBookRead() { bookReadWaiter?.resume(); bookReadWaiter = nil }
+    private var holdPlay = false
+    private var playWaiting = false
+    private var playWaiter: CheckedContinuation<Void,Never>?
+    private var playObserver: CheckedContinuation<Void,Never>?
+    func holdNextPlay() { holdPlay = true }
+    func waitForPlay() async {
+        if playWaiting { return }
+        await withCheckedContinuation { playObserver = $0 }
+    }
+    func releasePlay() { playWaiter?.resume(); playWaiter = nil }
     private var blocked = false
     private var waiter: CheckedContinuation<Void,Never>?
     func blockProgress() { blocked = true }
@@ -233,6 +247,11 @@ private actor DownloadContractTransport: HTTPTransport {
             object = ["access_token":"fixture", "refresh_token":"fixture", "expires_in":3600,"refresh_expires_in":86400,"session_id":session]
         } else if path.hasSuffix("/audiobooks/download") || path.hasSuffix("/audiobooks/play") || path.contains("/audiobooks/book/") {
             if path.hasSuffix("/download") { downloadRequests += 1 }
+            if path.hasSuffix("/play"), holdPlay {
+                holdPlay = false
+                await withCheckedContinuation { playWaiter = $0; playWaiting = true; playObserver?.resume(); playObserver = nil }
+                playWaiting = false
+            }
             let lease = String(repeating:fail ? "b" : empty ? "c" : "a", count:43)
             let book: [String:Any] = ["id":"book-one","library_id":"books","title":"Downloaded story","author":"Author","narrator":"Reader","series":"","description":"","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":1,
                 "parts":[["index":0,"start":0,"duration":1,"size_bytes":BookAudioProtocol.audio.count,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+lease+"/0"]],"chapters":[["title":"Chapter","start":0,"end":1]],"progress":["currentTime":remotePosition,"lastUpdate":remoteStamp,"isFinished":false]]
