@@ -231,3 +231,14 @@ the entire row to be above its bottom before the same empty-area tap. No chapter
 hit-area/Playing/unread assertions are removed. Fresh qualification is required.
 The existing targeted audiobook workflow also includes these new UI regressions;
 the full release gates still run all native tests on both device families.
+
+Apple HIG references reviewed Nov27 for the requested polish:
+https://developer.apple.com/design/human-interface-guidelines/buttons
+https://developer.apple.com/design/human-interface-guidelines/layout
+https://developer.apple.com/design/human-interface-guidelines/accessibility
+The control uses44x44pt hit bounds,16pt separation from title,32pt trailing
+content inset, adaptive system title text, SF Symbols, VoiceOver action/state,
+and explicit dimmed press feedback. The32pt inset is the reviewed design choice,
+not a claimed Apple-mandated value. Existing safe-area-aware ScrollViews and
+bounded iPad content width remain. Large Dynamic Type and physical-device visual
+quality are not yet independently qualified by these default-size screenshots.

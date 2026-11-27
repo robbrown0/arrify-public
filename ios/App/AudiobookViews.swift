@@ -431,7 +431,7 @@ private struct AudiobookDownloadControl: View {
                     }
                 } label: {
                     circle(complete:false,paused:paused,progress:progress).frame(width:44,height:44).contentShape(Circle())
-                }.buttonStyle(.plain).disabled(pendingAction != nil)
+                }.buttonStyle(AudiobookDownloadButtonStyle()).disabled(pendingAction != nil)
                     .accessibilityLabel(action).accessibilityValue(status)
             }
         }.accessibilityIdentifier(identifier)
@@ -451,6 +451,11 @@ private struct AudiobookDownloadControl: View {
                 Image(systemName:paused ? "pause.fill" : "arrow.down").font(.subheadline.bold()).foregroundStyle(paused ? Color.yellow : Color.green)
             }
         }.frame(width:36,height:36).foregroundStyle(.green).accessibilityElement(children:.ignore)
+    }
+}
+private struct AudiobookDownloadButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.6 : 1)
     }
 }
 private struct AudiobookDownloadPie: Shape {
