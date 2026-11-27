@@ -177,6 +177,8 @@ class AudiobookTests(unittest.TestCase):
         self.assertEqual(book['series_entries'][0]['sequence'],'2.5')
         self.assertEqual(book['authors'][0]['id'],'writer')
         self.assertIsNone(book['published_date']); self.assertEqual(book['published_year'],'2024')
+        item['media']['metadata'].update(authors=None, series=None, seriesName='Stories')
+        self.assertEqual(self.books.metadata(item)['series_entries'], [])
 
     def test_accepted_start_retry_reuses_session_and_does_not_reclaim_output(self):
         first = self.play(request='same-request')

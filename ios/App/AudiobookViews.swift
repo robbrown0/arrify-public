@@ -43,7 +43,7 @@ struct AudiobookShelf: View {
                     ScrollView(.horizontal, showsIndicators:false) { filterButtons }
                     HStack {
                         Picker("Sort books", selection:$savedSort) {
-                            Text("Title").tag("title"); Text("Author").tag("author"); Text("Release year · newest").tag("release")
+                            Text("Title").tag("title"); Text("Author").tag("author"); Text("Publication date · newest").tag("release_date"); Text("Publication year · newest").tag("release")
                             Text("Recently added").tag("added"); Text("Length · shortest").tag("duration")
                         }.disabled(!shelf.query.isEmpty)
                         Spacer()
@@ -114,6 +114,7 @@ struct AudiobookShelf: View {
         if shelf.filter == "downloads" { return model.books.downloads.records.values.map { $0.manifest.book }.filter { shelf.query.isEmpty || ($0.title + " " + $0.author).localizedCaseInsensitiveContains(shelf.query) }.sorted { left, right in
             switch savedSort {
             case "author": return left.author.localizedStandardCompare(right.author) == .orderedAscending
+            case "release_date": return (left.publishedDate ?? "") > (right.publishedDate ?? "")
             case "release": return (left.publishedYear ?? "") > (right.publishedYear ?? "")
             case "added": return (left.addedAt ?? 0) > (right.addedAt ?? 0)
             case "duration": return left.duration < right.duration
@@ -245,7 +246,7 @@ struct AudiobookPlayer: View {
                         HStack { Text(AudiobookTimeline.time(model.books.position)); Spacer(); Text("−" + AudiobookTimeline.time(book.duration-model.books.position)) }.font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         HStack(spacing:36) {
                             Button { model.books.seek(model.books.position-Double(model.books.preferences.backSeconds)) } label: { VStack { Image(systemName:"gobackward").font(.title); Text("\(model.books.preferences.backSeconds)").font(.caption) }.frame(width:60, height:60) }.accessibilityLabel("Skip backward \(model.books.preferences.backSeconds) seconds")
-                            Button { model.books.toggle() } label: { Image(systemName:model.books.playing || model.books.preparing ? "pause.fill" : "play.fill").font(.largeTitle).frame(width:84, height:84).foregroundStyle(.black).background(.white, in:Circle()) }.accessibilityLabel(model.books.playing ? "Pause audiobook" : "Play audiobook").accessibilityIdentifier("audiobookPlayPause")
+                            Button { model.books.toggle() } label: { ZStack { Circle().fill(.white).frame(width:84,height:84); if model.books.preparing { ProgressView().tint(.black).scaleEffect(1.4) } else { Image(systemName:model.books.playing ? "pause.fill" : "play.fill").font(.largeTitle).foregroundStyle(.black) } } }.accessibilityLabel(model.books.preparing ? "Cancel opening audiobook" : model.books.playing ? "Pause audiobook" : "Play audiobook").accessibilityIdentifier("audiobookPlayPause")
                             Button { model.books.seek(model.books.position+Double(model.books.preferences.forwardSeconds)) } label: { VStack { Image(systemName:"goforward").font(.title); Text("\(model.books.preferences.forwardSeconds)").font(.caption) }.frame(width:60, height:60) }.accessibilityLabel("Skip forward \(model.books.preferences.forwardSeconds) seconds")
                         }
                         HStack {

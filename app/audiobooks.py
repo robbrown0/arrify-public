@@ -96,6 +96,7 @@ class Audiobooks:
         if item.get('mediaType') != 'book' or item.get('libraryId') not in self.provider.config().get('libraries', []):
             raise BookError('This audiobook is not available in your library.', 404)
         media = item.get('media', {}); meta = media.get('metadata', {})
+        meta = {**meta, 'authors': meta.get('authors') or [], 'series': meta.get('series') or []}
         duration = number(media.get('duration'), 86400 * 31)
         book = {'id': identifier(item['id']), 'library_id': identifier(item['libraryId']),
                 'title': str(meta.get('title') or 'Untitled audiobook')[:500],
@@ -181,7 +182,7 @@ class Audiobooks:
         if type(page) is not int or not 0 <= page <= 10000: raise BookError('Invalid library page.', 400)
         if progress_filter not in ('all', 'started', 'finished', 'unstarted'): raise BookError('Invalid audiobook filter.', 400)
         sorts = {'title': ('media.metadata.title', 0), 'author': ('media.metadata.authorName', 0),
-                 'release': ('media.metadata.publishedYear', 1), 'added': ('addedAt', 1),
+                 'release': ('media.metadata.publishedYear', 1), 'release_date': ('media.metadata.publishedDate', 1), 'added': ('addedAt', 1),
                  'duration': ('media.duration', 0), 'sequence': ('sequence', 0)}
         if sort not in sorts: raise BookError('Invalid audiobook sort.', 400)
         if author and series: raise BookError('Choose an author or series scope.', 400)

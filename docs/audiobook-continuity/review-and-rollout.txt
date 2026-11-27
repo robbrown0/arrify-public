@@ -1,0 +1,96 @@
+Scope and provenance
+====================
+This branch continues the Nov 27 audiobook investigation on upstream main
+79b499074943e3e6ff892fc18685606029d7fdcf, preserving unrelated live changes.
+The previously reviewed audiobook modules match upstream main. The exact source
+commit shipped as TestFlight build 44 has not been independently established.
+The original incident's underlying error remains unproven: its pre-stream failure
+was not logged. Removing and downloading the book again restored the user's
+position; that is evidence of retained progress, not proof of the earlier race.
+
+Delivered behavior
+==================
+- Compatible complete downloads start locally before progress/ownership reads.
+  Local playback journals its position and reconciles when the server returns.
+  Known conflicts retain both histories; intentional rewinds never use max(position).
+- Concurrent synchronization callers await shared work; forced selected-book work
+  can drain a newer checkpoint. Errors/backoff are per book; old account completion
+  cannot release a newer account's synchronization gate.
+- Ambiguous playback-start retries reuse the original request ID and revision.
+  The backend's accepted-ID path is tested to avoid a second ownership claim.
+- Startup failures identify stage/category without titles, accounts, grants or URLs.
+- Truncated files are not considered downloaded. Old transfer callbacks cannot
+  update a replacement transfer. Removing a playing local copy first attempts a
+  server handoff; the file is kept if the handoff fails. Pausing allows removal.
+- Books, Authors and Series navigation; author series are fetched independently
+  of the first page of books. Numbered series use provider sequence ordering and
+  retain fractional/unknown numbers. Author and series IDs remain structured.
+- One-tap Continue listening, list/grid layouts, publication-year and provider publication-date
+  sort choices, recently-added/author/title/duration sort, Not started filter,
+  explicit complete/downloading/paused download badges.
+- Dates retain provider precision. Publication-date ordering uses publishedDate;
+  a publication year is not fabricated into an exact date. Unknown dates stay
+  unknown. Existing downloads and API consumers accept optional new metadata.
+
+Design references
+=================
+Audible: separate library hierarchy (Authors, Series), listening filters, sort,
+and clear distinction between removing a download and removing a library title.
+https://help.audible.com/s/article/manage-your-library?language=en_US
+https://help.audible.com/s/article/title-is-missing?language=en_US
+Visual review used Audible's public iPad App Store screenshots: cover-forward
+layout, compact book rows, persistent labeled sidebar and contextual book actions.
+https://apps.apple.com/us/app/audible-audiobooks-podcasts/id379693831
+Libby: recoverable recent-place navigation, a candidate for the next iteration.
+https://help.libbyapp.com/en-us/6285.htm
+Prologue: audiobook-specific controls, smart rewind, per-book settings and reading
+list. These inform follow-up work; no rating or best-in-class claim is made.
+https://prologue.audio/
+Provider contracts: https://api.audiobookshelf.org/
+
+Validation and remaining qualification
+======================================
+The initial 30 backend tests passed; the author-scope addition raises this to 31
+and those passed too. Initial Swift contract tests and unsigned iPhone build passed
+on Apple's CI. Subsequent commits must pass the same contracts, app and iPhone/iPad
+UI qualification; CI is authoritative for the final exact commit.
+New tests cover shared synchronization, account reset during requests, latest
+remote rewind versus older download position, error categories, metadata precision,
+blocked server reads during local startup, truncated files, provider pagination,
+filter authorization, author-series library scope, and accepted-command idempotency.
+The UI test captures author/series screenshots for review.
+No physical-device playback latency, AirPlay gap, or resource before/after result
+has been measured for this patch. Simulator tests and fixture timings cannot
+substitute for those measurements. Do not describe this as release-ready until the
+final CI and screenshot review are complete.
+
+Follow-up product work and risks
+===============================
+- Verify ordinary online device handoff and the exact removal -> streaming ->
+  re-download scenario on real devices, including an offline device reconnecting
+  after a second device listened. Competing offline histories still need a choice.
+- A full listening history/undo system needs a durable retention/migration design.
+  Add smart rewind and per-book speed with explicit behavior tests, then collections
+  and opt-in next-in-series playback. Preserve existing sleep/bookmark behavior.
+- Provider publishedDate may be absent or refer to publication rather than the
+  audio edition's release. Do not label unknown dates as known audiobook release
+  dates. Provider sequence metadata, not invented title parsing, determines order.
+- Provider filter data and scoped author inventory are bounded by the existing
+  8-MiB transport limit. Very large author inventories may need a paginated index.
+- A same-size damaged local file can pass the size check and then fail decoding.
+  Full media validation and automatic repair require additional tests.
+- This iteration targets the native iPhone/iPad audiobook experience. Existing web
+  clients remain compatible; matching new web navigation is separate product work.
+
+Rollout and rollback
+====================
+No production service or book files were changed. No TestFlight build was published.
+After final CI and review, obtain explicit approval for a beta build and any server
+deployment. Back up the running server configuration and database with online-safe
+methods. Deploy a pinned server image supporting the optional library parameters,
+then a separately identified beta iOS build. Check streaming, local startup in
+Airplane Mode, removal/re-download, multipart seeking, two-device handoff and AirPlay.
+Record device, network conditions and tap-to-audio measurements before and after.
+Retain the prior image and beta build. If qualification fails, revert the deployment
+and distribute the prior app build without restoring older listening progress or
+book files over newer user data. These changes add no server schema migration.

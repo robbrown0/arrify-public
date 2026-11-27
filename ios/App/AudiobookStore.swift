@@ -249,7 +249,10 @@ import CryptoKit
         }
     }
     func play(_ value: Audiobook, restart: Bool = false, useRemote: Bool = false, previousLease: String? = nil) {
-        pause(); active = false; book = value; let ticket = UUID(); generation = ticket; preparing = true; message = nil; conflict = false; presented = true
+        pause(); active = false; book = value
+        let saved = pending[value.id]?.dirty == true ? pending[value.id]?.checkpoint.position : value.progress?.currentTime
+        position = min(value.duration, max(0, restart ? 0 : saved ?? 0))
+        let ticket = UUID(); generation = ticket; preparing = true; message = nil; conflict = false; presented = true
         operation = Task { [weak self] in
             guard let self else { return }
             let account = self.accountGeneration
