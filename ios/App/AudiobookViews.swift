@@ -357,7 +357,7 @@ private struct AudiobookChapterRow: View {
                 }
                 Spacer()
                 Text(AudiobookTimeline.time(chapter.end-chapter.start)).font(.caption).foregroundStyle(.secondary)
-            }.padding(.horizontal,10).frame(maxWidth:.infinity,minHeight:52)
+            }.padding(.horizontal,10).frame(maxWidth:.infinity,minHeight:52).contentShape(Rectangle())
                 .background(current ? Color.green.opacity(0.12) : Color.clear,in:RoundedRectangle(cornerRadius:10))
         }.buttonStyle(.plain).foregroundStyle(current ? Color.green : Color.primary)
             .accessibilityLabel("Play chapter: " + chapter.title)

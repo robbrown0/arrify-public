@@ -109,7 +109,9 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(book.waitForExistence(timeout:20)); book.tap()
         let chapter = app.buttons["audiobookChapter-60.0"]
         for _ in 0..<5 where !chapter.isHittable { app.swipeUp() }
-        XCTAssertTrue(chapter.waitForExistence(timeout:10)); chapter.tap()
+        XCTAssertTrue(chapter.waitForExistence(timeout:10))
+        XCTAssertGreaterThanOrEqual(chapter.frame.height,44)
+        chapter.coordinate(withNormalizedOffset:CGVector(dx:0.65,dy:0.5)).tap()
         let player = app.buttons["audiobookPlayPause"]
         XCTAssertTrue(player.waitForExistence(timeout:20))
         let playingChapter = app.buttons["audiobookChapter-60.0"]
