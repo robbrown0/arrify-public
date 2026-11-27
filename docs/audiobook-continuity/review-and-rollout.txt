@@ -165,3 +165,5 @@ clock once. Later notices cannot move a paused checkpoint, and active notices
 sample the current item rather than accepting a timestamp queued before a seek.
 The regression injects stale zero/90-second notices around a real seek and Pause,
 then verifies an unchanged paused seek makes no server writes or conflict.
+Known chapter-end and finished-book coordinates remain canonical; a sleep-boundary
+pause does not replace that exact endpoint with a resetting AVPlayer clock.

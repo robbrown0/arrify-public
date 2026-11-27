@@ -433,11 +433,14 @@ import CryptoKit
     }
 
     func pause() {
+        pause(capturingPosition:true)
+    }
+    private func pause(capturingPosition: Bool) {
         let hadPlaybackIntent = wantsPlayback || playing || preparing
         if interrupted { resumeAfterInterruption = false }
         wantsPlayback = false; generation = UUID(); operation?.cancel(); operation = nil
         player.pause()
-        if hadPlaybackIntent, !preparing, !finishing, let current = currentAudioPosition() { position = current }
+        if capturingPosition, hadPlaybackIntent, !preparing, !finishing, let current = currentAudioPosition() { position = current }
         playing = false; preparing = false
         if active { if hadPlaybackIntent { save() }; publish(); Task { await synchronize() } }
     }
@@ -503,7 +506,9 @@ import CryptoKit
             }
         }
         if (sleepDeadline.map { Date() >= $0 } ?? false) || (sleepChapter.map { position >= $0 } ?? false) {
-            pause(); setSleep("off"); message = "Sleep timer finished. Your place is saved."
+            if let end = sleepChapter, position >= end { position = end; pause(capturingPosition:false) }
+            else { pause() }
+            setSleep("off"); message = "Sleep timer finished. Your place is saved."
         }
         if Date().timeIntervalSince(lastSaved) >= 10 { save(); Task { await synchronize() } }
         publish()
@@ -812,7 +817,7 @@ import CryptoKit
         guard active, wantsPlayback, let book, !preparing, !finishing else { return }
         let end = (part?.start ?? 0)+(part?.duration ?? 0)
         if let sleepChapter, end >= sleepChapter {
-            position = sleepChapter; pause(); setSleep("off"); message = "Sleep timer finished. Your place is saved."; return
+            position = sleepChapter; pause(capturingPosition:false); setSleep("off"); message = "Sleep timer finished. Your place is saved."; return
         }
         if let part, let next = book.parts?.first(where:{ $0.index > part.index }) { seek(next.start); return }
         finishing = true; position = book.duration; playing = false; save(finished:true)
