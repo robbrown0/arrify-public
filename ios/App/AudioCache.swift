@@ -14,6 +14,7 @@ import ArrifyCore
     private var fillGeneration = UUID()
     private var downloadTokens: [String: UUID] = [:]
     private var downloads: [String: Task<Void, Never>] = [:]
+    private(set) var startupPending = false
     var items: [BufferEntry] = []
     var downloadedBytes: Int { items.reduce(0) { $0 + $1.loadedBytes } }
     init(download: (@Sendable (URL) async throws -> (URL, URLResponse))? = nil) {
@@ -45,15 +46,25 @@ import ArrifyCore
     }
     func reset() {
         generation = UUID(); fillGeneration = UUID()
+        startupPending = false
         for task in downloads.values { task.cancel() }; downloads = [:]; downloadTokens = [:]
         files = [:]; items = []
         try? FileManager.default.removeItem(at: directory)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
-    func fill(_ manifest: Manifest, api: APIClient, onReady: (() async -> Void)? = nil) async {
+    func prioritizePlaybackStartup() {
+        startupPending = true; fillGeneration = UUID()
+        for task in downloads.values { task.cancel() }
+        downloads = [:]; downloadTokens = [:]
+        for index in items.indices where items[index].state == "downloading" { items[index].state = "queued" }
+    }
+    func playbackStarted() { startupPending = false }
+    func fill(_ manifest: Manifest, api: APIClient, prioritizing ids: [Int]? = nil, onReady: (() async -> Void)? = nil) async {
+        guard !startupPending else { return }
         let epoch = generation
         let pass = UUID(); fillGeneration = pass
-        let window = Array(manifest.items.prefix(4)); let wanted = Set(window.map(\.trackId))
+        let ordered = ids.map { ids in ids.compactMap { id in manifest.items.first { $0.trackId == id } } } ?? manifest.items
+        let window = Array(ordered.prefix(4)); let wanted = Set(window.map(\.trackId))
         let wantedKeys = Set(window.map { key($0) })
         for key in Array(downloads.keys) where !wantedKeys.contains(key) { downloads.removeValue(forKey: key)?.cancel(); downloadTokens.removeValue(forKey: key) }
         for id in Array(files.keys) where !wanted.contains(id) {
@@ -78,11 +89,13 @@ import ArrifyCore
                     guard let self else { return }
                     defer { if self.downloadTokens[cacheKey] == token { self.downloads.removeValue(forKey: cacheKey); self.downloadTokens.removeValue(forKey: cacheKey) } }
                     do {
+                        try Task.checkCancellation()
                         let remote = try await api.mediaURL(item)
+                        try Task.checkCancellation()
                         PlaybackDiagnostics.event("cache-download-start bytes=\(size)")
                         let (temporary, response) = try await self.downloadOnAvailableRoute(remote, api: api, generation: epoch)
                         defer { try? FileManager.default.removeItem(at: temporary) }
-                        guard self.generation == epoch, !Task.isCancelled else { return }
+                        guard self.generation == epoch, self.downloadTokens[cacheKey] == token, !Task.isCancelled else { return }
                         guard let http = response as? HTTPURLResponse, http.statusCode == 200,
                               (try FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.intValue == size else { throw APIError.invalidResponse }
                         let suffix = item.mimeType == "audio/flac" || item.mimeType == "audio/x-flac" ? ".flac" : item.mimeType == "audio/mpeg" ? ".mp3" : item.mimeType == "audio/mp4" ? ".m4a" : ["audio/wav", "audio/x-wav", "audio/wave"].contains(item.mimeType ?? "") ? ".wav" : ".audio"
@@ -94,7 +107,7 @@ import ArrifyCore
                         self.update(item.trackId, state: "ready", bytes: size)
                         PlaybackDiagnostics.event("cache-download-ready bytes=\(size)")
                     } catch {
-                        guard self.generation == epoch, !Task.isCancelled else { return }
+                        guard self.generation == epoch, self.downloadTokens[cacheKey] == token, !Task.isCancelled else { return }
                         self.update(item.trackId, state: "retrying")
                         PlaybackDiagnostics.event("cache-download-failed code=\((error as NSError).code)")
                     }

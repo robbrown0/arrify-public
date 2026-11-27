@@ -82,6 +82,19 @@ public struct PlaybackState: Codable, Sendable {
                     context: context, durationSeconds: nil, output: output)
     }
 
+    public func applyingPendingTransitions(_ commands: [PlaybackCommand]) -> Self? {
+        var projected = self
+        for command in commands {
+            guard command.action == "next", command.ownerEpoch == projected.ownerEpoch,
+                  command.expectedRevision == projected.queueRevision,
+                  command.expectedCurrent == projected.currentTrackId,
+                  let next = command.expectedNext,
+                  let after = projected.advancingCached(to: next, automatic: command.automatic ?? true) else { return nil }
+            projected = after
+        }
+        return projected
+    }
+
     public static func merging(_ update: Self, into current: Self?) -> Self {
         guard let current else { return update }
         guard update.ownerEpoch >= current.ownerEpoch, update.queueRevision >= current.queueRevision else { return current }

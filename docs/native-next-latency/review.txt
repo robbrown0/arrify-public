@@ -1,0 +1,47 @@
+Native Next latency correction — 2026-11-27
+
+Diagnostics distinguish a 6.7-second skip waiting on three cached-transition
+acknowledgements and a 9.9-second skip including approximately six seconds of
+uncached AVPlayerItem readiness. These device observations are not a controlled
+before/after benchmark.
+
+Changes
+- Replay outstanding transition fences over each acknowledged snapshot to obtain
+  the authorized remaining queue tail, without applying older audio state.
+- Refresh read-ahead from the same owner's server-issued manifest while subsequent
+  acknowledgements are still pending. Download only the current locally playing
+  item and known successors within that returned grant window.
+- A waiting manual Next retries a verified local successor after an acknowledgement
+  frees one journal slot. Keep the three-transition bound, idempotent IDs, exact
+  expected-current/next/revision/epoch checks, and the original queue order.
+- Pause cancels a waiting manual skip promptly; it cannot later resume playback.
+- New current-item preparation cancels competing disposable cache transfers and
+  suspends cache filling until media time advances. Completed cache files survive;
+  stale cancelled responses cannot install over a newer download.
+- Preserve original/AAC/MP3 choice, file bytes, grants and ownership policy. Add
+  separate sanitized acknowledgement-wait and item-readiness timing diagnostics.
+
+Regression qualification
+Core tests reject projected queue/owner/revision mismatches. Native app tests hold
+later acknowledgements indefinitely while the fourth skip starts from a refreshed
+window, preserve rapid-skip coalescing and ordered reconciliation, assert Pause
+wins while acknowledgements wait, and install a real generated audio item while a
+competing background transfer is held. The controlled uncached test substitutes a
+local response asset to isolate client scheduling; it does not measure real
+network/receiver readiness. Timing results will be captured from native CI logs.
+
+The existing three-skip test now holds acknowledgements until all three local
+commands finish, asserting zero server commits and the exact local queue order.
+It records elapsed time rather than using a subsecond wall-clock proxy for that
+network-independence contract. One iPad simulator run exceeded the old 500-ms
+proxy while the new actual-progress benchmarks remained around one second.
+Cached transition diagnostics separately time queue installation, play and
+metadata publication so future physical-device reports can locate such delays.
+
+Release boundaries
+This branch is independent of the earlier audiobook and discovery fixes. Run all
+Core, app and UI qualification on iPhone and iPad before merging for TestFlight.
+Use the existing signed TestFlight workflow from main, a fresh build number, and
+internal-only distribution. Verify Apple processing/group assignment before
+claiming availability. Simulator results do not certify physical AirPlay, lock
+screen, network switching, thermal state or the original 6/9-second device delays.
