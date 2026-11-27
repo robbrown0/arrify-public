@@ -161,10 +161,14 @@ public enum AudiobookTimeline {
     @discardableResult public func run(_ operation: @escaping @MainActor () async -> Void) async -> Bool {
         if let task { await task.value; return false }
         let token = UUID(); identity = token
-        let current = Task { @MainActor in await operation() }
+        let current = Task { @MainActor [weak self] in
+            await operation()
+            // Release the slot before any waiter observes completion. A joined
+            // caller may immediately need to drain a newer paused checkpoint.
+            if let self, self.identity == token { self.task = nil }
+        }
         task = current
         await current.value
-        if identity == token { task = nil }
         return true
     }
 }

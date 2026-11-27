@@ -179,3 +179,11 @@ assertion and adding an explicit selected-trait assertion. An existing Home test
 also queried an offscreen heading after LazyVStack removed its accessibility node.
 It now accepts that eviction as offscreen evidence while retaining the visible
 playlist anchor and before/after scroll-position assertions.
+
+The fresh iPad run also exposed a separate shared-sync completion race. A joined
+forced caller could resume before the original caller cleared the completed task,
+then join that completed task a second time and leave a newer paused checkpoint
+dirty. The gate now clears its generation-fenced slot inside the shared task,
+before completion becomes visible to waiters. A barrier regression covers a
+cancelled owner and an immediate higher-priority follow-up over 50 schedules.
+Existing paused-write, account-reset and sequence-acknowledgement assertions stay.
