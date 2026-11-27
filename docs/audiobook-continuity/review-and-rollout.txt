@@ -157,3 +157,11 @@ client passed 60 Core/118 app tests on both device configurations. The earlier
 chapter UI failure is not waived. Full combined backend/Core/app/UI checks and
 final screenshot review remain required; final results belong in PR68.
 Production audiobook rollout remains staged pending explicit approval.
+
+Combined iPad qualification exposed a paused-clock race: periodic callbacks
+could move the cursor or report playing again after Pause, creating a redundant
+write that conflicted with another device. Pause now captures the current item
+clock once. Later notices cannot move a paused checkpoint, and active notices
+sample the current item rather than accepting a timestamp queued before a seek.
+The regression injects stale zero/90-second notices around a real seek and Pause,
+then verifies an unchanged paused seek makes no server writes or conflict.

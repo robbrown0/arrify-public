@@ -195,7 +195,7 @@ import CryptoKit
     private func installTimeObserver() {
         observer = player.addPeriodicTimeObserver(forInterval:CMTime(seconds:0.5, preferredTimescale:600), queue:.main) { @Sendable [weak self] time in
             let seconds = time.seconds
-            MainActor.assumeIsolated { self?.tick(seconds) }
+            MainActor.assumeIsolated { self?.receivePlaybackTime(seconds) }
         }
     }
     private func resetPlayer() {
@@ -436,7 +436,9 @@ import CryptoKit
         let hadPlaybackIntent = wantsPlayback || playing || preparing
         if interrupted { resumeAfterInterruption = false }
         wantsPlayback = false; generation = UUID(); operation?.cancel(); operation = nil
-        player.pause(); playing = false; preparing = false
+        player.pause()
+        if hadPlaybackIntent, !preparing, !finishing, let current = currentAudioPosition() { position = current }
+        playing = false; preparing = false
         if active { if hadPlaybackIntent { save() }; publish(); Task { await synchronize() } }
     }
     func resume() {
@@ -474,9 +476,22 @@ import CryptoKit
         }
     }
     func toggle() { if wantsPlayback || preparing { pause() } else if !active, let book { play(book) } else { resume() } }
-    private func tick(_ seconds: Double) {
-        guard active, !preparing, seconds.isFinite else { return }
-        position = min(book?.duration ?? 0, (part?.start ?? 0)+seconds); playing = player.timeControlStatus == .playing
+    private func currentAudioPosition() -> Double? {
+        guard active, let book, let part, let item = player.currentItem, item.status == .readyToPlay else { return nil }
+        let seconds = item.currentTime().seconds
+        guard seconds.isFinite else { return nil }
+        return min(book.duration,max(0,part.start+seconds))
+    }
+    func receivePlaybackTime(_ notificationTime: Double) {
+        guard active, !preparing, !finishing else { return }
+        guard wantsPlayback else {
+            if let deadline = sleepDeadline, Date() >= deadline { setSleep("off"); message = "Sleep timer finished. Your place is saved."; publish() }
+            return
+        }
+        // A queued notice can precede a seek, part change or Pause. Sample the
+        // current item instead, and never let notices move a paused checkpoint.
+        guard let current = currentAudioPosition() else { return }
+        position = current; playing = player.timeControlStatus == .playing
         if position > lastAudioPosition + 0.1 {
             lastAudioProgress = Date(); lastAudioPosition = position
             if playing, wantsPlayback, automaticDownloads, let id = automaticDownloadCandidate, id == book?.id {

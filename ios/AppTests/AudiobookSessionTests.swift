@@ -123,13 +123,20 @@ final class AudiobookSessionTests: XCTestCase {
         await transport.owner(music.deviceId)
         let file = try UITestAudiobookAudio.make()
         let books = AudiobookStore(api:api,music:music,audioSession:BookSessionAudio(),localMedia:{ _,_ in file })
-        defer { books.clear(); music.stop(); try? FileManager.default.removeItem(at:file) }
+        let previousAutomatic = books.automaticDownloads; books.automaticDownloads = false
+        defer { books.automaticDownloads = previousAutomatic; books.clear(); music.stop(); try? FileManager.default.removeItem(at:file) }
         await books.restore(); let book = try await api.audiobook("book-one")
-        books.play(book)
+        books.play(book,startingAt:20)
         for _ in 0..<500 where !books.playing { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertTrue(books.playing)
+        books.receivePlaybackTime(0) // An old notice must not undo the completed seek.
+        XCTAssertGreaterThanOrEqual(books.position,19.99)
         books.pause(); await books.synchronize(force:true,bookID:book.id)
+        let frozen = books.position
         let before = await transport.progressRequests
         await transport.conflictProgress()
+        for _ in 0..<10 { books.receivePlaybackTime(90); await Task.yield() }
+        XCTAssertEqual(books.position,frozen,accuracy:0.0001)
         books.seek(books.position)
         for _ in 0..<500 where books.preparing { try await Task.sleep(for:.milliseconds(20)) }
         await books.synchronize(force:true,bookID:book.id)
