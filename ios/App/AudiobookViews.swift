@@ -156,7 +156,7 @@ struct AudiobookDetail: View {
         ScrollView {
             VStack(alignment:.leading, spacing:20) {
                 RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(maxWidth:300).aspectRatio(1, contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:16))
-                    .overlay(alignment:.bottomTrailing) { AudiobookDownloadIndicator(downloads:model.books.downloads,book:book).padding(10) }.frame(maxWidth:.infinity)
+                    .frame(maxWidth:.infinity)
                 Text(book.title).font(.largeTitle.bold())
                 if let authors = book.authors, !authors.isEmpty {
                     ForEach(authors) { author in NavigationLink(author.name) { AudiobookScopedShelf(model:model, name:author.name, library:book.libraryId, author:author.id) }.font(.title3) }
@@ -219,15 +219,9 @@ struct AudiobookDetail: View {
     private var listenTitle: String { (book.progress?.currentTime ?? 0) > 0 ? "Continue listening" : "Listen now" }
     @ViewBuilder private var downloadControls: some View {
         let downloads = model.books.downloads
+        AudiobookDownloadControl(books:model.books,book:book,identifier:"audiobookDetailDownload").id(book.id)
         if downloads.complete(book.id) {
-            HStack { Label("Downloaded", systemImage:"checkmark.circle.fill").foregroundStyle(.green); Spacer(); Button("Remove download", role:.destructive) { Task { await model.books.removeDownload(book.id) } } }.frame(minHeight:44)
-        } else if downloads.working.contains(book.id) {
-            VStack(alignment:.leading) {
-                ProgressView(value:downloads.fraction(book.id))
-                HStack { Text("Downloading · \(Int(downloads.fraction(book.id)*100))%"); Spacer(); Button("Pause") { Task { await downloads.pause(book.id) } } }.frame(minHeight:44)
-            }
-        } else {
-            Button { Task { await downloads.download(book.id) } } label: { Label(downloads.records[book.id] == nil ? "Download for offline listening" : "Resume download", systemImage:"arrow.down.circle").frame(minHeight:44) }
+            Button("Remove download", role:.destructive) { Task { await model.books.removeDownload(book.id) } }.frame(minHeight:44)
         }
         if let error = downloads.errors[book.id] { Text(error).font(.footnote).foregroundStyle(.secondary) }
     }
@@ -262,7 +256,7 @@ struct AudiobookPlayer: View {
                 VStack(spacing:20) {
                     if let book = model.books.book {
                         RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(width:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230, height:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230).clipShape(RoundedRectangle(cornerRadius:18))
-                            .overlay(alignment:.bottomTrailing) { AudiobookDownloadIndicator(downloads:model.books.downloads,book:book).padding(10) }
+                        AudiobookDownloadControl(books:model.books,book:book,identifier:"audiobookPlayerDownload").id(book.id).frame(maxWidth:360)
                         VStack(alignment:.leading, spacing:8) {
                             Text(book.author).foregroundStyle(.secondary)
                             Text(book.title).font(.title.bold())
@@ -407,21 +401,55 @@ private struct AudiobookDownloadStatus: View {
         }.font(.caption)
     }
 }
-private struct AudiobookDownloadIndicator: View {
-    let downloads: AudiobookDownloads
+private struct AudiobookDownloadControl: View {
+    let books: AudiobookStore
     let book: Audiobook
+    let identifier: String
+    @State private var pendingAction: String?
+    private var downloads: AudiobookDownloads { books.downloads }
     var body: some View {
-        ZStack {
-            Circle().fill(.ultraThinMaterial)
-            if downloads.working.contains(book.id) {
-                Circle().stroke(Color.primary.opacity(0.2),lineWidth:3).padding(3)
-                Circle().trim(from:0,to:CGFloat(downloads.fraction(book.id))).stroke(Color.green,style:StrokeStyle(lineWidth:3,lineCap:.round)).rotationEffect(.degrees(-90)).padding(3)
-                Image(systemName:"arrow.down").font(.caption.bold())
+        let complete = downloads.complete(book.id), working = downloads.working.contains(book.id)
+        let progress = downloads.fraction(book.id), paused = downloads.records[book.id] != nil && !working && !complete
+        let action = working ? "Pause download" : paused ? "Resume download" : "Download"
+        let status = pendingAction ?? (working ? "Downloading · \(Int(progress*100))%" : paused ? "Download paused" : "Listen offline")
+        Group {
+            if complete {
+                HStack(spacing:10) { circle(complete:true,working:false,progress:1); Text("Downloaded · Available offline").font(.footnote); Spacer() }
+                    .foregroundStyle(.green).frame(minHeight:44).accessibilityElement(children:.combine)
             } else {
-                Image(systemName:downloads.complete(book.id) ? "checkmark.circle.fill" : downloads.records[book.id] == nil ? "arrow.down.circle" : "pause.circle")
-                    .font(.title3).foregroundStyle(downloads.complete(book.id) ? Color.green : Color.primary)
+                Button {
+                    let shouldPause = downloads.working.contains(book.id)
+                    pendingAction = shouldPause ? "Pausing download…" : "Preparing download…"
+                    Task {
+                        defer { pendingAction = nil }
+                        if shouldPause { await downloads.pause(book.id) }
+                        else { await downloads.download(book.id) }
+                    }
+                } label: {
+                    HStack(spacing:10) {
+                        circle(complete:false,working:working,progress:progress)
+                        Text(status).font(.footnote).foregroundStyle(.primary).multilineTextAlignment(.leading)
+                        Spacer(minLength:8)
+                        if pendingAction == nil { Text(action).font(.footnote.weight(.semibold)).foregroundStyle(.green).multilineTextAlignment(.trailing) }
+                    }.frame(minHeight:44).contentShape(Rectangle())
+                }.buttonStyle(.plain).disabled(pendingAction != nil)
+                    .accessibilityLabel(action).accessibilityValue(status)
             }
-        }.frame(width:36,height:36).accessibilityHidden(true)
+        }.accessibilityIdentifier(identifier)
+    }
+    private func circle(complete: Bool, working: Bool, progress: Double) -> some View {
+        ZStack {
+            Circle().stroke(Color.primary.opacity(0.18),lineWidth:2).padding(3)
+            if complete {
+                Image(systemName:"checkmark").font(.subheadline.bold())
+            } else if pendingAction != nil {
+                ProgressView().controlSize(.small)
+            } else {
+                Circle().trim(from:0,to:CGFloat(progress)).stroke(working ? Color.green : Color.secondary,style:StrokeStyle(lineWidth:3,lineCap:.round)).rotationEffect(.degrees(-90)).padding(3)
+                    .animation(.linear(duration:0.2),value:progress)
+                Image(systemName:"arrow.down").font(.subheadline.bold())
+            }
+        }.frame(width:36,height:36).foregroundStyle(.green).accessibilityHidden(true)
     }
 }
 private struct AudiobookShelfRow: View {

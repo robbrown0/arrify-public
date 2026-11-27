@@ -191,3 +191,23 @@ The f957 iPhone run passed all four audiobook UI cases, including chapter jumpin
 highlighting and unread reset. The remaining Home failure was its second query
 of the same evicted heading after player dismissal; both queries now accept
 offscreen eviction while retaining the exact visible-card position check (3pt).
+
+User review identified the bare paused-download cover badge as ambiguous. The
+artwork is now unobstructed. A compact download control beneath the player cover
+uses a downward arrow in a circular progress ring, a percentage while downloading,
+an explicit Download paused label with Resume download, and a completed checkmark
+with Downloaded / Available offline. Detail actions use the same labeled control.
+Only the main playback button uses an unlabeled Pause glyph. Download actions
+keep their own state per book and do not invoke playback Pause.
+Reference: current official Audible App Store screenshots reviewed Nov27:
+https://apps.apple.com/us/app/audible-audiobooks-podcasts/id379693831
+Arrify retains its green theme; this is a familiar download pattern, not a claim
+that the layout is identical to Audible or physically performance-qualified.
+
+Repeated simulator failures occurred during initial test-media preparation before
+the ownership/Pause assertions. Silent test audio now has a directly finalized PCM
+WAV header; native AVAudioFile frame counts are verified for short and long files
+and every initial cached item. No production media, quality, readiness deadline,
+or policy assertion changed. Initial-item error/status/duration/queue diagnostics
+are retained if preparation still fails. The old writer lifetime is eliminated as
+a test dependency; it is not established as the sole cause of those CI failures.

@@ -122,6 +122,12 @@ final class LaunchTests: XCTestCase {
         let screenshot = XCTAttachment(screenshot:app.screenshot()); screenshot.name = "Playing chapter and download indicator"; screenshot.lifetime = .keepAlways; add(screenshot)
         XCTAssertEqual(result,.completed,"Chapter selected=\(playingChapter.isSelected), value=\(String(describing:playingChapter.value)), player=\(player.label)")
         XCTAssertTrue(playingChapter.isSelected)
+        let download = app.descendants(matching:.any).matching(identifier:"audiobookPlayerDownload").firstMatch
+        for _ in 0..<5 where !download.isHittable { app.swipeDown() }
+        XCTAssertTrue(download.waitForExistence(timeout:10))
+        XCTAssertGreaterThanOrEqual(download.frame.height,44)
+        XCTAssertTrue(download.label.lowercased().contains("download"))
+        let downloadScreenshot = XCTAttachment(screenshot:app.screenshot()); downloadScreenshot.name = "Audiobook cover and download circle"; downloadScreenshot.lifetime = .keepAlways; add(downloadScreenshot)
         app.buttons["Close audiobook player"].tap()
         let unread = app.buttons["markAudiobookUnread"]
         for _ in 0..<5 where !unread.isHittable { app.swipeUp() }
