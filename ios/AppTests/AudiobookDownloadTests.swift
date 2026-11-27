@@ -56,8 +56,11 @@ final class AudiobookDownloadTests: XCTestCase {
         let book = try XCTUnwrap(downloads.records["book-one"]?.manifest.book)
         await transport.blockProgress()
         books.play(book)
-        for _ in 0..<100 where audio.activations == 0 { try await Task.sleep(for:.milliseconds(20)) }
-        XCTAssertGreaterThan(audio.activations,0,"Local playback must not wait for a stalled progress/ownership request")
+        // The fake transport stays blocked until releaseProgress below. Allow
+        // the normal simulator media-readiness window without imposing a hardware
+        // performance assertion: a network dependency would remain blocked forever.
+        for _ in 0..<500 where audio.activations == 0 { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertGreaterThan(audio.activations,0,"Local playback must not wait for server reads; preparing=\(books.preparing), offline=\(books.offline), message=\(books.message ?? "none")")
         XCTAssertNil(books.message)
         books.clear(); await transport.releaseProgress(); music.stop(); await api.logout()
     }
