@@ -7,8 +7,9 @@ import XCTest
         var starts = 0, completed = 0
         let first = Task { await gate.run { starts += 1; await barrier.wait() }; completed += 1 }
         await barrier.entered()
-        let second = Task { await gate.run { starts += 1 }; completed += 1 }
-        await Task.yield()
+        var secondEntered = false
+        let second = Task { secondEntered = true; await gate.run { starts += 1 }; completed += 1 }
+        while !secondEntered { await Task.yield() }
         XCTAssertEqual(starts, 1); XCTAssertEqual(completed, 0)
         barrier.release(); await first.value; await second.value
         XCTAssertEqual(starts, 1); XCTAssertEqual(completed, 2)
@@ -18,12 +19,12 @@ import XCTest
         let first = Task { await gate.run { await old.wait() } }; await old.entered()
         gate.reset()
         let second = Task { await gate.run { await current.wait() } }; await current.entered()
-        old.release(); await first.value
-        var unexpected = false, joinedFinished = false
-        let joined = Task { await gate.run { unexpected = true }; joinedFinished = true }
-        await Task.yield()
+        old.release(); _ = await first.value
+        var unexpected = false, joinedFinished = false, joinedEntered = false
+        let joined = Task { joinedEntered = true; await gate.run { unexpected = true }; joinedFinished = true }
+        while !joinedEntered { await Task.yield() }
         XCTAssertFalse(unexpected); XCTAssertFalse(joinedFinished)
-        current.release(); await second.value; await joined.value
+        current.release(); _ = await second.value; await joined.value
         XCTAssertFalse(unexpected); XCTAssertTrue(joinedFinished)
     }
     func testLatestAcknowledgedRemoteRewindWinsOverOlderDownloadPosition() {

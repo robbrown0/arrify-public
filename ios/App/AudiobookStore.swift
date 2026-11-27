@@ -101,6 +101,7 @@ import CryptoKit
     private var wantsPlayback = false
     private let syncGate = AudiobookSyncGate()
     private var syncIssues: [String: AudiobookPlaybackIssue] = [:]
+    private var resolvingRemote: [String: UUID] = [:]
     private var retryDates: [String: Date] = [:]
     private var syncFailures: [String: Int] = [:]
     private var lastSaved = Date.distantPast
@@ -253,9 +254,11 @@ import CryptoKit
         let saved = pending[value.id]?.dirty == true ? pending[value.id]?.checkpoint.position : value.progress?.currentTime
         position = min(value.duration, max(0, restart ? 0 : saved ?? 0))
         let ticket = UUID(); generation = ticket; preparing = true; message = nil; conflict = false; presented = true
+        resolvingRemote = useRemote ? [value.id:ticket] : [:]
         operation = Task { [weak self] in
             guard let self else { return }
             let account = self.accountGeneration
+            defer { if self.resolvingRemote[value.id] == ticket { self.resolvingRemote[value.id] = nil } }
             var stage = "local-check"
             let started = Date()
             PlaybackDiagnostics.event("audiobook-start")
@@ -276,7 +279,11 @@ import CryptoKit
                     return
                 }
                 stage = "progress"
-                if !useRemote { await self.synchronize(force:true, bookID:value.id) }
+                if useRemote {
+                    // Finish any old progress request before reading the server
+                    // cursor, and suppress new writes from the history being replaced.
+                    await self.syncGate.run {}
+                } else { await self.synchronize(force:true, bookID:value.id) }
                 guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
                 if self.pending[value.id]?.dirty == true && !useRemote {
                     if self.conflict { self.preparing = false; self.message = "Your place changed on another device. Choose which position to keep."; return }
@@ -290,7 +297,10 @@ import CryptoKit
                 stage = "begin"
                 let result = try await self.begin(value.id, deviceId:self.music?.deviceId ?? "", revision:musicState.queueRevision, requestId:ticket.uuidString.lowercased(), restart:restart, useRemote:useRemote, previousLease:previousLease)
                 guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
-                if useRemote { self.pending.removeValue(forKey:value.id); self.persist() }
+                if useRemote {
+                    self.pending.removeValue(forKey:value.id); self.syncIssues[value.id] = nil; self.retryDates[value.id] = nil
+                    self.resolvingRemote[value.id] = nil; self.persist()
+                }
                 self.install(result.book, manifest:result, position:result.position, offline:false)
                 stage = "stream-open"
                 try await self.open(at:result.position, token:ticket)
@@ -459,7 +469,7 @@ import CryptoKit
         }
         for id in ids {
             guard account == accountGeneration, !Task.isCancelled else { return }
-            guard let value = pending[id], value.dirty else { continue }
+            guard resolvingRemote[id] == nil, let value = pending[id], value.dirty else { continue }
             if case .conflict = syncIssues[id] { continue }
             guard force || Date() >= (retryDates[id] ?? .distantPast) else { continue }
             do {
@@ -482,7 +492,7 @@ import CryptoKit
                     persist(); syncFailures[id] = nil; retryDates[id] = nil; syncIssues[id] = nil
                     PlaybackDiagnostics.event("audiobook-sync-ready newer-local=\(!clean)")
                 } else { syncIssues[id] = .progressPending; retryDates[id] = Date().addingTimeInterval(10) }
-                if receipt.active == false, let lease = value.lease, manifest?.lease == lease {
+                if resolvingRemote[id] == nil, receipt.active == false, let lease = value.lease, manifest?.lease == lease {
                     pause(); message = "Playback moved to another device. Your place is saved."
                 }
             } catch where RequestCancellation.matches(error) || Task.isCancelled { return }
@@ -491,7 +501,7 @@ import CryptoKit
                 let issue = AudiobookPlaybackIssue.classify(error); syncIssues[id] = issue
                 PlaybackDiagnostics.event("audiobook-sync-deferred reason=\(issue.category)")
                 if case .conflict = issue {
-                    if book?.id == id { conflict = true; pause(); message = issue.message }
+                    if book?.id == id && resolvingRemote[id] == nil { conflict = true; pause(); message = issue.message }
                 } else {
                     let failures = min((syncFailures[id] ?? 0) + 1, 6); syncFailures[id] = failures
                     retryDates[id] = Date().addingTimeInterval(min(60,pow(2,Double(failures)))*Double.random(in:0.8...1.2))
@@ -607,7 +617,7 @@ import CryptoKit
         player.replaceCurrentItem(with:nil); downloads.clear(); pending = [:]; continueListening = []; queue = []; bookmarks = []
         if let journal { try? FileManager.default.removeItem(at:journal) }; journal = nil
         if let preferencesFile { try? FileManager.default.removeItem(at:preferencesFile) }; preferencesFile = nil; preferencesPending = false
-        conflict = false; message = nil; retryDates = [:]; syncFailures = [:]; syncIssues = [:]
+        conflict = false; message = nil; retryDates = [:]; syncFailures = [:]; syncIssues = [:]; resolvingRemote = [:]
     }
     func setSleep(_ choice: String) {
         sleepChoice = choice; sleepDeadline = nil; sleepChapter = nil

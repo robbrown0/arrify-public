@@ -2,8 +2,11 @@ Scope and provenance
 ====================
 This branch continues the Nov 27 audiobook investigation on upstream main
 79b499074943e3e6ff892fc18685606029d7fdcf, preserving unrelated live changes.
-The previously reviewed audiobook modules match upstream main. The exact source
-commit shipped as TestFlight build 44 has not been independently established.
+The previously reviewed audiobook modules match upstream main. Build 44 source is
+fcd0de971230fc9156e04d22d334fdc70e03ae99: successful TestFlight run 45944102009
+contains qualification and size artifacts explicitly named build 44. The reviewed
+audiobook modules are unchanged between that commit and the branch base.
+https://github.com/robbrown0/arrify-public/actions/runs/45944102009
 The original incident's underlying error remains unproven: its pre-stream failure
 was not logged. Removing and downloading the book again restored the user's
 position; that is evidence of retained progress, not proof of the earlier race.

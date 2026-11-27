@@ -92,6 +92,30 @@ final class AudiobookSessionTests: XCTestCase {
             await api.logout()
         }
     }
+    @MainActor func testExplicitServerPositionResolvesAnEarlierProgressConflict() async throws {
+        let transport = BookSessionTransport()
+        let api = APIClient(transport:transport, store:UITestStore())
+        try await api.login(endpoint:"https://fixture.invalid", username:"fixture", password:"fixture", deviceName:"Test")
+        let music = PlaybackCoordinator(api:api, audioSession:UITestAudioSession())
+        await transport.owner(music.deviceId)
+        let file = try UITestAudiobookAudio.make()
+        let books = AudiobookStore(api:api, music:music, audioSession:BookSessionAudio(), localMedia:{ _,_ in file })
+        defer { books.clear(); music.stop(); try? FileManager.default.removeItem(at:file) }
+        await books.restore(); let book = try await api.audiobook("book-one")
+        books.play(book)
+        for _ in 0..<500 where !books.playing { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertTrue(books.playing)
+        books.pause(); await books.synchronize(force:true, bookID:book.id)
+        await transport.conflictProgress()
+        books.seek(30)
+        for _ in 0..<500 where !books.conflict { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertTrue(books.conflict)
+        books.play(book, useRemote:true)
+        for _ in 0..<500 where !books.playing { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertTrue(books.playing, books.message ?? "Explicit server position must open a new session")
+        XCTAssertFalse(books.conflict); XCTAssertLessThan(books.position,10)
+    }
+
 }
 @MainActor private final class BookPartRequests {
     weak var store: AudiobookStore?
@@ -110,6 +134,8 @@ private actor BookSessionTransport: HTTPTransport {
     let session = UUID().uuidString.lowercased()
     let multipart: Bool
     init(multipart: Bool = false) { self.multipart = multipart }
+    private var rejectProgress = false
+    func conflictProgress() { rejectProgress = true }
     private var holdRead = false
     private var waiter: CheckedContinuation<Void, Never>?
     func holdBookRead() { holdRead = true }
@@ -118,6 +144,11 @@ private actor BookSessionTransport: HTTPTransport {
     func owner(_ id: String) async { await base.setOwner(id) }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
+        if path.hasSuffix("/play"), let body = request.httpBody,
+           let object = try? JSONSerialization.jsonObject(with:body) as? [String:Any], object["use_remote"] as? Bool == true { rejectProgress = false }
+        if rejectProgress && (path.hasSuffix("/offline-progress") || path.hasSuffix("/progress")) {
+            return HTTPResult(status:409,data:Data(#"{"error":{"code":"audiobook_conflict","message":"Your place changed on another device."}}"#.utf8))
+        }
         if path.hasSuffix("/sessions") || path.hasSuffix("/refresh") {
             return HTTPResult(status:200,data:try JSONSerialization.data(withJSONObject:["access_token":"fixture","refresh_token":"fixture","expires_in":3600,"refresh_expires_in":86400,"session_id":session]))
         }
