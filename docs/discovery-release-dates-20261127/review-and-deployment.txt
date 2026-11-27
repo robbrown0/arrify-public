@@ -68,3 +68,38 @@ Coordination
 The configured Hive Mind START_HERE and PROTOCOL connector reads returned 404.
 No hub claim/ACK could be posted. Work is isolated on its own source branch;
 this fix does not change the audiobook draft branches or dirty live source.
+
+Deployment and full-run verification completed — 2026-11-27
+Source commit 8cdbf07a77fdb317a2453cddcf0e380d31020057, PR #69.
+Image sha256:65c6cc9f09fe5db86f54828b9ae91d141d3c33fced72399cd8cd86a7845e9eb6.
+Only hitdiscovery was recreated at 18:04:34 UTC. Mounted API/album-index/memory/
+metadata/preparation/expansion overrides, environment values and network mode
+were verified identical. Requests, watchdog, player and VPN container IDs stayed
+unchanged. Live source and old override files were never overwritten.
+
+Discovery run 3332 completed 18:04:35–18:18:23 UTC (13m48s), processing 11,784
+candidates and reporting 1,026 missing songs. One invalid-date record in this run
+was deferred with the explicit metadata-review reason; no fabricated release
+year. No new album acquisition was initiated by the discovery run.
+
+Four focused regressions passed in the source and exact helper image under the
+production UID; 90 request regressions passed. The full documented Docker server
+suite passed: 769 tests in 808.136 seconds. GitHub release-baseline checks passed.
+A broad host-only attempt lacks required /opt/arrify release assets; it is not the
+release qualification result.
+
+All 3,163 request IDs and 2,786 transfer IDs were retained. Normal reconciliation
+updated existing job states during the full run; compare private snapshots for
+transition aggregates. Media binds remained read-only. Nothing was restored from
+backup or removed from live data. The fresh 3,052,228,608-byte SQLite online
+snapshot passes quick_check and a repeated SHA-256 check:
+a6db6630823a1c4b914c1951eeb31c72df06e6a96e16221c86542468fffdbcea
+It is private/discovery.snapshot.sqlite3 in the release directory (not in Git).
+
+Lidarr was not restarted; its identity remained unchanged. Docker-reported memory
+was 415.5 MiB before deployment, 375.8–520.2 MiB over 26 samples during the complete
+run, and approximately 431 MiB afterward, against a 4 GiB limit. Anonymous memory
+was 112.7–271.5 MiB during the run. There were zero OOM kills or container restarts.
+This is a bounded observation of one complete run, not a long-term leak guarantee.
+Existing upstream metadata cooldowns still produce deferred resolutions. No
+scan policy, downloader settings, VPN configuration or SSH behavior was changed.
