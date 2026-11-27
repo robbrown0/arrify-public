@@ -82,7 +82,11 @@ import Network
             }
         }
     }
-    var progress: Double { duration.isFinite && duration > 0 && position.isFinite ? min(1, max(0, position / duration)) : 0 }
+    var timeline: PlaybackTimeline {
+        PlaybackTimeline(position: position, duration: duration,
+                         completed: ownsOutput && completedKey != nil && completedKey == loadedKey)
+    }
+    var progress: Double { timeline.progress }
     var position = 0.0
     var duration = 0.0
     var busy = false
@@ -342,18 +346,27 @@ import Network
                 self.playerStateChanged()
             }
         }
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { @Sendable [weak self] time in
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { @Sendable [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                guard self.ownsOutput else { return }
-                if !self.recovering && self.resumeCheckpoint == nil { self.position = time.seconds.isFinite ? time.seconds : 0 }
-                let seconds = self.player.currentItem?.duration.seconds ?? 0
-                self.duration = seconds.isFinite ? seconds : 0
+                guard self.updatePlaybackTimeline() else { return }
                 PlaybackDiagnostics.record("playback-tick position=\(self.position) duration=\(self.duration)")
                 self.publishNowPlaying()
                 if self.player.currentItem?.status == .failed { self.recoverServerRoute() }
             }
         }
+    }
+    @discardableResult
+    func updatePlaybackTimeline() -> Bool {
+        guard ownsOutput, let item = player.currentItem,
+              queuedTracks[ObjectIdentifier(item)] == state?.currentTrackId else { return false }
+        // A queued timer callback can carry the preceding item's time. Read
+        // both values from the current, identity-checked item at execution time.
+        let sample = item.currentTime().seconds
+        if sample.isFinite, !recovering, resumeCheckpoint == nil { position = max(0, sample) }
+        let length = item.duration.seconds
+        duration = length.isFinite ? max(0, length) : 0
+        return true
     }
     private func playerStateChanged() {
         rowOutputIsPlaying = isPlaying
@@ -535,14 +548,11 @@ import Network
                   !endedInFlight, !commandInFlight, !Task.isCancelled else { return }
             if report, ownsOutput, permission.enabled, loadedKey != nil, loadedKey == desiredKey,
                let current = player.currentItem, queuedTracks[ObjectIdentifier(current)] == state?.currentTrackId {
-                let sample = player.currentTime().seconds
-                if sample.isFinite, !recovering, resumeCheckpoint == nil { position = max(0, sample) }
-                let length = current.duration.seconds
-                if length.isFinite { duration = max(0, length) }
+                updatePlaybackTimeline()
                 var heartbeat = PlaybackCommand(action: "heartbeat", deviceId: deviceId)
                 heartbeat.ownerEpoch = state?.ownerEpoch; heartbeat.intent = state?.intent
                 heartbeat.expectedCurrent = state?.currentTrackId; heartbeat.position = position
-                heartbeat.duration = duration
+                heartbeat.duration = timeline.duration ?? 0
                 let buffered = player.currentItem?.loadedTimeRanges.compactMap { $0.timeRangeValue }.map { max(0, $0.end.seconds - position) }.max() ?? 0
                 heartbeat.buffer = BufferReport(items: cache.items, playerSeconds: Int(min(86400, max(0, buffered.isFinite ? buffered : 0))))
                 let sequence = heartbeatSequence.next()
@@ -1422,15 +1432,17 @@ import Network
     private func publishNowPlaying() {
         guard !externalOutput else { return }
         guard ownsOutput, permission.enabled, loadedKey != nil, let track else { return }
-        let signature = "\(track.id):\(artworkRevision):\(Int(duration)):\(state?.playId ?? 0)"
+        let displayTimeline = timeline
+        let signature = "\(track.id):\(artworkRevision):\(Int(displayTimeline.duration ?? 0)):\(state?.playId ?? 0)"
         guard nowPlayingGate.shouldPublish(signature: signature, position: position,
                                           rate: isPlaying ? 1 : 0, now: ProcessInfo.processInfo.systemUptime) else { return }
         var info: [String: Any] = [MPMediaItemPropertyTitle: track.title,
             MPMediaItemPropertyArtist: track.artist, MPMediaItemPropertyAlbumTitle: track.album,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
             MPNowPlayingInfoPropertyIsLiveStream: false,
-            MPMediaItemPropertyPlaybackDuration: duration, MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: displayTimeline.position,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0]
+        if let duration = displayTimeline.duration { info[MPMediaItemPropertyPlaybackDuration] = duration }
         if let systemArtwork { info[MPMediaItemPropertyArtwork] = systemArtwork }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
