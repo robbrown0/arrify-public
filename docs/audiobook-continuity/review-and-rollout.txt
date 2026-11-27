@@ -187,3 +187,7 @@ dirty. The gate now clears its generation-fenced slot inside the shared task,
 before completion becomes visible to waiters. A barrier regression covers a
 cancelled owner and an immediate higher-priority follow-up over 50 schedules.
 Existing paused-write, account-reset and sequence-acknowledgement assertions stay.
+The f957 iPhone run passed all four audiobook UI cases, including chapter jumping,
+highlighting and unread reset. The remaining Home failure was its second query
+of the same evicted heading after player dismissal; both queries now accept
+offscreen eviction while retaining the exact visible-card position check (3pt).

@@ -500,7 +500,7 @@ final class LaunchTests: XCTestCase {
             XCTAssertTrue(close.waitForNonExistence(timeout: 10))
             expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: playlist)
             waitForExpectations(timeout: 10)
-            XCTAssertLessThan(title.frame.minY, initialTitleY - 100, "Minimizing the player must not reset Home to the top")
+            XCTAssertTrue(!title.exists || title.frame.minY < initialTitleY - 100, "Minimizing the player must not reset Home to the top")
             XCTAssertEqual(playlist.frame.minY, scrolledY, accuracy: 3,
                            "Home must retain its exact browsing position after player dismissal")
         }
