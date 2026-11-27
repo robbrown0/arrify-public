@@ -59,7 +59,9 @@ import CryptoKit
                     let parts = name.split(separator:"/"); guard parts.count == 3 else { return }; let book = String(parts[0])
                     guard let self, self.epoch == ticket, self.records[book]?.transferId == String(parts[1]) else { return }
                     self.working.remove(book); self.errors[book] = error
-                    self.transferProgress.removeValue(forKey:book)
+                    // A paused transfer keeps its last byte count for the progress
+                    // pie. A resumed task replaces it with observed transfer data.
+                    if error == nil { self.transferProgress.removeValue(forKey:book) }
                     self.revision += 1
                     if error == nil { await self.schedule(book) }
                 }
@@ -138,6 +140,7 @@ import CryptoKit
             }
             let old = records[id]
             if old?.addresses != urls || old?.manifest.lease != manifest.lease {
+                transferProgress.removeValue(forKey:id)
                 // Resume data is opaque. A changed origin/grant starts a fresh transfer.
                 if let transfer = old?.transferId, let files = try? FileManager.default.contentsOfDirectory(at:root.appending(path:id + "/" + transfer), includingPropertiesForKeys:nil) {
                     for file in files where file.pathExtension == "resume" { try? FileManager.default.removeItem(at:file) }

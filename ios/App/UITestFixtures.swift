@@ -252,4 +252,17 @@ actor UITestTransport: HTTPTransport {
         try data(seconds:seconds).write(to:url,options:.atomic); return url
     }
 }
+/// Keep a real download delegate at 50% until the UI pauses it. No live network.
+final class UITestBookDownloadProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.path.contains("/audiobooks/stream/") == true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard let url = request.url else { return }
+        let total = 1920044
+        let response = HTTPURLResponse(url:url,statusCode:200,httpVersion:"HTTP/1.1",headerFields:["Content-Type":"audio/wav","Content-Length":String(total)])!
+        client?.urlProtocol(self,didReceive:response,cacheStoragePolicy:.notAllowed)
+        client?.urlProtocol(self,didLoad:Data(count:total/2))
+    }
+    override func stopLoading() {}
+}
 #endif

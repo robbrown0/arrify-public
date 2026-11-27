@@ -157,7 +157,10 @@ struct AudiobookDetail: View {
             VStack(alignment:.leading, spacing:20) {
                 RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(maxWidth:300).aspectRatio(1, contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:16))
                     .frame(maxWidth:.infinity)
-                Text(book.title).font(.largeTitle.bold())
+                HStack(alignment:.center,spacing:16) {
+                    Text(book.title).font(.largeTitle.bold()).frame(maxWidth:.infinity,alignment:.leading)
+                    AudiobookDownloadControl(books:model.books,book:book,identifier:"audiobookDetailDownload").id(book.id)
+                }.padding(.trailing,8)
                 if let authors = book.authors, !authors.isEmpty {
                     ForEach(authors) { author in NavigationLink(author.name) { AudiobookScopedShelf(model:model, name:author.name, library:book.libraryId, author:author.id) }.font(.title3) }
                 } else { Text(book.author).font(.title3).foregroundStyle(.secondary) }
@@ -201,7 +204,7 @@ struct AudiobookDetail: View {
                     }
                 }
             }.padding(24)
-        }.background(Color.black).navigationTitle("Audiobook").navigationBarTitleDisplayMode(.inline)
+        }.accessibilityIdentifier("audiobookDetailScroll").background(Color.black).navigationTitle("Audiobook").navigationBarTitleDisplayMode(.inline)
             .task {
                 let generation = detailGeneration
                 do {
@@ -219,7 +222,6 @@ struct AudiobookDetail: View {
     private var listenTitle: String { (book.progress?.currentTime ?? 0) > 0 ? "Continue listening" : "Listen now" }
     @ViewBuilder private var downloadControls: some View {
         let downloads = model.books.downloads
-        AudiobookDownloadControl(books:model.books,book:book,identifier:"audiobookDetailDownload").id(book.id)
         if downloads.complete(book.id) {
             Button("Remove download", role:.destructive) { Task { await model.books.removeDownload(book.id) } }.frame(minHeight:44)
         }
@@ -256,10 +258,12 @@ struct AudiobookPlayer: View {
                 VStack(spacing:20) {
                     if let book = model.books.book {
                         RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(width:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230, height:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230).clipShape(RoundedRectangle(cornerRadius:18))
-                        AudiobookDownloadControl(books:model.books,book:book,identifier:"audiobookPlayerDownload").id(book.id).frame(maxWidth:360)
                         VStack(alignment:.leading, spacing:8) {
                             Text(book.author).foregroundStyle(.secondary)
-                            Text(book.title).font(.title.bold())
+                            HStack(alignment:.center,spacing:16) {
+                                Text(book.title).font(.title.bold()).frame(maxWidth:.infinity,alignment:.leading).accessibilityIdentifier("audiobookPlayerTitle")
+                                AudiobookDownloadControl(books:model.books,book:book,identifier:"audiobookPlayerDownload").id(book.id)
+                            }.padding(.trailing,8)
                             Text(model.books.chapter?.title ?? "Audiobook").foregroundStyle(.secondary)
                         }.frame(maxWidth:.infinity, alignment:.leading)
                         Slider(value:Binding(get:{ seeking ?? model.books.position }, set:{ seeking = $0 }), in:0...max(1,book.duration)) { editing in
@@ -291,7 +295,7 @@ struct AudiobookPlayer: View {
                         panel(book)
                     } else { ProgressView(model.books.preparing ? "Opening your audiobook…" : "Choose a book to begin") }
                 }.padding(24).frame(maxWidth:760).frame(maxWidth:.infinity)
-            }.background(LinearGradient(colors:[Color.green.opacity(0.12),.black], startPoint:.top, endPoint:.bottom))
+            }.accessibilityIdentifier("audiobookPlayerScroll").background(LinearGradient(colors:[Color.green.opacity(0.12),.black], startPoint:.top, endPoint:.bottom))
                 .navigationTitle("Audiobook").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement:.topBarLeading) { Button { model.books.presented = false } label: { Image(systemName:"chevron.down").frame(width:44, height:44) }.accessibilityLabel("Close audiobook player") }
@@ -411,11 +415,11 @@ private struct AudiobookDownloadControl: View {
         let complete = downloads.complete(book.id), working = downloads.working.contains(book.id)
         let progress = downloads.fraction(book.id), paused = downloads.records[book.id] != nil && !working && !complete
         let action = working ? "Pause download" : paused ? "Resume download" : "Download"
-        let status = pendingAction ?? (working ? "Downloading · \(Int(progress*100))%" : paused ? "Download paused" : "Listen offline")
+        let status = pendingAction ?? (working ? "Downloading · \(Int(progress*100))%" : paused ? "Paused · \(Int(progress*100))%" : "Listen offline")
         Group {
             if complete {
-                HStack(spacing:10) { circle(complete:true,working:false,progress:1); Text("Downloaded · Available offline").font(.footnote); Spacer() }
-                    .foregroundStyle(.green).frame(minHeight:44).accessibilityElement(children:.combine)
+                circle(complete:true,paused:false,progress:1).frame(width:44,height:44)
+                    .accessibilityElement(children:.ignore).accessibilityLabel("Downloaded").accessibilityValue("Available offline")
             } else {
                 Button {
                     let shouldPause = downloads.working.contains(book.id)
@@ -426,30 +430,37 @@ private struct AudiobookDownloadControl: View {
                         else { await downloads.download(book.id) }
                     }
                 } label: {
-                    HStack(spacing:10) {
-                        circle(complete:false,working:working,progress:progress)
-                        Text(status).font(.footnote).foregroundStyle(.primary).multilineTextAlignment(.leading)
-                        Spacer(minLength:8)
-                        if pendingAction == nil { Text(action).font(.footnote.weight(.semibold)).foregroundStyle(.green).multilineTextAlignment(.trailing) }
-                    }.frame(minHeight:44).contentShape(Rectangle())
+                    circle(complete:false,paused:paused,progress:progress).frame(width:44,height:44).contentShape(Circle())
                 }.buttonStyle(.plain).disabled(pendingAction != nil)
                     .accessibilityLabel(action).accessibilityValue(status)
             }
         }.accessibilityIdentifier(identifier)
     }
-    private func circle(complete: Bool, working: Bool, progress: Double) -> some View {
+    private func circle(complete: Bool, paused: Bool, progress: Double) -> some View {
         ZStack {
-            Circle().stroke(Color.primary.opacity(0.18),lineWidth:2).padding(3)
+            Circle().fill(complete ? Color.green : Color.primary.opacity(0.12))
+            if !complete {
+                AudiobookDownloadPie(progress:progress).fill(Color.green.opacity(0.35))
+                    .animation(.linear(duration:0.2),value:progress)
+            }
             if complete {
-                Image(systemName:"checkmark").font(.subheadline.bold())
+                Image(systemName:"checkmark").font(.subheadline.bold()).foregroundStyle(.black)
             } else if pendingAction != nil {
                 ProgressView().controlSize(.small)
             } else {
-                Circle().trim(from:0,to:CGFloat(progress)).stroke(working ? Color.green : Color.secondary,style:StrokeStyle(lineWidth:3,lineCap:.round)).rotationEffect(.degrees(-90)).padding(3)
-                    .animation(.linear(duration:0.2),value:progress)
-                Image(systemName:"arrow.down").font(.subheadline.bold())
+                Image(systemName:paused ? "pause.fill" : "arrow.down").font(.subheadline.bold()).foregroundStyle(paused ? Color.yellow : Color.green)
             }
-        }.frame(width:36,height:36).foregroundStyle(.green).accessibilityHidden(true)
+        }.frame(width:36,height:36).foregroundStyle(.green).accessibilityElement(children:.ignore)
+    }
+}
+private struct AudiobookDownloadPie: Shape {
+    var progress: Double
+    var animatableData: Double { get { progress } set { progress = newValue } }
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x:rect.midX,y:rect.midY)
+        var path = Path(); path.move(to:center)
+        path.addArc(center:center,radius:min(rect.width,rect.height)/2,startAngle:.degrees(-90),endAngle:.degrees(-90+360*min(1,max(0,progress))),clockwise:false)
+        path.closeSubpath(); return path
     }
 }
 private struct AudiobookShelfRow: View {

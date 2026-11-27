@@ -108,9 +108,14 @@ final class LaunchTests: XCTestCase {
         let book = app.buttons["audiobook-book-one"]
         XCTAssertTrue(book.waitForExistence(timeout:20)); book.tap()
         let chapter = app.buttons["audiobookChapter-60.0"]
-        for _ in 0..<5 where !chapter.isHittable { app.swipeUp() }
+        let detailScroll = app.scrollViews["audiobookDetailScroll"]
+        for _ in 0..<5 {
+            if chapter.isHittable && chapter.frame.maxY <= detailScroll.frame.maxY-24 { break }
+            detailScroll.swipeUp()
+        }
         XCTAssertTrue(chapter.waitForExistence(timeout:10))
         XCTAssertGreaterThanOrEqual(chapter.frame.height,44)
+        XCTAssertLessThanOrEqual(chapter.frame.maxY,detailScroll.frame.maxY-24,"The whole row must be above the bottom player before tapping its center")
         chapter.coordinate(withNormalizedOffset:CGVector(dx:0.65,dy:0.5)).tap()
         let player = app.buttons["audiobookPlayPause"]
         XCTAssertTrue(player.waitForExistence(timeout:20))
@@ -138,6 +143,48 @@ final class LaunchTests: XCTestCase {
         let stale = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in app.buttons["Play from beginning"].exists },object:nil)
         stale.isInverted = true
         XCTAssertEqual(XCTWaiter.wait(for:[stale],timeout:2),.completed)
+    }
+    @MainActor func testAudiobookDownloadPiePausesAndResumesWithoutPausingPlayback() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
+        app.launchEnvironment["ARRIFY_UI_DOWNLOAD_CONTROL"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout:30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout:20)); app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Audiobooks"].firstMatch.waitForExistence(timeout:20)); app.buttons["Audiobooks"].firstMatch.tap()
+        let book = app.buttons["audiobook-book-one"]
+        XCTAssertTrue(book.waitForExistence(timeout:20)); book.tap()
+        let detailDownload = app.buttons["audiobookDetailDownload"]
+        XCTAssertTrue(detailDownload.waitForExistence(timeout:10)); detailDownload.tap()
+        let halfDownloaded = XCTNSPredicateExpectation(predicate:NSPredicate(format:"value CONTAINS %@","50%"),object:detailDownload)
+        XCTAssertEqual(XCTWaiter.wait(for:[halfDownloaded],timeout:15),.completed)
+        app.buttons["listenAudiobook"].tap()
+        let playback = app.buttons["audiobookPlayPause"]
+        XCTAssertTrue(playback.waitForExistence(timeout:20))
+        let playing = XCTNSPredicateExpectation(predicate:NSPredicate(format:"label == %@","Pause audiobook"),object:playback)
+        XCTAssertEqual(XCTWaiter.wait(for:[playing],timeout:20),.completed)
+        let download = app.buttons["audiobookPlayerDownload"]
+        XCTAssertTrue(download.waitForExistence(timeout:10)); XCTAssertEqual(download.label,"Pause download")
+        XCTAssertEqual(download.frame.width,44,accuracy:1); XCTAssertEqual(download.frame.height,44,accuracy:1)
+        let title = app.staticTexts["audiobookPlayerTitle"]
+        XCTAssertLessThanOrEqual(title.frame.maxX,download.frame.minX)
+        XCTAssertEqual(title.frame.midY,download.frame.midY,accuracy:1)
+        XCTAssertLessThanOrEqual(download.frame.maxX,app.scrollViews["audiobookPlayerScroll"].frame.maxX-32)
+        let active = XCTAttachment(screenshot:app.screenshot()); active.name = "Title download pie at 50 percent"; active.lifetime = .keepAlways; add(active)
+        download.tap()
+        let paused = XCTNSPredicateExpectation(predicate:NSPredicate(format:"label == %@ AND value CONTAINS %@","Resume download","50%"),object:download)
+        XCTAssertEqual(XCTWaiter.wait(for:[paused],timeout:15),.completed)
+        XCTAssertEqual(playback.label,"Pause audiobook","Download Pause must not pause listening")
+        let stopped = XCTAttachment(screenshot:app.screenshot()); stopped.name = "Title download pie paused yellow"; stopped.lifetime = .keepAlways; add(stopped)
+        download.tap()
+        let resumed = XCTNSPredicateExpectation(predicate:NSPredicate(format:"label == %@","Pause download"),object:download)
+        XCTAssertEqual(XCTWaiter.wait(for:[resumed],timeout:15),.completed)
+        XCTAssertEqual(playback.label,"Pause audiobook")
+        download.tap()
     }
     @MainActor func testSongsInitialFailureAndVisiblePageRetry() { checkCatalogPaging("Songs") }
     @MainActor func testAlbumsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Albums") }

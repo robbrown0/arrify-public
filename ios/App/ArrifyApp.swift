@@ -41,7 +41,10 @@ import AVKit
         #if DEBUG
         if ProcessInfo.processInfo.environment["ARRIFY_UI_AUDIOBOOKS"] == "1" {
             let audio = try? UITestAudiobookAudio.make()
-            books = AudiobookStore(api:api, music:playback, audioSession:UITestAudioSession(), localMedia:{ _,_ in audio })
+            let downloads = ProcessInfo.processInfo.environment["ARRIFY_UI_DOWNLOAD_CONTROL"] == "1" ? AudiobookDownloads(api:api,configuration:{ _ in
+                let value = URLSessionConfiguration.ephemeral; value.protocolClasses = [UITestBookDownloadProtocol.self]; return value
+            }) : nil
+            books = AudiobookStore(api:api, music:playback, audioSession:UITestAudioSession(), downloads:downloads, localMedia:{ _,_ in audio })
         } else { books = AudiobookStore(api:api, music:playback) }
         #else
         books = AudiobookStore(api:api, music:playback)

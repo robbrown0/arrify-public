@@ -211,3 +211,23 @@ and every initial cached item. No production media, quality, readiness deadline,
 or policy assertion changed. Initial-item error/status/duration/queue diagnostics
 are retained if preparation still fails. The old writer lifetime is eliminated as
 a test dependency; it is not established as the sole cause of those CI failures.
+
+Final user design correction supersedes the earlier labeled ring: the download
+control is now a compact44-point button at the far right of the title, on details
+and player. A filled radial pie shows byte progress; a green downward arrow
+becomes a yellow Pause symbol when paused. Tapping the circle pauses/resumes
+only the transfer. No visible download text row; VoiceOver retains action/state/
+percentage labels. Completed media uses a green check. Retain last observed
+partial-byte progress while paused; clear it when the grant or source URL changes.
+A real URLSession delegate fixture holds50% for pause/resume UI screenshots and
+checks listening remains active. Focused app coverage checks partial progress
+survives cancellation and can resume. This does not claim partial byte counts
+persist across process termination; completed parts remain durable.
+The latest pre-correction iPhone passed Core63/App124/UI32 (2Pad-only skips).
+iPad passed Core63/App124 and31of32UI, but the chapter test stopped scrolling
+when only14points of the row were visible. Its center landed beneath the bottom
+player (row1266..1318, viewport ends1280). Target the detail ScrollView and require
+the entire row to be above its bottom before the same empty-area tap. No chapter
+hit-area/Playing/unread assertions are removed. Fresh qualification is required.
+The existing targeted audiobook workflow also includes these new UI regressions;
+the full release gates still run all native tests on both device families.

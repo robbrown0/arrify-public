@@ -4,6 +4,22 @@ import ArrifyCore
 @testable import Arrify
 
 final class AudiobookDownloadTests: XCTestCase {
+    @MainActor func testPausingPartialDownloadKeepsItsProgressAndCanResume() async throws {
+        let api = APIClient(transport:DownloadContractTransport(fail:false,holdTransfer:true),store:UITestStore())
+        try await api.login(endpoint:"https://book-download.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let downloads = AudiobookDownloads(api:api,configuration:Self.configuration)
+        defer { downloads.clear() }
+        await downloads.download("book-one")
+        for _ in 0..<300 where downloads.fraction("book-one") < 0.5 { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertEqual(downloads.fraction("book-one"),0.5,accuracy:0.01)
+        XCTAssertTrue(downloads.working.contains("book-one")); XCTAssertFalse(downloads.complete("book-one"))
+        await downloads.pause("book-one")
+        for _ in 0..<300 where downloads.errors["book-one"] == nil { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertFalse(downloads.working.contains("book-one"))
+        XCTAssertEqual(downloads.fraction("book-one"),0.5,accuracy:0.01,"Pausing must retain the displayed partial progress")
+        await downloads.download("book-one")
+        XCTAssertTrue(downloads.working.contains("book-one")); XCTAssertFalse(downloads.complete("book-one"))
+    }
     @MainActor func testCompleteBookSurvivesStoreRecreationAndExplicitErasure() async throws {
         let api = try await makeAPI()
         let first = AudiobookDownloads(api:api, configuration:Self.configuration)
@@ -235,8 +251,9 @@ private actor DownloadContractTransport: HTTPTransport {
     func releaseProgress() { blocked = false; waiter?.resume(); waiter = nil }
     let fail: Bool
     let empty: Bool
+    let holdTransfer: Bool
     let session = UUID().uuidString.lowercased()
-    init(fail: Bool, empty: Bool = false) { self.fail = fail; self.empty = empty }
+    init(fail: Bool, empty: Bool = false, holdTransfer: Bool = false) { self.fail = fail; self.empty = empty; self.holdTransfer = holdTransfer }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
         if blocked && (path.hasSuffix("/offline-progress") || path.hasSuffix("/native/playback")) { await withCheckedContinuation { waiter = $0 } }
@@ -252,7 +269,7 @@ private actor DownloadContractTransport: HTTPTransport {
                 await withCheckedContinuation { playWaiter = $0; playWaiting = true; playObserver?.resume(); playObserver = nil }
                 playWaiting = false
             }
-            let lease = String(repeating:fail ? "b" : empty ? "c" : "a", count:43)
+            let lease = String(repeating:fail ? "b" : empty ? "c" : holdTransfer ? "d" : "a", count:43)
             let book: [String:Any] = ["id":"book-one","library_id":"books","title":"Downloaded story","author":"Author","narrator":"Reader","series":"","description":"","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":1,
                 "parts":[["index":0,"start":0,"duration":1,"size_bytes":BookAudioProtocol.audio.count,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+lease+"/0"]],"chapters":[["title":"Chapter","start":0,"end":1]],"progress":["currentTime":remotePosition,"lastUpdate":remoteStamp,"isFinished":false]]
             if path.contains("/book/"), holdBookRead {
@@ -289,6 +306,9 @@ private final class BookAudioProtocol: URLProtocol, @unchecked Sendable {
         let bytes = failed || url.path.contains(String(repeating:"c",count:43)) ? Data() : Self.audio
         let response = HTTPURLResponse(url:url,statusCode:failed ? 503 : 200,httpVersion:"HTTP/1.1",headerFields:["Content-Type":"audio/wav","Content-Length":String(bytes.count)])!
         client?.urlProtocol(self,didReceive:response,cacheStoragePolicy:.notAllowed)
+        if url.path.contains(String(repeating:"d",count:43)) {
+            client?.urlProtocol(self,didLoad:Data(bytes.prefix(bytes.count/2))); return
+        }
         client?.urlProtocol(self,didLoad:bytes); client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
