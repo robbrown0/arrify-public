@@ -43,7 +43,7 @@ struct AudiobookShelf: View {
                     ScrollView(.horizontal, showsIndicators:false) { filterButtons }
                     HStack {
                         Picker("Sort books", selection:$savedSort) {
-                            Text("Title").tag("title"); Text("Author").tag("author"); Text("Publication date · newest").tag("release_date"); Text("Publication year · newest").tag("release")
+                            Text("Title").tag("title"); Text("Author").tag("author"); Text("Publication year · newest").tag("release")
                             Text("Recently added").tag("added"); Text("Length · shortest").tag("duration")
                         }.disabled(!shelf.query.isEmpty)
                         Spacer()
@@ -62,7 +62,7 @@ struct AudiobookShelf: View {
         }.background(Color.black).navigationTitle("Audiobooks")
             .searchable(text:$shelf.query, prompt:section == "books" ? "Books, authors, narrators" : "Search " + section)
             .onChange(of:savedSort) { shelf.sort = savedSort }
-            .onAppear { shelf.sort = savedSort }
+            .onAppear { if savedSort == "release_date" { savedSort = "release" }; shelf.sort = savedSort }
             .toolbar { NavigationLink { AudiobookSettings(books:model.books) } label: { Image(systemName:"slider.horizontal.3") }.accessibilityLabel("Listening settings") }
             .task(id:taskKey) {
                 guard scenePhase == .active else { return }
@@ -114,7 +114,6 @@ struct AudiobookShelf: View {
         if shelf.filter == "downloads" { return model.books.downloads.records.values.map { $0.manifest.book }.filter { shelf.query.isEmpty || ($0.title + " " + $0.author).localizedCaseInsensitiveContains(shelf.query) }.sorted { left, right in
             switch savedSort {
             case "author": return left.author.localizedStandardCompare(right.author) == .orderedAscending
-            case "release_date": return (left.publishedDate ?? "") > (right.publishedDate ?? "")
             case "release": return (left.publishedYear ?? "") > (right.publishedYear ?? "")
             case "added": return (left.addedAt ?? 0) > (right.addedAt ?? 0)
             case "duration": return left.duration < right.duration

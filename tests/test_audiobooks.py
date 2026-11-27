@@ -146,7 +146,7 @@ class AudiobookTests(unittest.TestCase):
             self.assertEqual(base64.b64decode(query['filter'][0].split('.',1)[1]).decode(), 'series-one')
 
     def test_invalid_library_scope_and_sort_do_not_read_items(self):
-        for values in ({'sort':'private.path'}, {'sort':'sequence'}, {'library_id':'other'}, {'author':'../other'}, {'author':'one','series':'two'}):
+        for values in ({'sort':'private.path'}, {'sort':'release_date'}, {'sort':'sequence'}, {'library_id':'other'}, {'author':'../other'}, {'author':'one','series':'two'}):
             before = len(self.fixture.paths)
             with self.assertRaises(BookError): self.books.library(1, **values)
             self.assertFalse(any('/items?' in p for _,p in self.fixture.paths[before:]))

@@ -28,12 +28,12 @@ Delivered behavior
 - Books, Authors and Series navigation; author series are fetched independently
   of the first page of books. Numbered series use provider sequence ordering and
   retain fractional/unknown numbers. Author and series IDs remain structured.
-- One-tap Continue listening, list/grid layouts, publication-year and provider publication-date
-  sort choices, recently-added/author/title/duration sort, Not started filter,
+- One-tap Continue listening, list/grid layouts, publication-year
+  sorting, recently-added/author/title/duration sort, Not started filter,
   explicit complete/downloading/paused download badges.
-- Dates retain provider precision. Publication-date ordering uses publishedDate;
-  a publication year is not fabricated into an exact date. Unknown dates stay
-  unknown. Existing downloads and API consumers accept optional new metadata.
+- Dates retain provider precision. The installed provider only supports global
+  publication-year ordering; exact dates are shown in book details when supplied.
+  No unsupported exact-date sort is offered. Unknown dates stay unknown. Existing downloads and API consumers accept optional new metadata.
 
 Design references
 =================
@@ -75,7 +75,9 @@ Follow-up product work and risks
 - A full listening history/undo system needs a durable retention/migration design.
   Add smart rewind and per-book speed with explicit behavior tests, then collections
   and opt-in next-in-series playback. Preserve existing sleep/bookmark behavior.
-- Provider publishedDate may be absent or refer to publication rather than the
+- Exact-day ordering needs a separate bounded metadata index; the installed
+  provider getOrder implementation does not support publishedDate.
+  Provider publishedDate may be absent or refer to publication rather than the
   audio edition's release. Do not label unknown dates as known audiobook release
   dates. Provider sequence metadata, not invented title parsing, determines order.
 - Provider filter data and scoped author inventory are bounded by the existing
