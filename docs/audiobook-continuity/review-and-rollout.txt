@@ -171,3 +171,11 @@ Play/Pause labels now follow playback intent, including buffering. Failed opens
 stop that intent so one Play tap retries, and a stale cancelled local fallback
 cannot pause a newer selection. The activation-failure regression retains this
 single-tap retry contract; chapter rows distinguish starting from a user pause.
+
+Final UI evidence confirmed the player at 1:29 with the second chapter visibly
+green and Playing. The failed selector matched both the detail and player rows;
+their accessibility identifiers are now scoped separately, retaining the Playing
+assertion and adding an explicit selected-trait assertion. An existing Home test
+also queried an offscreen heading after LazyVStack removed its accessibility node.
+It now accepts that eviction as offscreen evidence while retaining the visible
+playlist anchor and before/after scroll-position assertions.

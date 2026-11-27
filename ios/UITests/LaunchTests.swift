@@ -114,13 +114,14 @@ final class LaunchTests: XCTestCase {
         chapter.coordinate(withNormalizedOffset:CGVector(dx:0.65,dy:0.5)).tap()
         let player = app.buttons["audiobookPlayPause"]
         XCTAssertTrue(player.waitForExistence(timeout:20))
-        let playingChapter = app.buttons["audiobookChapter-60.0"]
+        let playingChapter = app.buttons["audiobookPlayerChapter-60.0"]
         for _ in 0..<5 where !playingChapter.isHittable { app.swipeUp() }
         XCTAssertTrue(playingChapter.waitForExistence(timeout:10))
         let selected = XCTNSPredicateExpectation(predicate:NSPredicate(format:"value == %@","Playing"),object:playingChapter)
         let result = XCTWaiter.wait(for:[selected],timeout:20)
         let screenshot = XCTAttachment(screenshot:app.screenshot()); screenshot.name = "Playing chapter and download indicator"; screenshot.lifetime = .keepAlways; add(screenshot)
         XCTAssertEqual(result,.completed,"Chapter selected=\(playingChapter.isSelected), value=\(String(describing:playingChapter.value)), player=\(player.label)")
+        XCTAssertTrue(playingChapter.isSelected)
         app.buttons["Close audiobook player"].tap()
         let unread = app.buttons["markAudiobookUnread"]
         for _ in 0..<5 where !unread.isHittable { app.swipeUp() }
@@ -480,13 +481,15 @@ final class LaunchTests: XCTestCase {
         // Move well away from the top and keep a visible card as a position
         // anchor. Drag inside content, avoiding the sidebar and player footer.
         for _ in 0..<12 {
-            if title.frame.minY < initialTitleY - 100 && playlist.isHittable && playlist.frame.maxY < takeover.frame.minY { break }
+            if (!title.exists || title.frame.minY < initialTitleY - 100) && playlist.isHittable && playlist.frame.maxY < takeover.frame.minY { break }
             let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0))
             let start = origin.withOffset(CGVector(dx: 0, dy: takeover.frame.minY - 40))
             let end = origin.withOffset(CGVector(dx: 0, dy: max(180, takeover.frame.minY - 340)))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
-        XCTAssertLessThan(title.frame.minY, initialTitleY - 100, "Home must be scrolled before opening the player")
+        // Lazy content may remove the heading's accessibility node after it
+        // scrolls offscreen. Keep verifying the visible playlist anchor below.
+        XCTAssertTrue(!title.exists || title.frame.minY < initialTitleY - 100, "Home must be scrolled before opening the player")
         XCTAssertTrue(playlist.isHittable)
         let scrolledY = playlist.frame.minY
         for _ in 0..<2 {

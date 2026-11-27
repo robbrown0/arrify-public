@@ -312,7 +312,7 @@ struct AudiobookPlayer: View {
         switch tab {
         case "Chapters":
             ForEach(book.chapters ?? []) { chapter in
-                AudiobookChapterRow(chapter:chapter,current:model.books.chapter?.id == chapter.id,playing:model.books.playing,waiting:model.books.showsPauseControl && !model.books.playing) { model.books.seek(chapter.start,resumePlayback:true) }
+                AudiobookChapterRow(chapter:chapter,current:model.books.chapter?.id == chapter.id,playing:model.books.playing,waiting:model.books.showsPauseControl && !model.books.playing,identifierPrefix:"audiobookPlayerChapter") { model.books.seek(chapter.start,resumePlayback:true) }
             }
         case "Up Next":
             Toggle("Continue to the next queued book", isOn:Binding(get:{ model.books.preferences.continuous }, set:{ enabled in var value = model.books.preferences; value.continuous = enabled; Task { await model.books.updatePreferences(value) } }))
@@ -346,6 +346,7 @@ private struct AudiobookChapterRow: View {
     let current: Bool
     let playing: Bool
     var waiting = false
+    var identifierPrefix = "audiobookChapter"
     let action: () -> Void
     var body: some View {
         Button(action:action) {
@@ -364,7 +365,7 @@ private struct AudiobookChapterRow: View {
             .accessibilityLabel("Play chapter: " + chapter.title)
             .accessibilityValue(current ? (playing ? "Playing" : waiting ? "Starting" : "Paused") : "")
             .accessibilityAddTraits(current ? .isSelected : [])
-            .accessibilityIdentifier("audiobookChapter-\(chapter.start)")
+            .accessibilityIdentifier("\(identifierPrefix)-\(chapter.start)")
     }
 }
 
