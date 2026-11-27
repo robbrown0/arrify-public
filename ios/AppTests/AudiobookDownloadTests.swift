@@ -116,6 +116,27 @@ final class AudiobookDownloadTests: XCTestCase {
         let count = await transport.downloadRequests
         XCTAssertEqual(count,1)
     }
+    @MainActor func testMarkUnreadKeepsCompletedDownloadAndUpdatesItsDisplayedProgress() async throws {
+        let api = try await makeAPI()
+        let downloads = AudiobookDownloads(api:api,configuration:Self.configuration)
+        await downloads.download("book-one")
+        for _ in 0..<300 where !downloads.complete("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        let record = try XCTUnwrap(downloads.records["book-one"])
+        let part = try XCTUnwrap(record.manifest.book.parts?.first)
+        let file = try XCTUnwrap(downloads.file(record.manifest.book,part:part))
+        downloads.checkpoint("book-one",position:1,remoteStamp:100,finished:true)
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession())
+        let audio = DownloadPlaybackAudio()
+        let books = AudiobookStore(api:api,music:music,audioSession:audio,downloads:downloads)
+        defer { books.clear(); music.stop() }
+        await books.restore()
+        _ = try await books.markUnread(record.book)
+        XCTAssertTrue(downloads.complete("book-one"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:file.path))
+        XCTAssertEqual(downloads.records["book-one"]?.book.progress?.currentTime,0)
+        XCTAssertEqual(downloads.records["book-one"]?.book.progress?.isFinished,false)
+        XCTAssertEqual(audio.activations,0)
+    }
     @MainActor private func makeAPI(fail: Bool = false, empty: Bool = false) async throws -> APIClient {
         let api = APIClient(transport:DownloadContractTransport(fail:fail, empty:empty), store:UITestStore())
         try await api.login(endpoint:"https://book-download.invalid", username:"fixture", password:"fixture", deviceName:"Test")
