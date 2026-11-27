@@ -35,6 +35,11 @@ public struct Audiobook: Codable, Sendable, Identifiable {
     public let author: String
     public let narrator: String
     public let series: String
+    public let authors: [AudiobookPerson]?
+    public let seriesEntries: [AudiobookSeries]?
+    public let publishedDate: String?
+    public let publishedYear: String?
+    public let addedAt: Double?
     public let duration: Double
     public let cover: String
     public let description: String
@@ -141,4 +146,88 @@ public enum AudiobookTimeline {
         let value = max(0, Int(seconds)), hours = value / 3600
         return hours > 0 ? String(format: "%d:%02d:%02d", hours, value / 60 % 60, value % 60) : String(format: "%d:%02d", value / 60, value % 60)
     }
+}
+
+/// Coalesce concurrent callers without allowing a previous account's completion
+/// to release a newer operation. The owner must still fence its result writes.
+@MainActor public final class AudiobookSyncGate {
+    private var task: Task<Void, Never>?
+    private var identity = UUID()
+    public init() {}
+    public func reset() { identity = UUID(); task?.cancel(); task = nil }
+    public func run(_ operation: @escaping @MainActor () async -> Void) async {
+        if let task { await task.value; return }
+        let token = UUID(); identity = token
+        let current = Task { @MainActor in await operation() }
+        task = current
+        await current.value
+        if identity == token { task = nil }
+    }
+}
+
+public enum AudiobookPlaybackIssue: Error, Equatable, Sendable {
+    case offline, temporary, authentication, missing, invalidResponse, progressPending, conflict(String), media
+    public static func classify(_ error: any Error) -> Self {
+        if let issue = error as? Self { return issue }
+        if case APIError.signInRequired = error { return .authentication }
+        if case APIError.retryDeferred = error { return .temporary }
+        if case APIError.rejected(let status, _, let message) = error {
+            switch status {
+            case 401, 403: return .authentication
+            case 404, 410: return .missing
+            case 409: return .conflict(message)
+            case 429, 500...599: return .temporary
+            default: return .invalidResponse
+            }
+        }
+        if let url = error as? URLError {
+            switch url.code {
+            case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .timedOut: return .offline
+            default: return .media
+            }
+        }
+        return .invalidResponse
+    }
+    public var category: String {
+        switch self { case .offline: "network"; case .temporary: "server"; case .authentication: "authentication"
+        case .missing: "unavailable"; case .invalidResponse: "invalid-response"; case .progressPending: "progress-pending"
+        case .conflict: "conflict"; case .media: "media" }
+    }
+    public var message: String {
+        switch self {
+        case .offline: "The server couldn’t be reached. Your place is saved. Try again, or play a downloaded copy."
+        case .temporary: "The audiobook server is temporarily unavailable. Your place is saved. Try again shortly."
+        case .authentication: "This book needs access to the audiobook library. Check your connection or library access."
+        case .missing: "This edition is no longer available on the server. Your listening position is saved."
+        case .invalidResponse: "The server returned an unexpected audiobook response. Your place is saved. Try again."
+        case .progressPending: "Your listening position is still syncing. Your place is saved. Try again shortly."
+        case .conflict(let text): text
+        case .media: "This audio could not be opened. Your place is saved. Try again or download the book."
+        }
+    }
+}
+
+public enum AudiobookResume {
+    /// Rewinds are intentional: choose a history, never the greatest position.
+    public static func position(remote: AudiobookProgress?, local: Double?, localStamp: Double?, pending: AudiobookJournalEntry?, restart: Bool, finished: Bool) -> Double {
+        if restart { return 0 }
+        if let pending, pending.dirty { return pending.checkpoint.finished ? 0 : pending.checkpoint.position }
+        if let remote, (remote.lastUpdate ?? 0) > (localStamp ?? 0) { return remote.isFinished == true ? 0 : remote.currentTime ?? 0 }
+        if finished { return 0 }
+        return local ?? remote?.currentTime ?? 0
+    }
+}
+
+public struct AudiobookPerson: Codable, Sendable, Identifiable { public let id: String; public let name: String }
+public struct AudiobookSeries: Codable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let sequence: String?
+    public var label: String { sequence.map { "Book " + $0 + " · " + name } ?? name }
+}
+public struct AudiobookGroups: Decodable, Sendable {
+    public let items: [AudiobookPerson]
+    public let libraryId: String
+    public let total: Int
+    public let nextPage: Int?
 }

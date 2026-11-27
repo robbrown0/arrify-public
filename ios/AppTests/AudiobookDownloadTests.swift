@@ -41,6 +41,38 @@ final class AudiobookDownloadTests: XCTestCase {
         XCTAssertFalse(downloads.complete("book-one")); XCTAssertNotNil(downloads.errors["book-one"])
         downloads.clear(); await api.logout()
     }
+    @MainActor func testCompletedDownloadStartsWhileProgressAndOwnershipRequestsAreBlocked() async throws {
+        let transport = DownloadContractTransport(fail:false)
+        let api = APIClient(transport:transport, store:UITestStore())
+        try await api.login(endpoint:"https://book-download.invalid", username:"fixture", password:"fixture", deviceName:"Test")
+        let downloads = AudiobookDownloads(api:api, configuration:Self.configuration)
+        await downloads.download("book-one")
+        for _ in 0..<300 where !downloads.complete("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertTrue(downloads.complete("book-one"))
+        let music = PlaybackCoordinator(api:api, audioSession:UITestAudioSession())
+        let audio = DownloadPlaybackAudio()
+        let books = AudiobookStore(api:api, music:music, audioSession:audio, downloads:downloads)
+        await books.restore()
+        let book = try XCTUnwrap(downloads.records["book-one"]?.manifest.book)
+        await transport.blockProgress()
+        books.play(book)
+        for _ in 0..<100 where audio.activations == 0 { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertGreaterThan(audio.activations,0,"Local playback must not wait for a stalled progress/ownership request")
+        XCTAssertNil(books.message)
+        books.clear(); await transport.releaseProgress(); music.stop(); await api.logout()
+    }
+    @MainActor func testTruncatedDownloadIsNeverReportedComplete() async throws {
+        let api = try await makeAPI()
+        let downloads = AudiobookDownloads(api:api, configuration:Self.configuration)
+        await downloads.download("book-one")
+        for _ in 0..<300 where !downloads.complete("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        let book = try XCTUnwrap(downloads.records["book-one"]?.manifest.book)
+        let part = try XCTUnwrap(book.parts?.first)
+        let file = try XCTUnwrap(downloads.file(book,part:part))
+        try Data([1,2,3]).write(to:file)
+        XCTAssertFalse(downloads.complete("book-one")); XCTAssertNil(downloads.file(book,part:part))
+        downloads.clear(); await api.logout()
+    }
     @MainActor private func makeAPI(fail: Bool = false, empty: Bool = false) async throws -> APIClient {
         let api = APIClient(transport:DownloadContractTransport(fail:fail, empty:empty), store:UITestStore())
         try await api.login(endpoint:"https://book-download.invalid", username:"fixture", password:"fixture", deviceName:"Test")
@@ -52,12 +84,17 @@ final class AudiobookDownloadTests: XCTestCase {
 }
 
 private actor DownloadContractTransport: HTTPTransport {
+    private var blocked = false
+    private var waiter: CheckedContinuation<Void,Never>?
+    func blockProgress() { blocked = true }
+    func releaseProgress() { blocked = false; waiter?.resume(); waiter = nil }
     let fail: Bool
     let empty: Bool
     let session = UUID().uuidString.lowercased()
     init(fail: Bool, empty: Bool = false) { self.fail = fail; self.empty = empty }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
+        if blocked && (path.hasSuffix("/offline-progress") || path.hasSuffix("/native/playback")) { await withCheckedContinuation { waiter = $0 } }
         let object: [String:Any]
         if path.hasSuffix("capabilities") {
             object = ["server_id":"book-download-test", "features":["rotating_refresh","refresh_recovery_v1","native_media_manifest_v1","native_catalog_v1","native_playback_v1"]]
@@ -95,4 +132,11 @@ private final class BookAudioProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocol(self,didLoad:bytes); client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+}
+
+@MainActor private final class DownloadPlaybackAudio: PlaybackAudioSession {
+    var activations = 0
+    func activate() async throws { activations += 1 }
+    func deactivate() async throws {}
+    func invalidate() {}
 }

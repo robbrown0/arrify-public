@@ -130,6 +130,51 @@ class AudiobookTests(unittest.TestCase):
         self.books.provider.configure({'origin': 'http://books.internal:13378', 'username': 'admin', 'password': 'private-admin-password', 'enabled': True})
         self.token = self.a.login('readerone', 'a-strong-password'); self.device = 'a'*32
 
+    def test_library_order_and_scope_are_forwarded_before_pagination(self):
+        self.books.library(1, page=2, sort='release')
+        path = next(p for _, p in reversed(self.fixture.paths) if '/items?' in p)
+        query = parse_qs(urlsplit(path).query)
+        self.assertEqual(query['page'], ['2']); self.assertEqual(query['limit'], ['48'])
+        self.assertEqual(query['sort'], ['media.metadata.publishedYear']); self.assertEqual(query['desc'], ['1'])
+        with patch.object(self.books.provider, 'user', return_value={'results': [], 'total': 0}) as user:
+            # Allowed library lookup is required even for scoped book reads.
+            user.side_effect = [{'libraries':[{'id':'books','mediaType':'book'}]}, {'results':[], 'total':0}, {'mediaProgress':[]}]
+            self.books.library(1, series='series-one', sort='sequence')
+            path = user.call_args_list[1].args[2]
+            query = parse_qs(urlsplit(path).query)
+            self.assertEqual(query['sort'], ['sequence'])
+            self.assertEqual(base64.b64decode(query['filter'][0].split('.',1)[1]).decode(), 'series-one')
+
+    def test_invalid_library_scope_and_sort_do_not_read_items(self):
+        for values in ({'sort':'private.path'}, {'sort':'sequence'}, {'library_id':'other'}, {'author':'../other'}, {'author':'one','series':'two'}):
+            before = len(self.fixture.paths)
+            with self.assertRaises(BookError): self.books.library(1, **values)
+            self.assertFalse(any('/items?' in p for _,p in self.fixture.paths[before:]))
+
+    def test_group_navigation_pages_metadata_without_full_book_scans(self):
+        authors = [{'id':'author-'+str(i), 'name':f'Writer {i:03}'} for i in range(110)]
+        with patch.object(self.books.provider, 'user') as user:
+            user.side_effect = [{'libraries':[{'id':'books','mediaType':'book'}]}, {'authors':authors}]
+            result = self.books.groups(1, 'authors', page=1)
+            self.assertEqual(len(result['items']),48); self.assertEqual(result['items'][0]['id'],'author-48')
+            self.assertEqual(result['next_page'],2)
+            self.assertTrue(user.call_args_list[1].args[2].endswith('/filterdata'))
+
+    def test_metadata_preserves_author_series_numbers_and_date_precision(self):
+        item = self.fixture.item(); item['addedAt'] = 123
+        item['media']['metadata'].update(authors=[{'id':'writer','name':'Writer'}],
+            series=[{'id':'series','name':'Stories','sequence':'2.5'}], publishedYear='2024')
+        book = self.books.metadata(item)
+        self.assertEqual(book['series_entries'][0]['sequence'],'2.5')
+        self.assertEqual(book['authors'][0]['id'],'writer')
+        self.assertIsNone(book['published_date']); self.assertEqual(book['published_year'],'2024')
+
+    def test_accepted_start_retry_reuses_session_and_does_not_reclaim_output(self):
+        first = self.play(request='same-request')
+        with patch.object(self.listening, 'claim_external', side_effect=AssertionError('Duplicate ownership claim')):
+            second = self.play(request='same-request')
+        self.assertEqual(first['lease'],second['lease']); self.assertEqual(first['revision'],second['revision'])
+
     def tearDown(self):
         self.books.close(); self.a.db.close(); self.tmp.cleanup()
 

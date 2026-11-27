@@ -78,7 +78,9 @@ import CryptoKit
     }
     func file(_ book: Audiobook, part: AudiobookPart) -> URL? {
         guard let record = records[book.id], record.manifest.book.sourceRevision == book.sourceRevision,
-              let file = path(book.id, part), FileManager.default.fileExists(atPath:file.path) else { return nil }
+              let file = path(book.id, part),
+              let bytes = (try? file.resourceValues(forKeys:[.fileSizeKey]))?.fileSize, bytes > 0,
+              part.sizeBytes == nil || part.sizeBytes == 0 || Int64(bytes) == part.sizeBytes else { return nil }
         return file
     }
     func complete(_ id: String) -> Bool {

@@ -446,9 +446,15 @@ public actor APIClient {
         return try await router.selected().mediaURL(path)
     }
     public func audiobookStatus() async throws -> AudiobookStatus { try await call("/api/v1/audiobooks/status") }
-    public func audiobookLibrary(query: String = "", library: String = "", page: Int = 0, filter: String = "all") async throws -> AudiobookLibrary {
+    public func audiobookLibrary(query: String = "", library: String = "", page: Int = 0, filter: String = "all", sort: String = "title", author: String = "", series: String = "") async throws -> AudiobookLibrary {
         var c = URLComponents(); c.path = "/api/v1/audiobooks/library"
-        c.queryItems = [.init(name:"q", value:query), .init(name:"library", value:library), .init(name:"page", value:String(page)), .init(name:"filter", value:filter)]
+        c.queryItems = [.init(name:"q", value:query), .init(name:"library", value:library), .init(name:"page", value:String(page)), .init(name:"filter", value:filter), .init(name:"sort", value:sort), .init(name:"author", value:author), .init(name:"series", value:series)]
+        return try await call(c.string!)
+    }
+    public func audiobookGroups(_ kind: String, library: String = "", page: Int = 0, query: String = "") async throws -> AudiobookGroups {
+        guard ["authors", "series"].contains(kind) else { throw APIError.invalidEndpoint }
+        var c = URLComponents(); c.path = "/api/v1/audiobooks/" + kind
+        c.queryItems = [.init(name:"library", value:library), .init(name:"page", value:String(page)), .init(name:"q", value:query)]
         return try await call(c.string!)
     }
     public func continueAudiobooks() async throws -> [Audiobook] {
