@@ -1,0 +1,70 @@
+Arrify discovery release-date correction — 2026-11-27
+
+Problem and behavior
+The running helper repeatedly fails at score(): int('') raises ValueError.
+Read-only inspection found ten cached resolved records with blank release dates.
+A release date must be a real calendar-valid YYYY, YYYY-MM or YYYY-MM-DD string.
+Missing, null, whitespace, malformed and non-string values receive no recency
+bonus. Dates in future years receive no recency bonus. Evidence scores remain
+unchanged. No date or release year is written, guessed, or substituted.
+
+Discovery now defers a cached resolved recording with an invalid first-release
+date to the unresolved report with a metadata-review reason. It continues other
+songs. This also prevents the later per-year acquisition counters from failing.
+Malformed chart hints cannot fail candidate ordering. Chart-year fallback is
+used only to schedule metadata resolution; it is never stored as release metadata.
+Existing requests, transfers and cached source metadata are not rewritten.
+
+Regression tests
+Four focused tests cover missing and invalid types, blank and malformed strings,
+invalid calendar dates, valid partial dates, historical dates, future-year bonus,
+evidence preservation, no mutation, and an entire engine.run() with invalid cached
+records plus a valid song, checking durable complete status and report export.
+They failed on the old implementation (7 assertion failures, 12 errors).
+The corrected source passes all four. Ninety request regression tests also pass.
+The same four tests must pass under the production helper image/user before use.
+The full server suite is being checked in its documented Docker test environment;
+a host-only broad run cannot qualify release assets at /opt/arrify.
+
+Deployment construction
+Only the discovery helper is authorized for recreation in this task.
+Base image: sha256:175e89e49fb42d2d816c30187672d8f72132ce6ce97f0bd898854cb8f3cf8d94
+Candidate tag: hitdiscovery:release-dates-20261127
+Release directory: /home/rob/arrify-ops/discovery-release-20261127
+
+The live sources.py and engine.py contain existing chart-focus customizations.
+Stage the three live modules, then apply only this commit's request-bridge delta
+with patch --fuzz=0. Preserve those pre-existing customizations. coverage.py matches
+main. module-hashes.json records the inspected originals and staged results.
+Build deployment/discovery-release-dates/Dockerfile using the release context,
+with BASE_IMAGE pointing at a locally pinned tag of the captured base image ID.
+Set staged Python modes to 0644. No entrypoint, user, environment or other image
+configuration changes; all original image layers must remain the common prefix.
+
+The private Compose proposal changes only services.hitdiscovery.image. All
+existing binds, including api.py, album_index.py, inventory.py, metadata_transport,
+preparation.py and expansion.py, must remain identical. No player, requests,
+watchdog, Lidarr, downloader or VPN recreation is authorized or required.
+Preserve the private Compose backup and fresh SQLite online backup with verified
+quick_check and SHA-256. A code rollback must not restore an older database.
+
+Drain and verification
+Wait for acquisition-worker phase waiting and no expansion lock, then SIGTERM
+only the helper. Its handler sets the stop event and lets the current discovery
+run finish. Do not force-kill ongoing discovery or acquisition work. Revalidate
+Compose drift, image identity, queues and worker drain before recreation.
+Recreate hitdiscovery only with --no-deps --no-build --pull never. Preserve all
+other container IDs and mounts. Verify running module hashes and configuration,
+health and report/run-complete status. Measure Lidarr memory throughout a complete
+run; compare container identity/restarts, anonymous memory and OOM counters.
+
+Rollback
+If verification fails due to this change, restore only the helper's old image
+entry after checking no unrelated Compose drift, then recreate only hitdiscovery
+in a safe job window. The original image and all original override files remain
+available. Never restore this backup over new acquisition history.
+
+Coordination
+The configured Hive Mind START_HERE and PROTOCOL connector reads returned 404.
+No hub claim/ACK could be posted. Work is isolated on its own source branch;
+this fix does not change the audiobook draft branches or dirty live source.

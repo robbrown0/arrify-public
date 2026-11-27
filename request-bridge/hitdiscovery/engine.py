@@ -8,7 +8,7 @@ from .api import HTTP,Lidarr
 from .store import Store,now
 from .inventory import scan
 from .matching import Ownership,key,album_title,primary
-from .sources import discover,score
+from .sources import discover,release_year,score
 from .resolver import Resolver
 from .coverage import order_candidates,select_balanced,year_report
 from .acquire import album_groups,diversify,Acquirer,available_groups,handled_resolution
@@ -48,7 +48,7 @@ def run(config):
             corrections=json.loads(correction_file.read_text()) if correction_file.exists() else {}
             resolver=Resolver(http,config.contact,corrections); resolved=[]; excluded=[]; unresolved=[]; owned=[]
             # Chart hints influence processing order only; eligibility requires first-release metadata.
-            candidates.sort(key=lambda t:-score(t|{'release_date':t.get('release_date_hint') or '2015'}))
+            candidates.sort(key=lambda t:-score(t|{'release_date':t.get('release_date_hint')}))
             remaining=order_candidates([t for t in candidates if not ownership.owns(t)],config.core_rank)
             remaining.sort(key=lambda t:0 if t.get('discovery_channel')=='imported-playlist' else 1 if t.get('discovery_channel')=='spectrum' or t.get('discovery_channel','').startswith('sirius-') else 2)
             budget_used=0
@@ -73,6 +73,9 @@ def run(config):
                 status=t.get('resolution_status')
                 if status=='out-of-window': excluded.append(t); continue
                 if status!='resolved': unresolved.append(t); continue
+                if release_year(t.get('release_date')) is None:
+                    unresolved.append(t|{'reason':'Missing or malformed first release date; metadata review required'})
+                    continue
                 match=ownership.owns(t)
                 if match: owned.append(t|{'ownership_match':match}); continue
                 t['score']=score(t); resolved.append(t)
