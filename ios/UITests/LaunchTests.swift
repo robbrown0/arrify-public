@@ -75,6 +75,10 @@ final class LaunchTests: XCTestCase {
     @MainActor func testAlbumsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Albums") }
     @MainActor func testArtistsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Artists") }
     @MainActor private func checkCatalogPaging(_ section: String) {
+        // This traverses three pages, retries a failed page and opens distinct
+        // details. Hosted iPhones can exceed the default five-minute allowance
+        // after all assertions pass; retain a bounded ten-minute test budget.
+        executionTimeAllowance = 600
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
         app.launchEnvironment["ARRIFY_UI_CATALOG_PAGING"] = "1"
@@ -124,7 +128,7 @@ final class LaunchTests: XCTestCase {
         }
         // Traverse the full 120-item fixture with deliberate flings. Default
         // short swipes need dozens of accessibility round trips on iPhone.
-        // Keep the same visible Retry/final-row assertions and timeout.
+        // Keep the same visible Retry/final-row assertions.
         for _ in 0..<35 {
             if retryFullyVisible() { break }
             list.swipeUp(velocity: .fast)
