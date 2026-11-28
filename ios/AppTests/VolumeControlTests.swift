@@ -115,7 +115,10 @@ final class VolumeControlTests: XCTestCase {
 
     @MainActor private func fixtureVolume() -> MPVolumeView {
         let view = emptyVolume()
-        let slider = UISlider(frame: CGRect(x: 0, y: -8, width: 300, height: 30))
+        // Match the initially empty parent's width. Starting at300 inside a
+        // zero-width parent makes flexibleWidth expand the fixture to600 when
+        // hosted, so its center is outside the real native view's hit region.
+        let slider = UISlider(frame: CGRect(x: 0, y: -8, width: view.bounds.width, height: 30))
         slider.tag = 4647; slider.value = 0.18
         slider.autoresizingMask = [.flexibleWidth]
         view.addSubview(slider)
@@ -125,6 +128,8 @@ final class VolumeControlTests: XCTestCase {
     @MainActor private func assertCentered(_ slider: UISlider, in container: UIView,
                                            file: StaticString = #filePath, line: UInt = #line) {
         let track = slider.trackRect(forBounds: slider.bounds)
+        XCTAssertLessThanOrEqual(slider.frame.width, container.bounds.width,
+                                 "The fixture must fit the native control", file: file, line: line)
         XCTAssertEqual(slider.convert(track, to: container).midY, container.bounds.midY,
                        accuracy: 0.5, file: file, line: line)
         let point = slider.convert(CGPoint(x: track.midX, y: track.midY), to: container)
