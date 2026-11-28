@@ -315,7 +315,13 @@ public struct AudiobookSeries: Codable, Sendable, Identifiable {
     public let id: String
     public let name: String
     public let sequence: String?
-    public var label: String { sequence.map { "Book " + $0 + " · " + name } ?? name }
+    public var isReadingOrder: Bool {
+        name.localizedCaseInsensitiveContains("reading order") || name.localizedCaseInsensitiveContains("listening order")
+    }
+    public var label: String {
+        guard let sequence, !sequence.isEmpty else { return name }
+        return (isReadingOrder ? "Reading position " : "Book ") + sequence + " · " + name
+    }
 }
 public struct AudiobookGroups: Decodable, Sendable {
     public let items: [AudiobookPerson]

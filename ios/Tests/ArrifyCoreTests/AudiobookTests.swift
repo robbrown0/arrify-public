@@ -5,6 +5,23 @@ import FoundationNetworking
 #endif
 
 final class AudiobookTests: XCTestCase {
+    func testCombinedReadingOrderKeepsPositionsDistinctFromOfficialBookNumbers() throws {
+        let decoder = JSONDecoder()
+        func series(_ name: String, _ sequence: String?) throws -> AudiobookSeries {
+            var payload: [String:Any] = ["id":"series", "name":name]
+            payload["sequence"] = sequence
+            return try decoder.decode(AudiobookSeries.self, from: JSONSerialization.data(withJSONObject:payload))
+        }
+        let main = try series("Expeditionary Force", "10")
+        let universe = try series("Expeditionary Force Universe Reading Order", "14")
+        XCTAssertEqual(main.label, "Book 10 · Expeditionary Force")
+        XCTAssertEqual(universe.label, "Reading position 14 · Expeditionary Force Universe Reading Order")
+        XCTAssertEqual(try series("Expeditionary Force: Mavericks", "1").label, "Book 1 · Expeditionary Force: Mavericks")
+        XCTAssertEqual(try series("Expeditionary Force", "3.5").label, "Book 3.5 · Expeditionary Force")
+        XCTAssertEqual(try series("Expeditionary Force: Listening Order", "4").label,
+                       "Reading position 4 · Expeditionary Force: Listening Order")
+        XCTAssertEqual(try series("Universe Reading Order", nil).label, "Universe Reading Order")
+    }
     func testUnavailableBookProviderDoesNotInvalidateLoginOrMusicServerRouting() async throws {
         let store = MemoryStore(); let api = APIClient(transport:BookProviderFailureTransport(), store:store)
         try await api.login(endpoint:"https://example.com", username:"test", password:"test", deviceName:"test")
