@@ -8,8 +8,8 @@ import MediaPlayer
 final class VolumeControlContainer: UIView {
     private(set) var volumeView: MPVolumeView
     private let centersNativeHeight: Bool
-    private let makeVolumeView: () -> MPVolumeView
-    private let onCreate: (MPVolumeView) -> Void
+    private let makeVolumeView: @MainActor () -> MPVolumeView
+    private let onCreate: @MainActor (MPVolumeView) -> Void
     private let notifications: NotificationCenter
     private var refreshTask: Task<Void, Never>?
     private var refreshPending = false
@@ -18,8 +18,8 @@ final class VolumeControlContainer: UIView {
 
     init(volumeView: MPVolumeView, centersNativeHeight: Bool = false,
          notifications: NotificationCenter = .default,
-         makeVolumeView: @escaping () -> MPVolumeView = VolumeControlContainer.makeNativeView,
-         onCreate: @escaping (MPVolumeView) -> Void = { _ in }) {
+         makeVolumeView: @escaping @MainActor () -> MPVolumeView = VolumeControlContainer.makeNativeView,
+         onCreate: @escaping @MainActor (MPVolumeView) -> Void = { _ in }) {
         self.volumeView = volumeView
         self.centersNativeHeight = centersNativeHeight
         self.notifications = notifications
@@ -162,7 +162,7 @@ final class VolumeControlContainer: UIView {
 
 struct SystemVolumeSlider: UIViewRepresentable {
     var centersNativeHeight = false
-    var onCreate: (MPVolumeView) -> Void = { _ in }
+    var onCreate: @MainActor (MPVolumeView) -> Void = { _ in }
 
     func makeUIView(context: Context) -> VolumeControlContainer {
         VolumeControlContainer(volumeView: VolumeControlContainer.makeNativeView(),
