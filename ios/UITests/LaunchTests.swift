@@ -20,6 +20,11 @@ final class LaunchTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Your books will appear here when available."].exists)
         app.buttons["Home"].firstMatch.tap(); app.buttons["Library"].firstMatch.tap()
         app.buttons["Audiobooks"].firstMatch.tap()
+        // Returning from details/tabs preserves the loaded shelf. Explicitly
+        // refresh to exercise a failed read without requiring a navigation reload.
+        let heading = app.staticTexts["Continue listening"].firstMatch
+        let pull = heading.coordinate(withNormalizedOffset:CGVector(dx:0.7,dy:0.5))
+        pull.press(forDuration:0.1,thenDragTo:pull.withOffset(CGVector(dx:0,dy:260)))
         // The Continue listening rail and failure message can move this row
         // below the phone viewport. Reveal it before checking retention; lazy
         // accessibility membership is not the store's loaded-book membership.
@@ -224,7 +229,45 @@ final class LaunchTests: XCTestCase {
         let detail = XCTAttachment(screenshot:XCUIScreen.main.screenshot()); detail.name = "Book details directly from the audiobook player"; detail.lifetime = .keepAlways; add(detail)
     }
 
-    @MainActor private func openBookFixture(_ environment: [String:String]) -> XCUIApplication {
+    @MainActor func testAudiobookListLoadsPagesRetriesAndKeepsPositionAfterDetails() {
+        let app = openBookFixture(["ARRIFY_UI_BOOK_PAGING":"1","ARRIFY_UI_BOOK_PAGE_FAILURE":"1"],expectedBook:"book-page-001")
+        if app.buttons["Show book list"].exists { app.buttons["Show book list"].tap() }
+        let shelf = app.scrollViews["audiobookShelfScroll"]
+        let last = app.buttons["audiobook-book-page-036"]
+        XCTAssertFalse(app.buttons["More books"].exists)
+        XCTAssertFalse(last.exists,"A prefetched footer must not drain the library before scrolling")
+        let retry = app.buttons["audiobookPageRetry"]
+        for _ in 0..<20 where !retry.isHittable { shelf.swipeUp() }
+        XCTAssertTrue(retry.waitForExistence(timeout:10)); XCTAssertTrue(retry.isHittable)
+        XCTAssertTrue(app.buttons["audiobook-book-page-012"].exists,"A failed page must keep the loaded page at its scroll position")
+        retry.tap()
+        for _ in 0..<24 where !last.isHittable { shelf.swipeUp() }
+        XCTAssertTrue(last.isHittable,"Continuous scrolling must reach the final book without a More tap")
+        XCTAssertFalse(retry.exists); XCTAssertFalse(app.buttons["More books"].exists)
+        let beforeDetails = last.frame.minY
+        last.tap()
+        XCTAssertTrue(app.buttons["listenAudiobook"].waitForExistence(timeout:10))
+        app.navigationBars["Audiobook"].buttons.element(boundBy:0).tap()
+        XCTAssertTrue(last.isHittable,"Returning from details must retain all loaded pages")
+        XCTAssertEqual(last.frame.minY,beforeDetails,accuracy:3,"Returning from details must preserve the browsing position")
+        let list = XCTAttachment(screenshot:app.screenshot()); list.name = "Audiobook continuous list reaches final page"; list.lifetime = .keepAlways; add(list)
+    }
+
+    @MainActor func testAudiobookGridLoadsPagesAfterChangingFilters() {
+        let app = openBookFixture(["ARRIFY_UI_BOOK_PAGING":"1"],expectedBook:"book-page-001")
+        let shelf = app.scrollViews["audiobookShelfScroll"]
+        let last = app.buttons["audiobook-book-page-036"]
+        if app.buttons["Show cover grid"].exists { app.buttons["Show cover grid"].tap() }
+        app.buttons["audiobookFilter-started"].tap()
+        XCTAssertTrue(app.buttons["audiobook-book-page-001"].waitForExistence(timeout:15))
+        XCTAssertFalse(last.exists,"Changing filters starts a new page sequence")
+        for _ in 0..<30 where !last.isHittable { shelf.swipeUp() }
+        XCTAssertTrue(last.isHittable,"The cover grid must use the same continuous paging")
+        XCTAssertFalse(app.buttons["More books"].exists)
+        let covers = XCTAttachment(screenshot:app.screenshot()); covers.name = "Audiobook continuous cover grid reaches final page"; covers.lifetime = .keepAlways; add(covers)
+    }
+
+    @MainActor private func openBookFixture(_ environment: [String:String],expectedBook: String = "book-one") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
         for (key,value) in environment { app.launchEnvironment[key] = value }
@@ -235,7 +278,7 @@ final class LaunchTests: XCTestCase {
         app.buttons["signIn"].tap()
         XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout:20)); app.buttons["Library"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Audiobooks"].firstMatch.waitForExistence(timeout:20)); app.buttons["Audiobooks"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["audiobook-book-one"].waitForExistence(timeout:15))
+        XCTAssertTrue(app.buttons["audiobook-" + expectedBook].waitForExistence(timeout:15))
         return app
     }
 

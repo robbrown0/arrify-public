@@ -35,6 +35,9 @@ import CryptoKit
     func load(more: Bool = false) async {
         guard filter != "downloads" else { return }
         let key = requestKey, owner = account
+        // Geometry can report a boundary repeatedly before/after a task starts.
+        // A paging request never joins a load and then drains the following page.
+        if more { guard !loading, hasLoaded, next != nil, scope == key else { return } }
         if loading && scope == key {
             let pending = generation
             while loading && scope == key && generation == pending && !Task.isCancelled {
@@ -53,6 +56,7 @@ import CryptoKit
                 try await self.api.audiobookLibrary(query:query, library:library, page:page, filter:filter, sort:query.isEmpty ? sort : "title", author:author, series:series)
             }
             guard generation == token, owner == account, key == requestKey, !Task.isCancelled else { return }
+            if let nextPage = value.nextPage, nextPage <= page { throw APIError.invalidResponse }
             let incoming = value.items.map(presentation).filter { $0.readingState.matches(filter) }
             if more {
                 for book in incoming {
@@ -60,7 +64,7 @@ import CryptoKit
                     else { items.append(book) }
                 }
             } else { items = incoming }
-            libraries = value.libraries; next = value.nextPage; hasLoaded = true; needsRecovery = false
+            libraries = value.libraries; next = value.nextPage; hasLoaded = true; needsRecovery = false; failedMore = false
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
             guard generation == token, owner == account, key == requestKey else { return }
             failedMore = more
@@ -69,6 +73,11 @@ import CryptoKit
             message = needsRecovery ? "Reconnecting to your bookshelf…" : "Your bookshelf couldn’t be updated."
             PlaybackDiagnostics.event("bookshelf-read-deferred reason=\(ReadRecovery.reason(error))")
         }
+    }
+    var failedNextPage: Bool { failedMore && message != nil }
+    func loadNextPage(_ expectedPage: Int) async {
+        guard next == expectedPage, !loading, scope == requestKey else { return }
+        await load(more:true)
     }
     func retry() async { await load(more:failedMore) }
     func presentation(_ book: Audiobook) -> Audiobook {

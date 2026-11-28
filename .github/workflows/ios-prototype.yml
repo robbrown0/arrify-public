@@ -27,6 +27,10 @@ on:
         description: Targeted iPad mini-player volume layout qualification
         type: boolean
         default: false
+      book_paging_only:
+        description: Audiobook continuous scrolling, page retry and pagination ownership checks
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -38,7 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         device: ${{ fromJSON((inputs.ipad_only || inputs.volume_alignment_only) && '["iPad"]' || '["iPhone","iPad"]') }}
-        suite: ${{ fromJSON((inputs.volume_alignment_only || inputs.navigation_refresh_only || inputs.read_recovery_only || inputs.audiobooks_only) && '["targeted"]' || '["app","ui"]') }}
+        suite: ${{ fromJSON((inputs.book_paging_only || inputs.volume_alignment_only || inputs.navigation_refresh_only || inputs.read_recovery_only || inputs.audiobooks_only) && '["targeted"]' || '["app","ui"]') }}
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -74,9 +78,13 @@ jobs:
           NAVIGATION_ONLY: ${{ inputs.navigation_refresh_only }}
           RECOVERY_ONLY: ${{ inputs.read_recovery_only }}
           AUDIOBOOKS_ONLY: ${{ inputs.audiobooks_only }}
+          BOOK_PAGING_ONLY: ${{ inputs.book_paging_only }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
           ONLY_TESTS=(-only-testing:ArrifyUITests)
+          if [ "$BOOK_PAGING_ONLY" = "true" ]; then
+            ONLY_TESTS=(-only-testing:ArrifyAppTests/AudiobookSessionTests -only-testing:ArrifyUITests/LaunchTests/testAudiobookListLoadsPagesRetriesAndKeepsPositionAfterDetails -only-testing:ArrifyUITests/LaunchTests/testAudiobookGridLoadsPagesAfterChangingFilters)
+          fi
           if [ "$AUDIOBOOKS_ONLY" = "true" ]; then
             ONLY_TESTS=(-only-testing:ArrifyAppTests/AudiobookDownloadTests -only-testing:ArrifyAppTests/AudiobookSessionTests -only-testing:ArrifyAppTests/PlaybackTransitionTests/testAudiobookHandoffPreservesSystemMetadataAndCachedMusicSuccessors -only-testing:ArrifyAppTests/PlaybackTransitionTests/testReadAheadKeepsVerifiedLocalSuccessors -only-testing:ArrifyUITests/LaunchTests/testAudiobookShelfPlayerAndOptionalSettings -only-testing:ArrifyUITests/LaunchTests/testAudiobookAuthorSeriesNavigationAndBookNumbers -only-testing:ArrifyUITests/LaunchTests/testAudiobookChapterJumpHighlightsPlayingChapterAndCanMarkUnread -only-testing:ArrifyUITests/LaunchTests/testAudiobookDownloadPiePausesAndResumesWithoutPausingPlayback -only-testing:ArrifyUITests/LaunchTests/testAudiobookActionsUnreadAndFinishedStayConsistentAcrossShelves -only-testing:ArrifyUITests/LaunchTests/testAudiobookRecoveryKeepsChaptersAndPlayerOpensBookDetails -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testAirPlayMetadataEmbedsArtworkAndReplacesOldCover -only-testing:ArrifyUITests/LaunchTests/testArtistsSelectDistinctItemsAndVisiblePageRetry)
           fi
