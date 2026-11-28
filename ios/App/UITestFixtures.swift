@@ -18,6 +18,9 @@ actor UITestStore: CredentialStore {
 actor UITestTransport: HTTPTransport {
     private var bookPreferences: [String:Any] = ["visible":true,"continuous":false,"speed":1.0,"back_seconds":30,"forward_seconds":30]
     private var bookPosition = 40.0
+    private var bookFinished = false
+    private var bookStamp = 0
+    private var bookEditionChanged = false
     private var bookDevice = ""
     private var bookEpoch = 1
     private var bookMarks: [[String:Any]] = []
@@ -43,6 +46,10 @@ actor UITestTransport: HTTPTransport {
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
         if path.hasPrefix("/api/v1/audiobooks/"), ProcessInfo.processInfo.environment["ARRIFY_UI_AUDIOBOOKS"] == "1" {
+            if path.hasSuffix("/play"), ProcessInfo.processInfo.environment["ARRIFY_UI_BOOK_EDITION_CONFLICT"] == "1", !bookEditionChanged {
+                bookEditionChanged = true; bookPosition = 20; bookStamp += 1
+                return HTTPResult(status:409,data:Data(#"{"error":{"code":"audiobook_edition_changed","message":"This audiobook changed. Your offline place is saved; download the current edition before syncing it."}}"#.utf8))
+            }
             if path.hasSuffix("/library"), ProcessInfo.processInfo.environment["ARRIFY_UI_SHELF_RECOVERY"] == "1" {
                 bookshelfReads += 1
                 if bookshelfReads == 1 || (3...6).contains(bookshelfReads) { throw URLError(.timedOut) }
@@ -50,18 +57,30 @@ actor UITestTransport: HTTPTransport {
             let body = (try? JSONSerialization.jsonObject(with:request.httpBody ?? Data())) as? [String:Any] ?? [:]
             if path.hasSuffix("/preferences"), request.httpMethod == "POST" { bookPreferences.merge(body) { _,new in new } }
             if path.hasSuffix("/play") { bookDevice = body["device_id"] as? String ?? ""; owner = bookDevice; playing = false; bookEpoch += 1 }
-            if path.hasSuffix("/progress") || path.hasSuffix("/offline-progress") { bookPosition = body["position"] as? Double ?? bookPosition }
+            if path.hasSuffix("/progress") || path.hasSuffix("/offline-progress") { bookPosition = body["position"] as? Double ?? bookPosition; bookFinished = body["finished"] as? Bool ?? false; bookStamp += 1 }
             if path.hasSuffix("/offline-progress") { oldBookRead?.resume(); oldBookRead = nil }
             if path.hasSuffix("/bookmark") { bookMarks.append(["time":body["position"] ?? bookPosition,"title":body["title"] ?? "Bookmark"]) }
-            let book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Good Story","author":"A Writer","narrator":"A Reader","series":"Stories","authors":[["id":"writer-one","name":"A Writer"]],"series_entries":[["id":"series-one","name":"Stories","sequence":"2.5"]],"published_year":"2024","description":"A story worth listening to.","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":120,"progress":["currentTime":bookPosition,"lastUpdate":0,"isFinished":false],
+            let book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Good Story","author":"A Writer","narrator":"A Reader","series":"Stories","authors":[["id":"writer-one","name":"A Writer"]],"series_entries":[["id":"series-one","name":"Stories","sequence":"2.5"]],"published_year":"2024","description":"A story worth listening to.","cover":"/api/v1/audiobooks/cover/book-one","source_revision":bookEditionChanged ? "updated" : "fixture","audio_revision":bookEditionChanged ? "updated-audio" : "fixture-audio","duration":120,"progress":["currentTime":bookPosition,"lastUpdate":bookStamp,"isFinished":bookFinished],
                 "parts":[["index":0,"start":0,"duration":120,"size_bytes":1920044,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+String(repeating:"a",count:43)+"/0"]],
                 "chapters":[["title":"Beginning","start":0,"end":60],["title":"The next chapter","start":60,"end":120]],"bookmarks":bookMarks]
             let result: [String:Any]
             if path.hasSuffix("/status") { result = ["enabled":true,"preferences":bookPreferences] }
-            else if path.hasSuffix("/library") { result = ["libraries":[["id":"books","name":"Books"]],"library_id":"books","items":[book],"total":1,"next_page":NSNull()] }
+            else if path.hasSuffix("/library") {
+                var listed = book
+                if ProcessInfo.processInfo.environment["ARRIFY_UI_STALE_BOOK_PROGRESS"] == "1" { listed["progress"] = ["currentTime":40,"lastUpdate":0,"isFinished":false] }
+                let filter = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{ $0.name == "filter" })?.value ?? "all"
+                let state = bookFinished ? "finished" : bookPosition > 0 ? "started" : "unstarted"
+                let items = ProcessInfo.processInfo.environment["ARRIFY_UI_STALE_BOOK_PROGRESS"] == "1" || !["started","unstarted","finished"].contains(filter) || filter == state ? [listed] : []
+                result = ["libraries":[["id":"books","name":"Books"]],"library_id":"books","items":items,"total":items.count,"next_page":NSNull()]
+            }
             else if path.hasSuffix("/authors") { result = ["items":[["id":"writer-one","name":"A Writer"]],"library_id":"books","total":1] }
             else if path.hasSuffix("/series") { result = ["items":[["id":"series-one","name":"Stories"]],"library_id":"books","total":1] }
-            else if path.hasSuffix("/continue") { result = ["items":[book]] }
+            else if path.hasSuffix("/continue") {
+                var listed = book
+                let stale = ProcessInfo.processInfo.environment["ARRIFY_UI_STALE_BOOK_PROGRESS"] == "1"
+                if stale { listed["progress"] = ["currentTime":40,"lastUpdate":0,"isFinished":false] }
+                result = ["items":stale || bookPosition > 0 && !bookFinished ? [listed] : []]
+            }
             else if path.contains("/book/") {
                 bookReadCount += 1
                 if bookReadCount == 1, ProcessInfo.processInfo.environment["ARRIFY_UI_UNREAD_READ_RACE"] == "1" {
@@ -73,7 +92,7 @@ actor UITestTransport: HTTPTransport {
             else if path.hasSuffix("/play") || path.hasSuffix("/download") { result = ["book":book,"position":bookPosition,"lease":String(repeating:"a",count:43),"revision":1,"queue":[],"preferences":bookPreferences,"music_epoch":bookEpoch,"music_intent":1] }
             else if path.hasSuffix("/state") { result = ["book_id":"book-one","lease":String(repeating:"a",count:43),"device_id":bookDevice,"active":true,"position":bookPosition,"revision":1,"queue":[],"preferences":bookPreferences] }
             else if path.hasSuffix("/preferences") { result = bookPreferences }
-            else { result = ["saved":true,"pending":false,"active":true,"remote_stamp":0] }
+            else { result = ["saved":true,"pending":false,"active":true,"remote_stamp":bookStamp] }
             return HTTPResult(status:200,data:try JSONSerialization.data(withJSONObject:result))
         }
         if ProcessInfo.processInfo.environment["ARRIFY_UI_READ_RECOVERY"] == "1", request.httpMethod == "GET",

@@ -23,12 +23,14 @@ import CryptoKit
     private var account = UUID()
     private var scope = ""
     private var failedMore = false
+    private var progressOverrides: [String:AudiobookProgress] = [:]
     private let wait: @MainActor (Double) async throws -> Void
     var requestKey: String { query + "\u{0}" + filter + "\u{0}" + library + "\u{0}" + sort + "\u{0}" + author + "\u{0}" + series }
     init(api: APIClient, wait: @escaping @MainActor (Double) async throws -> Void = ReadRecovery.wait) { self.api = api; self.wait = wait }
     func clear() {
         generation = UUID(); account = UUID(); query = ""; filter = "all"; library = ""; sort = "title"; author = ""; series = ""; scope = ""
         items = []; libraries = []; next = nil; loading = false; hasLoaded = false; needsRecovery = false; message = nil; failedMore = false
+        progressOverrides = [:]
     }
     func load(more: Bool = false) async {
         guard filter != "downloads" else { return }
@@ -51,7 +53,13 @@ import CryptoKit
                 try await self.api.audiobookLibrary(query:query, library:library, page:page, filter:filter, sort:query.isEmpty ? sort : "title", author:author, series:series)
             }
             guard generation == token, owner == account, key == requestKey, !Task.isCancelled else { return }
-            items = more ? items + value.items : value.items
+            let incoming = value.items.map(presentation).filter { $0.readingState.matches(filter) }
+            if more {
+                for book in incoming {
+                    if let index = items.firstIndex(where:{ $0.id == book.id }) { items[index] = book }
+                    else { items.append(book) }
+                }
+            } else { items = incoming }
             libraries = value.libraries; next = value.nextPage; hasLoaded = true; needsRecovery = false
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
             guard generation == token, owner == account, key == requestKey else { return }
@@ -63,13 +71,31 @@ import CryptoKit
         }
     }
     func retry() async { await load(more:failedMore) }
-    func applyProgress(_ book: Audiobook) {
+    func presentation(_ book: Audiobook) -> Audiobook {
+        var value = book
+        if let progress = progressOverrides[book.id], (progress.lastUpdate ?? 0) >= (book.progress?.lastUpdate ?? 0) { value.progress = progress }
+        return value
+    }
+    func applyProgress(_ book: Audiobook, refreshMembership: Bool = true) {
+        if let progress = book.progress {
+            progressOverrides[book.id] = progress
+            if progressOverrides.count > 512, let oldest = progressOverrides.min(by:{ ($0.value.lastUpdate ?? 0) < ($1.value.lastUpdate ?? 0) })?.key, oldest != book.id { progressOverrides[oldest] = nil }
+        }
+        if !refreshMembership {
+            items = items.map { $0.id == book.id ? presentation($0) : $0 }.filter { $0.readingState.matches(filter) }
+            return
+        }
         generation = UUID(); loading = false
-        if ["started","finished"].contains(filter), (book.progress?.currentTime ?? 0) == 0, book.progress?.isFinished != true {
+        if !book.readingState.matches(filter) {
             items.removeAll { $0.id == book.id }
             next = nil
             Task { [weak self] in await self?.load() }
         } else if let index = items.firstIndex(where:{ $0.id == book.id }) { items[index] = book }
+        else if ["unstarted","started","finished"].contains(filter) { next = nil; Task { [weak self] in await self?.load() } }
+    }
+    func recordProgress(_ id: String, progress: AudiobookProgress) {
+        progressOverrides[id] = progress
+        items = items.map(presentation).filter { $0.readingState.matches(filter) }
     }
     func reconnect() async {
         let owner = account, key = requestKey
@@ -81,6 +107,8 @@ import CryptoKit
         }
     }
 }
+
+enum AudiobookRecoveryKind: Equatable { case position, edition }
 
 @MainActor @Observable final class AudiobookStore {
     private typealias Pending = AudiobookJournalEntry
@@ -100,6 +128,8 @@ import CryptoKit
     private var pending: [String: Pending] = [:]
     private var journal: URL?
     private var preferencesFile: URL?
+    private var placesFile: URL?
+    private(set) var savedPlaces: [AudiobookSavedPlace] = []
     private var preferencesPending = false
     private var savingPreferences = false
     private struct SavedPreferences: Codable { let value: AudiobookPreferences; let pending: Bool }
@@ -131,6 +161,7 @@ import CryptoKit
     }
     private var automaticDownloadCandidate: String?
     private var unreadBooks: Set<String> = []
+    private var loadingRecovery = false
     private(set) var continueListening: [Audiobook] = []
     private(set) var book: Audiobook?
     private(set) var manifest: AudiobookManifest?
@@ -140,6 +171,9 @@ import CryptoKit
     private(set) var active = false
     private(set) var offline = false
     private(set) var conflict = false
+    private(set) var recovery: AudiobookRecoveryKind?
+    private(set) var recoveryBook: Audiobook?
+    private(set) var recoveryCheckpoint: AudiobookCheckpoint?
     private(set) var message: String?
     private(set) var queue: [AudiobookQueueEntry] = []
     private(set) var bookmarks: [AudiobookBookmark] = []
@@ -150,17 +184,33 @@ import CryptoKit
     var chapter: AudiobookChapter? { AudiobookTimeline.chapter(book?.chapters ?? [], at:position) }
     var visible: Bool { enabled && preferences.visible }
     var resumeBooks: [Audiobook] {
-        var values = continueListening
-        guard !canonicalLoaded else { return values }
+        var values = continueListening.map(presentation)
         for record in downloads.records.values where record.finished != true {
-            guard let position = record.lastPosition, position > 0 else { continue }
-            var book = record.manifest.book
-            book.progress = AudiobookProgress(currentTime:position, lastUpdate:record.remoteStamp ?? 0, isFinished:false)
+            guard !canonicalLoaded || pending[record.book.id]?.dirty == true else { continue }
+            let book = presentation(record.book)
             if let index = values.firstIndex(where:{ $0.id == book.id }) { values[index] = book }
             else { values.append(book) }
         }
-        return values
+        if let book, pending[book.id]?.dirty == true, !values.contains(where:{ $0.id == book.id }) { values.insert(presentation(book),at:0) }
+        return values.filter { $0.readingState == .started }
     }
+    func presentation(_ value: Audiobook) -> Audiobook {
+        var result = shelf.presentation(value)
+        if let entry = pending[value.id], entry.dirty {
+            result.progress = AudiobookProgress(currentTime:entry.checkpoint.position,lastUpdate:entry.checkpoint.baseRemoteStamp,isFinished:entry.checkpoint.finished)
+        }
+        return result
+    }
+    func isUpdatingReadingState(_ id: String) -> Bool { unreadBooks.contains(id) }
+    func hasPendingReadingState(_ id: String) -> Bool { pending[id]?.dirty == true && pending[id]?.checkpoint.isStatusChange == true }
+    var deviceSavedPosition: Double? { book.flatMap { pending[$0.id]?.checkpoint.position ?? recoveryCheckpoint?.position ?? downloads.records[$0.id]?.book.progress?.currentTime ?? position } }
+    var canKeepDevicePlace: Bool {
+        guard let book, let fresh = recoveryBook else { return false }
+        if recovery == .edition { return deviceSavedPosition != nil }
+        guard let checkpoint = pending[book.id]?.checkpoint ?? recoveryCheckpoint else { return false }
+        return AudiobookEdition.matches(checkpoint,fresh)
+    }
+    func savedPlaces(for id: String) -> [AudiobookSavedPlace] { savedPlaces.filter { $0.checkpoint.bookId == id } }
     init(api: APIClient, music: PlaybackCoordinator, audioSession: (any PlaybackAudioSession)? = nil, localMedia: ((Audiobook, AudiobookPart) -> URL?)? = nil, downloads: AudiobookDownloads? = nil) {
         self.api = api; self.music = music; self.downloads = downloads ?? AudiobookDownloads(api:api); shelf = AudiobookShelfStore(api:api)
         self.localMedia = localMedia
@@ -217,6 +267,8 @@ import CryptoKit
             guard ticket == accountGeneration else { return }
             journal = directory.appending(path:key + ".json")
             preferencesFile = directory.appending(path:key + ".preferences")
+            placesFile = directory.appending(path:key + ".places")
+            if let placesFile, let data = try? Data(contentsOf:placesFile) { savedPlaces = (try? JSONDecoder().decode([AudiobookSavedPlace].self,from:data)) ?? [] }
             if let preferencesFile, let data = try? Data(contentsOf:preferencesFile), let saved = try? JSONDecoder().decode(SavedPreferences.self, from:data) { preferences = saved.value; preferencesPending = saved.pending }
             if let journal, let data = try? Data(contentsOf:journal) { pending = (try? JSONDecoder().decode([String:Pending].self, from:data)) ?? [:] }
             await downloads.configure()
@@ -243,7 +295,7 @@ import CryptoKit
             if enabled {
                 let values = try await api.continueAudiobooks()
                 guard ticket == accountGeneration else { return }
-                continueListening = values; canonicalLoaded = true
+                continueListening = values.map(presentation).filter { $0.readingState == .started }; canonicalLoaded = true
             }
         } catch { /* Books are optional; keep already downloaded books available. */
             guard ticket == accountGeneration else { return }
@@ -266,12 +318,13 @@ import CryptoKit
     }
     func play(_ value: Audiobook, restart: Bool = false, useRemote: Bool = false, previousLease: String? = nil, startingAt: Double? = nil) {
         guard !unreadBooks.contains(value.id) else { return }
+        let earlierPlace = book?.id == value.id ? recoveryCheckpoint : nil
         pause(); active = false; book = value
         automaticDownloadCandidate = automaticDownloads && downloads.records[value.id] == nil ? value.id : nil
         let saved = pending[value.id]?.dirty == true ? pending[value.id]?.checkpoint.position : value.progress?.currentTime
         let chapterStart = startingAt.map { min(value.duration,max(0,$0)) }
         position = min(value.duration, max(0, chapterStart ?? (restart ? 0 : saved ?? 0)))
-        let ticket = UUID(); generation = ticket; preparing = true; message = nil; conflict = false; presented = true
+        let ticket = UUID(); generation = ticket; preparing = true; message = nil; conflict = false; recovery = nil; recoveryBook = nil; recoveryCheckpoint = nil; presented = true
         resolvingRemote = useRemote ? [value.id:ticket] : [:]
         operation = Task { [weak self] in
             guard let self else { return }
@@ -282,8 +335,8 @@ import CryptoKit
             PlaybackDiagnostics.event("audiobook-start")
             do {
                 if !useRemote, let record = self.downloads.records[value.id], self.downloads.complete(value.id),
-                   value.sourceRevision == nil || value.sourceRevision == record.manifest.book.sourceRevision {
-                    if case .conflict = self.syncIssues[value.id] { throw self.syncIssues[value.id]! }
+                   value.sourceRevision == nil || AudiobookEdition.matches(value,record.manifest.book) {
+                    if self.syncIssues[value.id]?.isConflict == true { throw self.syncIssues[value.id]! }
                     if self.syncIssues[value.id] == .authentication { throw AudiobookPlaybackIssue.authentication }
                     var local = record.manifest.book
                     if let progress = value.progress { local.progress = progress }
@@ -293,15 +346,15 @@ import CryptoKit
                             let api = self.api, id = value.id
                             let fresh = try await AudiobookReadDeadline.load { try await api.audiobook(id) }
                             guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
-                            if let revision = fresh.sourceRevision, revision != local.sourceRevision {
-                                throw AudiobookPlaybackIssue.conflict("This book’s edition changed. Your earlier position is saved.")
+                            if fresh.sourceRevision != nil, !AudiobookEdition.matches(fresh,local) {
+                                throw AudiobookPlaybackIssue.editionChanged
                             }
-                            local.progress = fresh.progress
+                            local = fresh
                         } catch where RequestCancellation.matches(error) || Task.isCancelled { throw CancellationError() }
                         catch {
                             let issue = AudiobookPlaybackIssue.classify(error)
                             if issue == .authentication { throw issue }
-                            if case .conflict = issue { throw issue }
+                            if issue.isConflict { throw issue }
                             PlaybackDiagnostics.event("audiobook-resume-read-deferred reason=\(issue.category)")
                         }
                     }
@@ -325,6 +378,9 @@ import CryptoKit
                     // Finish any old progress request before reading the server
                     // cursor, and suppress new writes from the history being replaced.
                     await self.syncGate.run {}
+                    if let earlier = self.pending[value.id] { try self.rememberPlace(earlier.checkpoint,title:value.title) }
+                    else if let earlierPlace { try self.rememberPlace(earlierPlace,title:value.title) }
+                    else if let stored = self.downloads.records[value.id]?.book { try self.rememberPlace(AudiobookCheckpoint(book:stored,deviceId:self.music?.deviceId ?? ""),title:value.title) }
                 } else { await self.synchronize(force:true, bookID:value.id) }
                 guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
                 if self.pending[value.id]?.dirty == true && !useRemote {
@@ -334,11 +390,13 @@ import CryptoKit
                     throw self.syncIssues[value.id] ?? AudiobookPlaybackIssue.progressPending
                 }
                 stage = "ownership"
+                if !useRemote, let earlierPlace { try self.rememberPlace(earlierPlace,title:value.title) }
                 let musicState = try await self.api.state()
                 guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
                 stage = "begin"
                 let result = try await self.begin(value.id, deviceId:self.music?.deviceId ?? "", revision:musicState.queueRevision, requestId:ticket.uuidString.lowercased(), restart:restart, useRemote:useRemote, previousLease:previousLease)
                 guard ticket == self.generation, account == self.accountGeneration, !Task.isCancelled else { return }
+                if chapterStart != nil, value.sourceRevision != nil, !AudiobookEdition.matches(value,result.book) { throw AudiobookPlaybackIssue.editionChanged }
                 if useRemote {
                     self.pending.removeValue(forKey:value.id); self.syncIssues[value.id] = nil; self.retryDates[value.id] = nil
                     self.resolvingRemote[value.id] = nil; self.persist()
@@ -353,9 +411,9 @@ import CryptoKit
                 guard ticket == self.generation, account == self.accountGeneration else { return }
                 let issue = AudiobookPlaybackIssue.classify(error)
                 PlaybackDiagnostics.event("audiobook-start-failed stage=\(stage) reason=\(issue.category) ms=\(Int(Date().timeIntervalSince(started)*1000))")
-                if case .conflict = issue { self.pause(); self.message = issue.message; self.conflict = true; return }
-                if issue == .authentication { self.pause(); self.message = issue.message; return }
-                if self.downloads.complete(value.id), let stored = self.downloads.records[value.id]?.manifest, value.sourceRevision == nil || value.sourceRevision == stored.book.sourceRevision {
+                if issue.isConflict { self.reportConflict(issue); return }
+                if issue == .authentication || issue == .storage { self.pause(); self.message = issue.message; return }
+                if !useRemote, self.downloads.complete(value.id), let stored = self.downloads.records[value.id]?.manifest, value.sourceRevision == nil || AudiobookEdition.matches(value,stored.book) {
                     let downloaded = self.downloads.records[value.id]
                     let cursor = chapterStart ?? (restart || downloaded?.finished == true ? 0 : self.pending[value.id]?.checkpoint.position ?? downloaded?.lastPosition ?? stored.book.progress?.currentTime ?? stored.position)
                     self.install(stored.book, manifest:nil, position:cursor, offline:true)
@@ -444,7 +502,7 @@ import CryptoKit
     private func pause(capturingPosition: Bool) {
         let hadPlaybackIntent = wantsPlayback || playing || preparing
         if interrupted { resumeAfterInterruption = false }
-        wantsPlayback = false; generation = UUID(); operation?.cancel(); operation = nil
+        wantsPlayback = false; generation = UUID(); operation?.cancel(); operation = nil; loadingRecovery = false
         player.pause()
         if capturingPosition, hadPlaybackIntent, !preparing, !finishing, let current = currentAudioPosition() { position = current }
         playing = false; preparing = false
@@ -476,7 +534,7 @@ import CryptoKit
         }
     }
     func seek(_ target: Double, resumePlayback: Bool = false) {
-        guard let book, !unreadBooks.contains(book.id) else { return }; let wasPlaying = wantsPlayback || resumePlayback
+        guard let book, !unreadBooks.contains(book.id), !conflict else { return }; let wasPlaying = wantsPlayback || resumePlayback
         pause(); finishing = false; position = min(book.duration, max(0,target)); save(); wantsPlayback = wasPlaying
         let ticket = UUID(); generation = ticket; preparing = true
         operation = Task { [weak self] in
@@ -531,6 +589,9 @@ import CryptoKit
         value.checkpoint.seq += 1; value.checkpoint.position = position; value.checkpoint.finished = finished || finishing
         value.playing = playing; value.dirty = true; pending[book.id] = value; lastSaved = Date(); persist()
         downloads.checkpoint(book.id, position:position, finished:value.checkpoint.finished)
+        var displayed = book
+        displayed.progress = AudiobookProgress(currentTime:position,lastUpdate:value.checkpoint.baseRemoteStamp,isFinished:value.checkpoint.finished)
+        shelf.applyProgress(displayed,refreshMembership:false)
     }
     func synchronize(force: Bool = false, bookID: String? = nil) async {
         let account = accountGeneration
@@ -550,7 +611,7 @@ import CryptoKit
             guard !unreadBooks.contains(id) else { continue }
             guard account == accountGeneration, !Task.isCancelled else { return }
             guard resolvingRemote[id] == nil, let value = pending[id], value.dirty else { continue }
-            if case .conflict = syncIssues[id] { continue }
+            if syncIssues[id]?.isConflict == true { continue }
             guard force || Date() >= (retryDates[id] ?? .distantPast) else { continue }
             do {
                 let receipt: AudiobookReceipt
@@ -567,6 +628,9 @@ import CryptoKit
                 guard pending[id]?.checkpoint.sessionId == value.checkpoint.sessionId else { continue }
                 if receipt.saved && !receipt.pending {
                     let clean = pending[id]?.acknowledge(session:value.checkpoint.sessionId, sequence:value.checkpoint.seq, remoteStamp:receipt.remoteStamp) == true
+                    if let latest = pending[id]?.checkpoint {
+                        shelf.recordProgress(id,progress:AudiobookProgress(currentTime:latest.position,lastUpdate:latest.baseRemoteStamp,isFinished:latest.finished))
+                    }
                     if clean && (!active || book?.id != id) { pending.removeValue(forKey:id) }
                     if let stamp = receipt.remoteStamp { downloads.checkpoint(id, remoteStamp:stamp) }
                     persist(); syncFailures[id] = nil; retryDates[id] = nil; syncIssues[id] = nil
@@ -580,8 +644,8 @@ import CryptoKit
                 guard account == accountGeneration else { return }
                 let issue = AudiobookPlaybackIssue.classify(error); syncIssues[id] = issue
                 PlaybackDiagnostics.event("audiobook-sync-deferred reason=\(issue.category)")
-                if case .conflict = issue {
-                    if book?.id == id && resolvingRemote[id] == nil { conflict = true; pause(); message = issue.message }
+                if issue.isConflict {
+                    if book?.id == id && resolvingRemote[id] == nil { reportConflict(issue) }
                 } else if issue == .authentication {
                     retryDates[id] = Date().addingTimeInterval(60)
                     if book?.id == id && resolvingRemote[id] == nil { pause(); message = issue.message }
@@ -619,8 +683,8 @@ import CryptoKit
             guard token == generation, account == accountGeneration, !Task.isCancelled else { return }
             let result = try await begin(book.id, deviceId:music?.deviceId ?? "", revision:state.queueRevision, requestId:token.uuidString.lowercased())
             guard token == generation, account == accountGeneration, !Task.isCancelled else { return }
-            guard result.book.sourceRevision == book.sourceRevision else {
-                pause(); conflict = true; message = "This book’s edition changed. Your earlier position is saved."; return
+            guard AudiobookEdition.matches(result.book,book) else {
+                reportConflict(.editionChanged); return
             }
             // Refresh the fenced streaming URLs without reopening local audio.
             self.book = result.book
@@ -632,27 +696,107 @@ import CryptoKit
             guard token == generation, account == accountGeneration else { return }
             let issue = AudiobookPlaybackIssue.classify(error)
             PlaybackDiagnostics.event("audiobook-local-connect-deferred reason=\(issue.category)")
-            if case .conflict = issue { conflict = true; pause(); message = issue.message }
+            if issue.isConflict { reportConflict(issue) }
             if issue == .authentication { pause(); message = issue.message }
         }
     }
+    private func reportConflict(_ issue: AudiobookPlaybackIssue) {
+        let checkpoint = book.map { selected -> AudiobookCheckpoint in
+            if let checkpoint = pending[selected.id]?.checkpoint { return checkpoint }
+            if let downloaded = downloads.records[selected.id]?.book { return AudiobookCheckpoint(book:downloaded,deviceId:music?.deviceId ?? "") }
+            var checkpoint = AudiobookCheckpoint(book:selected,deviceId:music?.deviceId ?? ""); checkpoint.position = position; return checkpoint
+        }
+        pause(); conflict = true; recovery = issue == .editionChanged ? .edition : .position
+        recoveryBook = nil; recoveryCheckpoint = checkpoint; message = issue.message
+        Task { [weak self] in await self?.refreshRecovery() }
+    }
+    func refreshRecovery() async {
+        guard conflict, !loadingRecovery, let selected = book else { return }
+        let account = accountGeneration, token = generation
+        loadingRecovery = true
+        defer { if account == accountGeneration, token == generation { loadingRecovery = false } }
+        do {
+            let api = api, id = selected.id
+            let fresh = try await AudiobookReadDeadline.load { try await api.audiobook(id) }
+            guard account == accountGeneration, token == generation, book?.id == id, conflict, !Task.isCancelled else { return }
+            recoveryBook = fresh; book = fresh; bookmarks = fresh.bookmarks ?? []
+            position = min(fresh.duration,max(0,position))
+            if let checkpoint = pending[id]?.checkpoint ?? recoveryCheckpoint,
+               !checkpoint.sourceRevision.isEmpty, !AudiobookEdition.matches(checkpoint,fresh) { recovery = .edition }
+        } catch { /* Keep the saved history and known chapters available. */ }
+    }
+    private func rememberPlace(_ checkpoint: AudiobookCheckpoint, title: String) throws {
+        guard checkpoint.position > 0 || checkpoint.finished else { return }
+        let place = AudiobookSavedPlace(checkpoint:checkpoint,title:title)
+        guard !savedPlaces.contains(where:{ $0.id == place.id }) else { return }
+        guard let placesFile else { throw AudiobookPlaybackIssue.storage }
+        let forBook = savedPlaces.filter { $0.checkpoint.bookId == checkpoint.bookId }
+        let keep = Set(forBook.prefix(2).map(\.id))
+        let updated = Array(([place] + savedPlaces.filter { $0.checkpoint.bookId != checkpoint.bookId || keep.contains($0.id) }).prefix(512))
+        do { try JSONEncoder().encode(updated).write(to:placesFile,options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication]) }
+        catch { throw AudiobookPlaybackIssue.storage }
+        savedPlaces = updated
+    }
+    func resumeSavedPlace(_ place: AudiobookSavedPlace, in value: Audiobook) {
+        guard AudiobookEdition.matches(place.checkpoint,value) else { return }
+        play(value,startingAt:place.checkpoint.position)
+    }
+    func restart(_ value: Audiobook) throws {
+        if book?.id == value.id { pause() }
+        let checkpoint = pending[value.id]?.checkpoint ?? AudiobookCheckpoint(book:presentation(value),deviceId:music?.deviceId ?? "")
+        try rememberPlace(checkpoint,title:value.title)
+        play(value,restart:true)
+    }
+    func useDevicePlaceInUpdatedBook() {
+        guard recovery == .edition, let fresh = recoveryBook, let saved = deviceSavedPosition else { return }
+        play(fresh,useRemote:true,startingAt:min(fresh.duration,max(0,saved)))
+    }
+    func updateCurrentDownload() async {
+        guard let selected = book else { return }
+        let account = accountGeneration
+        do {
+            try preservePlaceBeforeDownload(selected)
+            await downloads.download(selected.id)
+            guard account == accountGeneration, book?.id == selected.id else { return }
+            await refreshRecovery()
+        } catch { if account == accountGeneration { message = AudiobookPlaybackIssue.classify(error).message } }
+    }
+    func preservePlaceBeforeDownload(_ value: Audiobook) throws {
+        guard downloads.needsUpdate(value), let old = downloads.records[value.id]?.book else { return }
+        let checkpoint = pending[value.id]?.checkpoint ?? AudiobookCheckpoint(book:old,deviceId:music?.deviceId ?? "")
+        try rememberPlace(checkpoint,title:value.title)
+    }
     func keepLocalPosition() async {
-        guard let book, let old = pending[book.id] else { return }
+        guard let book, recovery != .edition else { return }
+        guard let old = pending[book.id] ?? recoveryCheckpoint.map({ Pending(checkpoint:$0,lease:nil,playing:false,dirty:true) }) else { return }
+        let account = accountGeneration, token = generation
         do {
             let remote = try await api.audiobook(book.id)
-            guard remote.sourceRevision == old.checkpoint.sourceRevision else {
-                message = "This book’s edition changed. Your earlier position is kept on this device."; return
+            guard account == accountGeneration, token == generation, self.book?.id == book.id, !Task.isCancelled else { return }
+            guard AudiobookEdition.matches(old.checkpoint,remote) else {
+                reportConflict(.editionChanged); return
             }
+            try rememberPlace(AudiobookCheckpoint(book:remote,deviceId:music?.deviceId ?? ""),title:remote.title)
             var value = old
             value.checkpoint.sessionId = UUID().uuidString.lowercased()
             value.checkpoint.baseRemoteStamp = remote.progress?.lastUpdate ?? 0
             value.checkpoint.seq = 1; value.lease = nil; value.dirty = true
-            pending[book.id] = value; persist(); conflict = false; syncIssues[book.id] = nil; retryDates[book.id] = nil
+            pending[book.id] = value; persist(); conflict = false; recovery = nil; syncIssues[book.id] = nil; retryDates[book.id] = nil
             await synchronize(force:true, bookID:book.id)
-            if pending[book.id]?.dirty != true { play(remote) }
-        } catch { message = "Connect to choose which position to keep. Your offline place is saved." }
+            guard account == accountGeneration, token == generation, self.book?.id == book.id, !Task.isCancelled else { return }
+            if pending[book.id]?.dirty != true {
+                if old.checkpoint.isStatusChange != true { play(remote) }
+                else { recoveryBook = nil; recoveryCheckpoint = nil; message = nil }
+            } else { conflict = true; recovery = .position }
+        } catch { if account == accountGeneration, token == generation { message = "Connect to choose where to resume. Your saved place is safe." } }
     }
     func markUnread(_ value: Audiobook) async throws -> Audiobook {
+        try await setReadingState(value,finished:false)
+    }
+    func markFinished(_ value: Audiobook) async throws -> Audiobook {
+        try await setReadingState(value,finished:true)
+    }
+    private func setReadingState(_ value: Audiobook, finished: Bool) async throws -> Audiobook {
         guard !unreadBooks.contains(value.id) else { throw AudiobookPlaybackIssue.progressPending }
         let account = accountGeneration
         if book?.id == value.id { pause() }
@@ -661,26 +805,52 @@ import CryptoKit
         // Finish a previously submitted write before issuing the explicit reset.
         await syncGate.run {}
         guard account == accountGeneration else { throw CancellationError() }
-        var fresh = try await api.audiobook(value.id)
+        var fresh: Audiobook
+        do { fresh = try await api.audiobook(value.id) }
+        catch {
+            let issue = AudiobookPlaybackIssue.classify(error)
+            guard issue == .offline || issue == .temporary,
+                  let local = downloads.records[value.id]?.book, local.sourceRevision != nil else { throw error }
+            fresh = local
+        }
         guard account == accountGeneration else { throw CancellationError() }
+        if let old = pending[value.id] { try rememberPlace(old.checkpoint,title:value.title) }
+        else { try rememberPlace(AudiobookCheckpoint(book:fresh,deviceId:music?.deviceId ?? ""),title:fresh.title) }
         var reset = AudiobookCheckpoint(book:fresh,deviceId:music?.deviceId ?? "")
-        reset.seq = 1; reset.position = 0; reset.finished = false
-        let receipt = try await api.offlineAudiobookProgress(reset)
+        reset.seq = 1; reset.position = finished ? fresh.duration : 0; reset.finished = finished; reset.isStatusChange = true
+        let previous = pending[value.id]
+        pending[value.id] = Pending(checkpoint:reset,lease:nil,playing:false,dirty:true)
+        guard let journal else { pending[value.id] = previous; throw AudiobookPlaybackIssue.storage }
+        do { try JSONEncoder().encode(pending).write(to:journal,options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication]) }
+        catch { pending[value.id] = previous; throw AudiobookPlaybackIssue.storage }
+        var stamp = reset.baseRemoteStamp
+        do {
+            let receipt = try await api.offlineAudiobookProgress(reset)
+            guard account == accountGeneration else { throw CancellationError() }
+            if receipt.saved, !receipt.pending { stamp = receipt.remoteStamp ?? stamp; pending[value.id] = nil }
+        } catch {
+            guard account == accountGeneration else { throw CancellationError() }
+            let issue = AudiobookPlaybackIssue.classify(error)
+            if issue != .offline && issue != .temporary {
+                syncIssues[value.id] = issue; persist()
+                if issue.isConflict, book?.id == value.id { reportConflict(issue) }
+                throw issue
+            }
+        }
         guard account == accountGeneration else { throw CancellationError() }
-        guard receipt.saved, !receipt.pending else { throw AudiobookPlaybackIssue.progressPending }
-        pending[value.id] = nil; syncIssues[value.id] = nil; retryDates[value.id] = nil; syncFailures[value.id] = nil
-        downloads.checkpoint(value.id,position:0,remoteStamp:receipt.remoteStamp,finished:false)
-        fresh.progress = AudiobookProgress(currentTime:0,lastUpdate:receipt.remoteStamp ?? fresh.progress?.lastUpdate ?? 0,isFinished:false)
+        syncIssues[value.id] = nil; retryDates[value.id] = nil; syncFailures[value.id] = nil
+        downloads.checkpoint(value.id,position:reset.position,remoteStamp:stamp,finished:finished)
+        fresh.progress = AudiobookProgress(currentTime:reset.position,lastUpdate:stamp,isFinished:finished)
         continueListening.removeAll { $0.id == value.id }
         shelf.applyProgress(fresh)
         if book?.id == value.id {
             active = false; wantsPlayback = false; playing = false; preparing = false; manifest = nil
-            player.pause(); player.replaceCurrentItem(with:nil); currentURL = nil; position = 0; book = fresh; conflict = false
+            player.pause(); player.replaceCurrentItem(with:nil); currentURL = nil; position = reset.position; book = fresh; conflict = false; recovery = nil; recoveryBook = nil; recoveryCheckpoint = nil
             part = nil; systemArtwork = nil; receiverArtwork = nil; audioSession.invalidate()
             if music?.state?.playing != true { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
         }
         automaticDownloadCandidate = automaticDownloadCandidate == value.id ? nil : automaticDownloadCandidate
-        persist(); message = nil
+        persist(); if book?.id == value.id { message = nil }
         return fresh
     }
     func observe(_ state: PlaybackState) {
@@ -724,11 +894,11 @@ import CryptoKit
     func stopForMusic() {
         pause(); active = false; presented = false; book = nil; manifest = nil
         systemArtwork = nil; receiverArtwork = nil
+        conflict = false; recovery = nil; recoveryBook = nil; recoveryCheckpoint = nil; message = nil
         player.replaceCurrentItem(with:nil); audioSession.invalidate()
     }
     func clear() {
-        shelf.clear()
-        pause(); accountGeneration = UUID(); syncGate.reset(); heartbeat?.cancel(); heartbeat = nil
+        pause(); shelf.clear(); accountGeneration = UUID(); syncGate.reset(); heartbeat?.cancel(); heartbeat = nil
         audioSession.invalidate()
         active = false; presented = false; book = nil; manifest = nil; part = nil; enabled = false
         systemArtwork = nil; receiverArtwork = nil
@@ -736,7 +906,9 @@ import CryptoKit
         player.replaceCurrentItem(with:nil); downloads.clear(); pending = [:]; continueListening = []; queue = []; bookmarks = []
         if let journal { try? FileManager.default.removeItem(at:journal) }; journal = nil
         if let preferencesFile { try? FileManager.default.removeItem(at:preferencesFile) }; preferencesFile = nil; preferencesPending = false
+        if let placesFile { try? FileManager.default.removeItem(at:placesFile) }; placesFile = nil; savedPlaces = []; loadingRecovery = false
         conflict = false; message = nil; retryDates = [:]; syncFailures = [:]; syncIssues = [:]; resolvingRemote = [:]
+        recovery = nil; recoveryBook = nil; recoveryCheckpoint = nil
         automaticDownloadCandidate = nil; unreadBooks = []
     }
     func setSleep(_ choice: String) {

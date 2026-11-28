@@ -1,0 +1,74 @@
+Audiobook flow review, 2026-11-28
+
+User evidence
+Continue listening opens playback while other book rows open details. Mark as
+unread removes the rail item but a reload can leave it in In progress. The player
+shows a large raw edition/sync warning stack, offers choices that do not apply to
+edition changes, loses chapters after a failed open, and has no direct book link.
+
+Confirmed defects and corrections
+- Provider filtered membership was trusted for non-search pages. Recheck each
+  returned item against current per-user progress, as Continue listening already
+  does. Preserve bounded provider pagination; do not scan the whole library.
+- A shelf reload could replace an acknowledged reset with an older snapshot.
+  Retain timestamped local overrides and one shared reading-state policy across
+  shelves, downloaded books, details and the player. Explicit unread/finished
+  actions never acquire output. A downloaded book can save a durable offline
+  status change and reconcile it later with normal conflict fencing.
+- Item updatedAt includes descriptive metadata edits. Preserve legacy revision
+  compatibility and add an optional audio_revision based on file/layout signals.
+  New clients use it for cache matching and progress reconciliation. Real media
+  changes remain fenced. Old copies without this identity remain conservative;
+  they are not silently relabeled as verified current audio.
+- Use a shared book-actions menu on rail/list/grid/detail/player, separate fast
+  resume from title/cover navigation, and make player artwork/title open details.
+  Finished books offer Listen again. All shelves use the same state predicates.
+- Present a compact contextual recovery card and a native saved-place review
+  sheet. Distinguish a position conflict from an edition mismatch. Keep chapters
+  available, show actual compared times, and require an explicit selection before
+  applying an earlier time to an updated book. An unavailable remote choice must
+  never silently play the old local history.
+- Save earlier positions before resets/history replacement/download updates in
+  an account-scoped, protected, atomic device file: three recent places per book,
+  at most 512 total. Earlier editions can be inspected but not blindly jumped to.
+  Failure to persist aborts replacement. Sign-out clears device records.
+- A stale keep-local response could act after switching books or signing out.
+  Fence it, recovery reads and account state; preserve other audio ownership.
+
+Industry references and application
+Apple HIG Menus: shared contextual commands, clear labels and grouped secondary
+actions. HIG Sheets: a scoped review task without filling the player with choices.
+Audible library guidance: separate Not started/In progress/Finished/Downloaded;
+removing a download does not remove the title. Audible listening guidance: synced
+positions, chapters and player access. Libby: automatically sync progress and
+retain clear offline-download state. These guide Arrify's flows; no copied visual
+assets, invented metadata or claim that all products behave identically.
+https://developer.apple.com/design/human-interface-guidelines/menus
+https://developer.apple.com/design/human-interface-guidelines/sheets
+https://help.audible.com/s/article/manage-your-library?language=en_US
+https://help.audible.com/s/article/listen-in-the-app?language=en_US
+https://help.libbyapp.com/en-us/6023.htm
+https://help.libbyapp.com/en-us/6022.htm
+
+Additional active user report
+Next latency and Home's long-lived top spinner are additive follow-ups. In build
+48 diagnostics, a 13.209-second navigation spends about 11.535 seconds awaiting a
+command response; the cached item reports 50ms ready time. The older log section
+also shows deferred cached-transition sync and failed network reads. Distinguish
+server/transport delay, avoidable client serialization and native/device startup.
+Do not attribute every stop to Wi-Fi. Preserve queue, ownership, pause and quality.
+
+Validation and deployment
+Four new server regressions were run before the implementation in an isolated
+runtime: stale membership and metadata-only grant replacement failed; the new
+audio identity fields were absent. After correction all 36 audiobook service
+tests passed. Native focused and full qualification, UI screenshots, current
+service/job/stream state and backup checks remain required before release.
+Actual source hashes, CI results, screenshots and deployment/rollback receipts
+belong in the private release record rather than guessed success claims here.
+
+Remaining design limits to keep explicit
+Audio identity uses provider file/layout metadata, not an expensive full-file
+checksum on each request. Previously downloaded legacy copies cannot always prove
+that a metadata change left their bytes unchanged. Saved-place history is local
+and bounded; the canonical current listening position remains account-synced.

@@ -204,6 +204,72 @@ final class AudiobookSessionTests: XCTestCase {
         XCTAssertFalse(shelf.loading)
     }
 
+    @MainActor func testUnreadStaysOutOfProgressAfterStaleReloadsAndFilterChanges() async throws {
+        let transport = BookSessionTransport()
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://fixture.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let shelf = AudiobookShelfStore(api:api)
+        shelf.filter = "started"; await shelf.load()
+        XCTAssertEqual(shelf.items.count,1)
+        var reset = try await api.audiobook("book-one")
+        reset.progress = AudiobookProgress(currentTime:0,lastUpdate:10,isFinished:false)
+        shelf.applyProgress(reset)
+        for filter in ["started","all","unstarted","finished","started"] {
+            shelf.filter = filter; await shelf.load()
+            if ["started","finished"].contains(filter) { XCTAssertTrue(shelf.items.isEmpty,filter) }
+            else { XCTAssertEqual(shelf.items.first?.progress?.currentTime,0,filter) }
+        }
+        shelf.clear(); await shelf.load()
+        XCTAssertEqual(shelf.items.first?.progress?.currentTime,40,"A new account must not inherit the last account’s overrides")
+    }
+
+    @MainActor func testMarkFinishedAndUnreadUpdateEveryShelfWithoutActivatingAudio() async throws {
+        let transport = BookSessionTransport(), audio = BookSessionAudio()
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://fixture.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession())
+        let books = AudiobookStore(api:api,music:music,audioSession:audio)
+        defer { books.clear(); music.stop() }
+        await books.restore(); books.shelf.filter = "started"; await books.shelf.load()
+        let original = try await api.audiobook("book-one")
+        let finished = try await books.markFinished(original)
+        XCTAssertEqual(finished.readingState,.finished)
+        await books.shelf.load(); XCTAssertTrue(books.shelf.items.isEmpty)
+        books.shelf.filter = "finished"; await books.shelf.load()
+        XCTAssertEqual(books.shelf.items.first?.readingState,.finished)
+        _ = try await books.markUnread(finished)
+        await books.shelf.load(); XCTAssertTrue(books.shelf.items.isEmpty)
+        XCTAssertTrue(books.resumeBooks.isEmpty)
+        XCTAssertEqual(audio.activations,0); XCTAssertFalse(books.active)
+        let positions = await transport.offlinePositions
+        XCTAssertEqual(positions,[120,0])
+    }
+
+    @MainActor func testEditionRecoveryHydratesChaptersAndLateReadCannotRestoreOldSelection() async throws {
+        for signOut in [false,true] {
+            let transport = BookSessionTransport()
+            let api = APIClient(transport:transport,store:UITestStore())
+            try await api.login(endpoint:"https://fixture.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+            let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession()), audio = BookSessionAudio()
+            let books = AudiobookStore(api:api,music:music,audioSession:audio)
+            let previous = books.automaticDownloads; books.automaticDownloads = false
+            await books.restore()
+            let original = try await api.audiobook("book-one")
+            await transport.rejectEditionOnBegin(); books.play(original)
+            for _ in 0..<500 where books.recoveryBook == nil { try await Task.sleep(for:.milliseconds(10)) }
+            XCTAssertEqual(books.recovery,.edition)
+            XCTAssertFalse(try XCTUnwrap(books.book).chapters?.isEmpty ?? true)
+            XCTAssertEqual(audio.activations,0)
+            await transport.holdBookRead()
+            let late = Task { await books.refreshRecovery() }
+            for _ in 0..<200 { if await transport.readWaiting() { break }; try await Task.sleep(for:.milliseconds(10)) }
+            if signOut { books.clear() } else { books.stopForMusic() }
+            await transport.releaseBookRead(); await late.value
+            XCTAssertNil(books.book); XCTAssertFalse(books.active)
+            books.automaticDownloads = previous; books.clear(); music.stop()
+        }
+    }
+
 }
 @MainActor private final class BookPartRequests {
     weak var store: AudiobookStore?
@@ -238,6 +304,9 @@ private actor BookSessionTransport: HTTPTransport {
     let multipart: Bool
     init(multipart: Bool = false) { self.multipart = multipart }
     private var rejectProgress = false
+    private var rejectEdition = false
+    private var source = "fixture"
+    func rejectEditionOnBegin() { rejectEdition = true }
     func conflictProgress() { rejectProgress = true }
     private var holdRead = false
     private var waiter: CheckedContinuation<Void, Never>?
@@ -257,8 +326,12 @@ private actor BookSessionTransport: HTTPTransport {
             return HTTPResult(status:200,data:try JSONSerialization.data(withJSONObject:["access_token":"fixture","refresh_token":"fixture","expires_in":3600,"refresh_expires_in":86400,"session_id":session]))
         }
         guard path.hasPrefix("/api/v1/audiobooks/") else { return try await base.send(request) }
+        if path.hasSuffix("/play"), rejectEdition {
+            rejectEdition = false; source = "new-edition"
+            return HTTPResult(status:409,data:Data(#"{"error":{"code":"audiobook_edition_changed","message":"This audiobook changed."}}"#.utf8))
+        }
         let preferences: [String:Any] = ["visible":true,"continuous":false,"speed":1,"back_seconds":30,"forward_seconds":30]
-        var book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Story","author":"Author","narrator":"Reader","series":"","description":"","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":120,
+        var book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Story","author":"Author","narrator":"Reader","series":"","description":"","cover":"/api/v1/audiobooks/cover/book-one","source_revision":source,"audio_revision":source,"duration":120,
             "parts":[["index":0,"start":0,"duration":120,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+String(repeating:"a",count:43)+"/0"]],"chapters":[["title":"Chapter","start":0,"end":120]],"progress":["currentTime":0,"lastUpdate":0,"isFinished":false]]
         if multipart {
             book["duration"] = 1.5

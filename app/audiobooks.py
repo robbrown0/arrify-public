@@ -134,6 +134,13 @@ class Audiobooks:
             book['source_revision'] = hashlib.sha256(json.dumps([item.get('updatedAt'),
                 [(x.get('updatedAt'), x.get('contentUrl'), x.get('metadata', {}).get('size'), x.get('metadata', {}).get('mtimeMs'))
                  for x in media.get('tracks', [])]], sort_keys=True).encode()).hexdigest()
+            # Item/chapter metadata edits must not invalidate unchanged audio.
+            # Keep source_revision intact for older clients and downloads; new
+            # clients also retain this identity of the actual media layout.
+            book['audio_revision'] = hashlib.sha256(json.dumps([duration,
+                [(part['path'], part['start'], part['duration'], part['size_bytes'], part['mime'],
+                  track.get('metadata', {}).get('mtimeMs'), track.get('metadata', {}).get('ino'))
+                 for part, track in zip(tracks, media.get('tracks', []))]], sort_keys=True).encode()).hexdigest()
             chapters = []
             for chapter in media.get('chapters', [])[:5000]:
                 # Embedded chapter clocks can extend past the decoded audio
@@ -214,7 +221,9 @@ class Audiobooks:
         books = []
         for row in rows:
             book = self.metadata(row); book['progress'] = progress.get(book['id'], {'currentTime': 0, 'isFinished': False})
-            if query and not self.matches_progress(book['progress'], progress_filter): continue
+            # ABS's filtered membership can lag a progress reset. The current
+            # per-user progress above is authoritative for every entry point.
+            if not self.matches_progress(book['progress'], progress_filter): continue
             books.append(book)
         return {'libraries': allowed, 'library_id': selected, 'items': books, 'total': total, 'next_page': next_page,
                 'preferences': self.preferences(uid)}
@@ -246,9 +255,18 @@ class Audiobooks:
 
     @staticmethod
     def matches_progress(progress, value):
-        if value == 'unstarted': return not progress.get('isFinished') and not progress.get('currentTime', 0)
+        position = progress.get('currentTime')
+        position = position if type(position) in (int, float) and math.isfinite(position) else 0
+        if value == 'unstarted': return not progress.get('isFinished') and position <= 0
         return value == 'all' or (bool(progress.get('isFinished')) if value == 'finished' else
-                                  progress.get('currentTime', 0) > 0 and not progress.get('isFinished'))
+                                  position > 0 and not progress.get('isFinished'))
+
+    @staticmethod
+    def same_audio(left, right):
+        if left.get('audio_revision') and right.get('audio_revision'):
+            return left['audio_revision'] == right['audio_revision']
+        # An old download without an audio identity is deliberately conservative.
+        return bool(left.get('source_revision')) and left.get('source_revision') == right.get('source_revision')
 
     def continue_listening(self, uid):
         self.provider.require()
@@ -347,7 +365,7 @@ class Audiobooks:
                 row = self.db.execute("SELECT payload FROM downloads WHERE user_id=? AND json_extract(payload,'$.book_id')=? AND json_extract(payload,'$.anchor')=?", (uid, book['id'], anchor)).fetchone()
             if row:
                 previous = json.loads(row[0])
-                if previous['book']['source_revision'] == book['source_revision']:
+                if self.same_audio(previous['book'], book):
                     previous.update(expires=self.now()+3600, book=book,
                                     position=number(book['progress'].get('currentTime'), book['duration']))
                     with self.lock: self.db.execute('UPDATE downloads SET payload=? WHERE grant=?', (json.dumps(previous), previous['lease']))
@@ -358,12 +376,12 @@ class Audiobooks:
             with self.lock:
                 # Another device can download the same unchanged edition. Only
                 # replace this session's grant, or grants for an obsolete edition.
-                self.db.execute("""DELETE FROM downloads WHERE user_id=? AND
-                    (json_extract(payload,'$.expires')<=? OR
-                     (json_extract(payload,'$.book_id')=? AND
-                      (json_extract(payload,'$.anchor')=? OR
-                       json_extract(payload,'$.book.source_revision') IS NOT ?)))""",
-                    (uid, self.now(), book['id'], anchor, book['source_revision']))
+                self.db.execute("DELETE FROM downloads WHERE user_id=? AND json_extract(payload,'$.expires')<=?", (uid, self.now()))
+                candidates = self.db.execute("SELECT grant,payload FROM downloads WHERE user_id=? AND json_extract(payload,'$.book_id')=?", (uid, book['id'])).fetchall()
+                for grant, payload in candidates:
+                    old = json.loads(payload)
+                    if old['anchor'] == anchor or not self.same_audio(old['book'], book):
+                        self.db.execute('DELETE FROM downloads WHERE user_id=? AND grant=?', (uid, grant))
                 count = self.db.execute('SELECT count(*) FROM downloads WHERE user_id=?', (uid,)).fetchone()[0]
                 if count >= 4: raise BookError('Finish or cancel another book download first.', 409)
                 self.db.execute('INSERT INTO downloads VALUES(?,?,?)', (state['lease'], uid, json.dumps(state)))
@@ -428,8 +446,9 @@ class Audiobooks:
             if receipt and receipt.get('dirty'): self.flush_offline(uid, session, receipt)
             if not receipt or seq > receipt['seq']:
                 book = self.metadata(self.provider.user(uid, 'GET', '/api/items/' + book_id + '?expanded=1'), True)
-                if data.get('source_revision') != book['source_revision']:
-                    raise BookError('This audiobook changed. Your offline place is saved; download the current edition before syncing it.', 409)
+                same = (data['audio_revision'] == book['audio_revision']) if data.get('audio_revision') else data.get('source_revision') == book['source_revision']
+                if not same:
+                    raise BookError('This audiobook changed. Your offline place is saved; download the current edition before syncing it.', 409, reason='edition_changed')
                 position = number(data.get('position'), book['duration'])
                 stamp = receipt['remote_stamp'] if receipt else number(data.get('base_remote_stamp'), 2**53)
                 receipt = {'book_id':book_id, 'device_id':device, 'seq':seq, 'position':position,
