@@ -81,7 +81,9 @@ struct AudiobookShelf: View {
                 let key = taskKey
                 // Details/menus are not a new shelf request. Keep the loaded
                 // pages and native scroll anchor when returning to this view.
-                if loadedTaskKey == key && shelf.hasLoaded && !shelf.needsRecovery { return }
+                // The separate recovery task retries the failed cursor. Returning
+                // from details must not replace loaded pages with page zero.
+                if loadedTaskKey == key && shelf.hasLoaded { return }
                 do {
                     if !shelf.query.isEmpty { try await Task.sleep(for:.milliseconds(250)) }
                     await shelf.load()
@@ -195,6 +197,7 @@ private struct AudiobookShelfNextPage: View {
         if shelf.failedNextPage, let message = shelf.message {
             VStack(spacing:8) {
                 Text(message).font(.footnote).foregroundStyle(.secondary)
+                if shelf.loading { ProgressView().controlSize(.small) }
                 Button("Retry") { Task { await shelf.retry() } }.disabled(shelf.loading).accessibilityIdentifier("audiobookPageRetry")
             }.frame(maxWidth:.infinity).padding(.vertical,8)
         } else if let page = shelf.next {
@@ -766,7 +769,7 @@ private struct AudiobookGroupBrowser: View {
             if let message { Text(message).foregroundStyle(.secondary).padding(); Button("Retry") { Task { await load(more:failedMore) } }.disabled(loading) }
             else if let page = next {
                 AutomaticAudiobookPage(page:page,loading:loading,label:"Loading more " + kind) { page in
-                    guard next == page, !loading else { return }; await load(more:true)
+                    guard next == page, !loading, message == nil else { return }; await load(more:true)
                 }.id(key + ":page:" + String(page))
             }
         }.task(id:key) { await load(more:false) }

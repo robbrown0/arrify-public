@@ -19,6 +19,8 @@ jobs:
         with:
           node-version: '22'
       - run: node --test tests/*.test.cjs
+      - name: Verify complete native UI test partition and runtime audit
+        run: python3 -m unittest discover -s ios/tools -p test_ui_test_shards.py -v
   server:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

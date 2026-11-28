@@ -23,8 +23,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        device: [iPhone, iPad]
-        suite: [app, ui]
+        include:
+          - { device: iPhone, suite: ui, shard: '0' }
+          - { device: iPhone, suite: ui, shard: '1' }
+          - { device: iPad, suite: ui, shard: '0' }
+          - { device: iPad, suite: ui, shard: '1' }
+          - { device: iPhone, suite: app, shard: all }
+          - { device: iPad, suite: app, shard: all }
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -42,13 +47,20 @@ jobs:
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
           xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath build/TestFlightAppTests.xcresult -only-testing:ArrifyAppTests CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test
-      - name: Qualify all UI regressions
+      - name: Qualify every UI regression in this shard
         if: matrix.suite == 'ui'
         env:
           DEVICE_FAMILY: ${{ matrix.device }}
+          UI_SHARD: ${{ matrix.shard }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
-          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath build/TestFlightQualification.xcresult -only-testing:ArrifyUITests CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test
+          mkdir -p build
+          python3 ios/tools/ui_test_shards.py --shard "$UI_SHARD" > build/ui-test-selection.txt
+          ONLY_TESTS=()
+          while IFS= read -r flag; do ONLY_TESTS+=("$flag"); done < build/ui-test-selection.txt
+          set -o pipefail
+          xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath build/TestFlightQualification.xcresult "${ONLY_TESTS[@]}" CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test | tee build/ui-test.log
+          python3 ios/tools/ui_test_shards.py --shard "$UI_SHARD" --audit-log build/ui-test.log
       - name: Export screenshots
         if: always() && matrix.suite == 'ui'
         run: |
@@ -59,11 +71,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: testflight-qualification-${{ inputs.build_number }}-${{ matrix.device }}-${{ matrix.suite }}-${{ github.run_attempt }}
+          name: testflight-qualification-${{ inputs.build_number }}-${{ matrix.device }}-${{ matrix.suite }}-${{ matrix.shard }}-${{ github.run_attempt }}
           path: |
             build/TestFlightQualification.xcresult
             build/TestFlightAppTests.xcresult
             build/screenshots
+            build/ui-test-selection.txt
+            build/ui-test.log
           retention-days: 7
   distribute:
     needs: qualify
