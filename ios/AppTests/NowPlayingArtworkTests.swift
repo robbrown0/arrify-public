@@ -2,6 +2,7 @@ import XCTest
 import UIKit
 import ArrifyCore
 import CryptoKit
+import Observation
 @preconcurrency import AVFoundation
 @preconcurrency import MediaPlayer
 @testable import Arrify
@@ -537,6 +538,24 @@ extension NowPlayingArtworkTests {
         XCTAssertTrue(coordinator.routeDiagnostics.records.isEmpty)
     }
 
+    @MainActor func testNativeControlRegistrationDoesNotCreateObservationDependencies() {
+        let recorder = AudioRouteDiagnostics(readSystemVolume: { 0.16 }, observeVolume: { _ in nil })
+        let expanded = MPVolumeView()
+        let tablet = MPVolumeView()
+        let registrationChanges = NativeVolumeObservationChanges()
+        withObservationTracking {
+            recorder.registerVolumeView(expanded, location: "expanded")
+        } onChange: { registrationChanges.increment() }
+        recorder.registerVolumeView(tablet, location: "tablet")
+        XCTAssertEqual(registrationChanges.count, 0, "Diagnostic registration must not invalidate the UIKit view being mounted")
+
+        let captureChanges = NativeVolumeObservationChanges()
+        withObservationTracking { _ = recorder.capturing } onChange: { captureChanges.increment() }
+        recorder.start(); defer { recorder.stop() }
+        XCTAssertTrue(recorder.capturing)
+        XCTAssertEqual(captureChanges.count, 1, "The capture UI must still observe its visible state")
+    }
+
     @MainActor func testVolumeCaptureKeepsStaleNativeAndSystemLevelsDistinctWithoutWriting() throws {
         let recorder = AudioRouteDiagnostics(readSystemVolume: { 0.16 }, observeVolume: { _ in nil })
         let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
@@ -630,6 +649,13 @@ extension NowPlayingArtworkTests {
     var outputName: String { name }
     func activate() async throws { activations += 1 }
     func deactivate() async throws {}
+}
+
+private final class NativeVolumeObservationChanges: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    func increment() { lock.lock(); defer { lock.unlock() }; value += 1 }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return value }
 }
 
 extension NowPlayingArtworkTests {
