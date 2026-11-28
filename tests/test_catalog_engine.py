@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import wave
 import threading
+import json
 from unittest.mock import patch
 from pathlib import Path
 
@@ -47,6 +48,27 @@ class CatalogEngineTests(unittest.TestCase):
             catalog.scan()
         self.assertEqual(catalog.db.execute("SELECT id FROM tracks WHERE relative_path=?", (row['relative_path'],)).fetchone()[0], row['id'])
         self.assertEqual(catalog.db.execute("SELECT track_id FROM playlist_tracks WHERE playlist_slug='saved'").fetchone()[0], row['id'])
+
+    def test_disc_repair_preserves_existing_curated_and_station_manifest_matches(self):
+        audio = self.music / 'Artist' / 'Album' / 'CD 02' / '01 - Song.wav'
+        audio.parent.mkdir(parents=True)
+        audio.write_bytes(self.audio.read_bytes())
+        manifest = self.root / 'playlists.json'
+        manifest.write_text(json.dumps([
+            {'slug': 'old-curated', 'name': 'Old curated', 'description': '',
+             'tracks': [{'artists': ['Album'], 'title': 'Song', 'album': 'CD 02'}]},
+            {'slug': 'old-station', 'name': 'Old station', 'description': '', 'section': 'channels',
+             'tracks': [{'artists': ['Album'], 'title': '01 - Song', 'album': 'CD 02'}]},
+            {'slug': 'corrected', 'name': 'Corrected', 'description': '',
+             'tracks': [{'artists': ['Artist'], 'title': 'Song', 'album': 'Album'}]},
+        ]))
+        catalog = Catalog(self.db_path, {'local': str(self.music)}, playlists_file=str(manifest))
+        self.addCleanup(catalog.db.close)
+        catalog.scan()
+        row = catalog.db.execute("SELECT * FROM tracks WHERE relative_path LIKE '%CD 02%'").fetchone()
+        matches = list(catalog.db.execute('SELECT playlist_slug,track_id FROM playlist_tracks ORDER BY playlist_slug'))
+        self.assertEqual([(r[0], r[1]) for r in matches], [('corrected', row['id']), ('old-curated', row['id']), ('old-station', row['id'])])
+        self.assertEqual((row['artist'], row['album']), ('Artist', 'Album'))
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

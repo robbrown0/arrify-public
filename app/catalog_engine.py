@@ -284,6 +284,20 @@ def _public_row(row: sqlite3.Row | dict[str, object]) -> dict[str, object]:
     return result
 
 
+def _playlist_path_variants(track):
+    """Keep previously audited path identities usable after disc-folder repairs."""
+    keys = set(track.keys())
+    if {'raw_artist', 'raw_title', 'raw_album'}.issubset(keys):
+        variants = [(str(track['raw_artist']), str(track['raw_title']), str(track['raw_album']))]
+        parts = Path(str(track['relative_path'])).parts if 'relative_path' in keys else ()
+        if len(parts) >= 4 and _disc_folder_number(parts[-2]):
+            legacy = (_safe_component(parts[-3]), _safe_component(Path(parts[-1]).stem), _safe_component(parts[-2]))
+            if legacy not in variants:
+                variants.append(legacy)
+        return variants
+    return [(str(track['artist']), str(track['title']), str(track['album']))]
+
+
 class Catalog:
     def __init__(self, db_path: str, sources: dict[str, str],
                  extra_root: str | None = None,
@@ -370,16 +384,9 @@ class Catalog:
 
     @staticmethod
     def _playlist_match(track: sqlite3.Row, wanted: dict[str, object]) -> int:
-        keys = set(track.keys()) if isinstance(track, sqlite3.Row) else set(track)
-        if {"raw_artist", "raw_title", "raw_album"}.issubset(keys):
-            # Playlist manifests were audited against this immutable identity.
-            # Canonical tags improve presentation but must never retarget a
-            # curated entry to a different copy or recording.
-            variants = [(str(track["raw_artist"]), str(track["raw_title"]),
-                         str(track["raw_album"]))]
-        else:
-            variants = [(str(track["artist"]), str(track["title"]),
-                         str(track["album"]))]
+        # Match both the corrected path display and the former, exact disc path
+        # identity. Never substitute embedded tags from a different recording.
+        variants = _playlist_path_variants(track)
         wanted_artists = {_music_key(str(value)) for value in wanted["artists"]}
         wanted_title = _music_key(str(wanted["title"]))
         wanted_album = _music_key(str(wanted.get("album", "")))
@@ -431,8 +438,8 @@ class Catalog:
             available=[r for r in available if exclusions.get((r['source'],r['relative_path'])) != (r['size'],r['modified_ns'])]
             by_artist: dict[str, list[sqlite3.Row]] = {}
             for row in available:
-                raw_artist_key = _music_key(str(row["raw_artist"]))
-                by_artist.setdefault(raw_artist_key, []).append(row)
+                for artist_key in {_music_key(artist) for artist, _, _ in _playlist_path_variants(row)}:
+                    by_artist.setdefault(artist_key, []).append(row)
             resolved: list[tuple[str, int, int]] = []
             channel_weights={}
             self.radio_artists={int(r['id']):_music_key(str(r['artist'])) for r in available}
