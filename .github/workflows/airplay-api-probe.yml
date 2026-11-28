@@ -78,16 +78,16 @@ jobs:
                   if check:result.check_returncode()
               devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j'],text=True))
               device=next(x['udid'] for runtime,entries in devices['devices'].items() if 'iOS-27' in runtime for x in entries if 'iPad' in x['name'])
-              run(['xcrun','simctl','boot',device],check=False)
-              run(['xcrun','simctl','bootstatus',device,'-b'],timeout=360)
-              run(['xcrun','simctl','install',device,str(root/'Probe.app')],timeout=60)
+              run(['xcrun','simctl','boot',device],timeout=360,check=False)
+              run(['xcrun','simctl','bootstatus',device,'-b'],timeout=120)
+              run(['xcrun','simctl','install',device,str(root/'Probe.app')],timeout=180)
               container=subprocess.check_output(['xcrun','simctl','get_app_container',device,bundle,'data'],text=True,timeout=20).strip()
               report=pathlib.Path(container)/'Documents/probe.jsonl'
               command=['xcrun','simctl','launch','--terminate-running-process',device,bundle]
               log.write(datetime.datetime.now(datetime.timezone.utc).isoformat()+' '+repr(command)+'\n')
               launch=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT)
               try:
-                  for _ in range(90):
+                  for _ in range(120):
                       if report.exists():
                           raw=report.read_text()
                           (root/'simulator.txt').write_text(raw)
