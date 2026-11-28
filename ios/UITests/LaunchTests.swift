@@ -260,7 +260,8 @@ final class LaunchTests: XCTestCase {
         let download = app.buttons["audiobookPlayerDownload"]
         XCTAssertTrue(download.waitForExistence(timeout:10)); XCTAssertEqual(download.label,"Pause download")
         XCTAssertEqual(download.frame.width,44,accuracy:1); XCTAssertEqual(download.frame.height,44,accuracy:1)
-        let title = app.staticTexts["audiobookPlayerTitle"]
+        let title = app.buttons["audiobookPlayerTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout:10))
         XCTAssertLessThanOrEqual(title.frame.maxX,download.frame.minX)
         XCTAssertEqual(title.frame.midY,download.frame.midY,accuracy:1)
         XCTAssertLessThanOrEqual(download.frame.maxX,app.scrollViews["audiobookPlayerScroll"].frame.maxX-32)

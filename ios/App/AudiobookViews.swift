@@ -258,8 +258,8 @@ struct AudiobookPlayer: View {
                             Text(book.author).foregroundStyle(.secondary)
                             HStack(alignment:.center,spacing:16) {
                                 Button { showingDetails = true } label: {
-                                    Text(book.title).font(.title.bold()).foregroundStyle(.primary).frame(maxWidth:.infinity,minHeight:44,alignment:.leading).accessibilityIdentifier("audiobookPlayerTitle")
-                                }.buttonStyle(.plain).accessibilityHint("Open book details")
+                                    Text(book.title).font(.title.bold()).foregroundStyle(.primary).frame(maxWidth:.infinity,minHeight:44,alignment:.leading)
+                                }.buttonStyle(.plain).accessibilityHint("Open book details").accessibilityIdentifier("audiobookPlayerTitle")
                                 AudiobookDownloadControl(books:model.books,book:book,identifier:"audiobookPlayerDownload").id(book.id)
                             }.padding(.trailing,8)
                             if let chapter = model.books.chapter { Text(chapter.title).foregroundStyle(.secondary) }
@@ -618,14 +618,14 @@ private struct AudiobookPlaceReview: View {
                 }
                 Section("Saved places") {
                     if let position = books.deviceSavedPosition { place("On this device",position:position) }
-                    if let remote = books.recoveryBook { place("From your other devices",position:remote.progress?.currentTime ?? 0) }
+                    if let remote = books.recoveryBook { place("Synced place",position:remote.progress?.currentTime ?? 0) }
                     else { Label(loading ? "Checking saved places…" : "Connect to compare saved places",systemImage:loading ? "icloud" : "wifi.slash").foregroundStyle(.secondary) }
                 }
                 if let remote = books.recoveryBook {
                     Section("Continue listening") {
                         Button { choosing = true; Task { if books.recovery == .edition { books.useDevicePlaceInUpdatedBook() } else { await books.keepLocalPosition() }; choosing = false; if !books.conflict { dismiss() } } } label: { Label("Use this device’s place",systemImage:"play.circle") }
                             .disabled(choosing || !books.canKeepDevicePlace).accessibilityIdentifier("useDeviceAudiobookPlace")
-                        Button { books.play(remote,useRemote:true); dismiss() } label: { Label("Use other devices’ place",systemImage:"play.circle") }.disabled(choosing).accessibilityIdentifier("useRemoteAudiobookPlace")
+                        Button { books.play(remote,useRemote:true); dismiss() } label: { Label("Use synced place",systemImage:"play.circle") }.disabled(choosing).accessibilityIdentifier("useRemoteAudiobookPlace")
                     }
                     if books.downloads.needsUpdate(remote) {
                         Section { Button { Task { await books.updateCurrentDownload() } } label: { Label("Update download",systemImage:"arrow.down.circle") }.accessibilityIdentifier("updateAudiobookEdition") }
