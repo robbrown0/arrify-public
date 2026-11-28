@@ -110,19 +110,19 @@ struct RoutePortDetails: Codable, Sendable {
         return controls.compactMap { control in
             guard let view = control.view else { return nil }
             var sliders: [NativeSlider] = []
-            func inspect(_ child: UIView) {
+            @MainActor func inspect(_ child: UIView) {
                 guard sliders.count < 8 else { return }
                 if let slider = child as? UISlider {
                     sliders.append(NativeSlider(value: Self.finite(slider.value), minimumValue: Self.finite(slider.minimumValue),
                         maximumValue: Self.finite(slider.maximumValue), tracking: slider.isTracking, enabled: slider.isEnabled,
-                        hidden: slider.isHidden, frame: NSStringFromCGRect(slider.frame), bounds: NSStringFromCGRect(slider.bounds),
-                        trackRect: NSStringFromCGRect(slider.trackRect(forBounds: slider.bounds))))
+                        hidden: slider.isHidden, frame: NSCoder.string(for: slider.frame), bounds: NSCoder.string(for: slider.bounds),
+                        trackRect: NSCoder.string(for: slider.trackRect(forBounds: slider.bounds))))
                 }
                 for nested in child.subviews { inspect(nested) }
             }
             inspect(view)
             return NativeControl(id: control.id, location: control.location, attachedToWindow: view.window != nil,
-                hidden: view.isHidden, enabled: view.isUserInteractionEnabled, bounds: NSStringFromCGRect(view.bounds), sliders: sliders)
+                hidden: view.isHidden, enabled: view.isUserInteractionEnabled, bounds: NSCoder.string(for: view.bounds), sliders: sliders)
         }
     }
     struct Snapshot: Codable {
