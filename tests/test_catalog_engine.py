@@ -7,11 +7,47 @@ import threading
 from unittest.mock import patch
 from pathlib import Path
 
-from app.catalog_engine import Catalog
+from app.catalog_engine import Catalog, _metadata, _public_row
 from app.errors import CatalogError
 
 
 class CatalogEngineTests(unittest.TestCase):
+    def test_disc_directories_keep_album_and_artist_with_disc_order(self):
+        for folder, number in [('CD 01', '1'), ('cd02', '2'),
+                               ('Digital Media 01', '1'), ('12 Vinyl 02', '2'),
+                               ('7 Vinyl 01', '1'), ('Disc 2 of 3', '2')]:
+            with self.subTest(folder=folder):
+                path = 'Artist/Album (2008)/' + folder + '/01 - Song.flac'
+                self.assertEqual(_metadata(path), ('01 - Song', 'Artist', 'Album (2008)'))
+                row = _public_row({'relative_path': path, 'disc_number': ''})
+                self.assertEqual(row['disc_number'], number)
+                self.assertNotIn('relative_path', row)
+                self.assertEqual(_public_row({'relative_path': path, 'disc_number': '3/3'})['disc_number'], '3/3')
+
+    def test_album_titles_and_shallow_disc_names_are_preserved(self):
+        for path, expected in [
+            ('Artist/Volume 1/01.flac', ('01', 'Artist', 'Volume 1')),
+            ('Artist/CD 01/01.flac', ('01', 'Artist', 'CD 01')),
+            ('Artist/Discovery/01.flac', ('01', 'Artist', 'Discovery')),
+            ('ITUNES/Music/Various Artists/cd4/13 Song.m4a', ('13 Song', 'Various Artists', 'cd4')),
+        ]:
+            self.assertEqual(_metadata(path), expected)
+
+    def test_multidisc_rescan_preserves_playlist_track_ids(self):
+        audio = self.music / 'Artist' / 'Album' / 'CD 02' / '01 - Song.wav'
+        audio.parent.mkdir(parents=True)
+        audio.write_bytes(self.audio.read_bytes())
+        catalog = self.catalog()
+        catalog.scan()
+        row = catalog.db.execute("SELECT * FROM tracks WHERE relative_path LIKE '%CD 02%'").fetchone()
+        self.assertEqual((row['artist'], row['album']), ('Artist', 'Album'))
+        catalog.db.execute("INSERT INTO playlists VALUES('saved','Saved','',0)")
+        catalog.db.execute("INSERT INTO playlist_tracks VALUES('saved',?,0)", (row['id'],))
+        with patch.object(catalog, '_refresh_playlists'):
+            catalog.scan()
+        self.assertEqual(catalog.db.execute("SELECT id FROM tracks WHERE relative_path=?", (row['relative_path'],)).fetchone()[0], row['id'])
+        self.assertEqual(catalog.db.execute("SELECT track_id FROM playlist_tracks WHERE playlist_slug='saved'").fetchone()[0], row['id'])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

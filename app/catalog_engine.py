@@ -158,9 +158,24 @@ def _safe_component(value: str, maximum: int = 160) -> str:
     return cleaned[:maximum]
 
 
+def _disc_folder_number(value: str) -> str:
+    """Recognize format/disc directories, without treating volume titles as discs."""
+    match = re.fullmatch(
+        r"(?:cd|disc|disk|digital[\s_-]*media|(?:7|10|12)[\s_-]*(?:inch[\s_-]*)?vinyl)"
+        r"[\s_-]*(\d{1,3})(?:[\s_-]*of[\s_-]*\d{1,3})?", value,
+        flags=re.IGNORECASE,
+    )
+    return str(int(match[1])) if match and int(match[1]) > 0 else ""
+
+
 def _metadata(relative: str) -> tuple[str, str, str]:
-    parts = Path(relative).parts
+    parts = list(Path(relative).parts)
     title = _safe_component(Path(parts[-1]).stem)
+    # Artist/Album/CD 01/Track belongs to Album. Keep the full relative path
+    # as its immutable identity, and require both album and artist ancestors.
+    while (len(parts) >= 4 and _disc_folder_number(parts[-2])
+           and parts[-3].casefold() not in {'music', 'itunes', 'various', 'various artists'}):
+        del parts[-2]
     album = _safe_component(parts[-2]) if len(parts) >= 2 else ""
     artist = _safe_component(parts[-3]) if len(parts) >= 3 else ""
     return title or "Untitled", artist, album
@@ -254,6 +269,9 @@ CATALOG_JOIN = " FROM tracks t LEFT JOIN track_metadata m ON m.track_id=t.id "
 
 def _public_row(row: sqlite3.Row | dict[str, object]) -> dict[str, object]:
     result = dict(row)
+    parts = Path(str(result.get("relative_path", ""))).parts
+    if not result.get("disc_number") and len(parts) >= 4:
+        result["disc_number"] = _disc_folder_number(parts[-2])
     result["title"] = _display_title(str(result.get("title", "")))
     result["artist"] = _display_artist(str(result.get("artist", "")))
     result["album"] = _display_album(str(result.get("album", "")))
