@@ -1,0 +1,142 @@
+AirPlay destination names: investigation and diagnostic change, 2026-11-28
+
+Result
+
+Receiver discovery works across the five receiver families tested. Reliably
+identifying the playing iPad's selected receiver set remains unresolved.
+This change collects simultaneous receiver advertisements and selected-route
+data on the playing device. It does not replace a generic AirPlay label with
+an unverified receiver name, change playback, or claim a completed naming fix.
+
+Observed device behavior
+
+An iPadOS 27.0.1 capture from Arrify 0.3.0 (48) reports portName AirPlay,
+portType AirPlay and opaque route UIDs after single/multiple selections and
+settled callbacks. The two channel names AirPlay 1/2 describe audio channels;
+they do not enumerate selected receivers. Displayed and raw port names agree.
+The capture is from the playback owner, not an observing remote controller.
+No tested persistent Bonjour identifier matched the captured route UIDs.
+The network scans did not overlap that capture, so transient identifiers are
+still an open hypothesis rather than a disproven or implemented mapping.
+
+Network and Mac tests
+
+- Existing host Avahi discovery: 14 AirPlay receivers, 11 additional RAOP
+  service records. Includes Sonos, Apple TV, Roku-family, Onkyo and Samsung.
+- Native Swift Network.framework browsing inside the existing macOS 14.8.9
+  VM: same 25 service records after temporary DNS-SD proxies bridged service
+  visibility into the VM's NAT. Advertised endpoints remained the real LAN
+  receivers. This verifies the Swift browser; it does not prove the VM has
+  native multicast visibility or selected iPad-route access.
+- The exact App/AirPlayReceiverDiscovery.swift implementation compiled with
+  the VM's Swift 5.10, found all 25 records, then stopped and cleared.
+- Direct read-only receiver GET /info requests from the Mac: 12/14 succeed;
+  two Apple TVs require authorization (403). No pairing or control attempted.
+  No tested old route UUID appeared in the returned string/binary identifiers.
+- Sonos read-only topology: two simultaneously selected AirPlay rooms can be
+  separate single-room Sonos groups. Sonos group expansion alone cannot
+  reconstruct the iPad's multi-selection. Activity flags and matching media
+  metadata also do not prove sender ownership.
+- pyatv 0.18.0 tested in a disposable Mac venv: targeted discovery found
+  11/14 receivers in this run, missing three non-Apple endpoints. It did not
+  identify the separate iPad's selected destinations.
+- Mac CoreAudio and system_profiler report no audio output devices. The VM
+  has Command Line Tools, not full Xcode. A temporary QEMU USB-audio hotplug
+  attempt failed because no audio backend exists; no device was installed.
+  No VM restart, persistent network change or service reconfiguration occurred.
+- Native AppKit AVRoutePickerView instantiated in a window: public button
+  accessibility provides a menu action, not a selected receiver set in this
+  VM. Native macOS AVAudioSession is explicitly unavailable at typecheck.
+- Read-only native runtime investigation found undocumented AVOutputContext
+  getters. Shared presentation/system-audio contexts returned nil; the default
+  context had no device name or output devices. The type is absent from the
+  VM's public Swift SDK. No private runtime API was added to Arrify.
+
+Public API and module review
+
+- AVAudioSession.currentRoute supplies the observed generic port data.
+  Port UID is documented as system-assigned, without a Bonjour identity
+  equality contract. Longer post-dismissal delays did not reveal real names.
+- AVRoutePickerViewDelegate exposes presentation/dismissal, not selected
+  receivers. AVRoutePickerView.player exists on macOS but is unavailable on
+  iOS; assigning a player is not an iPad solution.
+- Xcode 27.1 / Swift 6.4: physical-device SDK typecheck succeeds for the new
+  AVSystemRouting observer. Its public contract covers routes from installed
+  matching protocol extensions. It is not established as a native AirPlay
+  selected-route inspector. AVSystemRouting/MediaDevice are absent from the
+  simulator SDK, so a simulator test cannot validate that device-only path.
+- iOS 27 simulator public-API probe produces actual application/start/settled
+  snapshots: built-in Speaker route and an AirPlay button without a selected
+  device accessibility value. This is a simulator result, not a physical
+  AirPlay selection result. Dedicated CI preserves SDK headers and reports.
+- NowPlaying remote session devices are supplied by the app's own remote
+  session implementation; they are not automatic native AirPlay discovery.
+- eMdOS/AirPlay and AudioKit's examined iOS implementations use the same
+  currentRoute portName/UID input. ConnectSDK's documented AirPlay service
+  excludes speakers. Its older direct-routing proof of concept uses a copied
+  private MPAudioDeviceController header; that code is not included here.
+- Spotify Connect exposes its own active devices. That API does not establish
+  how the closed-source Spotify app labels a native iPad AirPlay selection.
+
+App change
+
+Explicit output-diagnostic capture now browses _airplay._tcp and _raop._tcp
+using Apple's Network.framework with TXT records, for the existing ten-minute
+capture lifetime. Snapshots contain service names and whitelisted identity,
+group, model and manufacturer fields alongside currentRoute and all public
+output data sources. Inventory changes trigger timestamped route snapshots.
+
+Only the explicit diagnostic flow starts browsing. Stop, expiry and sign-out
+cancel it; clear removes retained names. Generation fencing rejects late
+callbacks from an older capture. Each type is capped at 128 service records;
+the existing report cap is 120 snapshots. Captures stay local until shared.
+No receiver connection, playback command, media metadata or credential capture
+is added. Local-peer account verification remains a separate protocol.
+
+Same-name receivers, Bonjour suffixes, shared group IDs and AirPlay/RAOP
+records remain distinct. The count is labeled service records, not speakers.
+Receiver advertisements are explicitly marked as nearby, not selected.
+
+Validation
+
+Native Mac exact-implementation discovery and stop/clear: passed, 25 records.
+Hosted iOS tests cover same-name/shared-group collisions, removal/replacement,
+stale callbacks after stop/restart/clear, record bounds and TXT field filtering.
+All four hosted tests passed with zero failures under Xcode 27.1 / iOS 27,
+including a complete integrated app/test-bundle build. A physical-device
+Release build and entitlement checks also passed under Xcode 26.5. The four
+committed test bodies separately passed in the Mac VM using a standalone
+assertion adapter because its Command Line Tools do not include XCTest.
+
+Run 46167641747 preserves the successful hosted test output. Its route probe
+failed during simulator boot before the probe ran, and the step later timed
+out compiling the separate existing formatter tests after the four hosted
+tests had passed. The workflow budgets were corrected and formatter testing
+split into a separate step. These infrastructure outcomes do not establish a
+selected-route result or a fully passing workflow. Broader PR checks remain
+separate; inspect their current status rather than inferring success from a
+launch PID or the successful app build.
+
+Remaining experiment
+
+The new capture can compare transient advertised identities with the native
+route UID at the same moment on the actual playing iPad. A claimed mapping
+must survive independent senders, same-name devices and changing multi-room
+selections. No deterministic mapping has yet been demonstrated. Discovery,
+Sonos activity, a shared group ID or a matching song alone is insufficient.
+
+Primary references
+
+https://developer.apple.com/documentation/network/nwbrowser
+https://developer.apple.com/documentation/network/nwbrowser/descriptor-swift.enum
+https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy
+https://developer.apple.com/documentation/avfaudio/avaudiosessionportdescription/uid
+https://developer.apple.com/documentation/avkit/avroutepickerviewdelegate
+https://developer.apple.com/documentation/avsystemrouting/routing-and-streaming-media-to-remote-devices
+https://developer.apple.com/documentation/nowplaying/remotemediasessionrepresentable
+https://github.com/eMdOS/AirPlay/blob/develop/Sources/AirPlay.swift
+https://github.com/AudioKit/AudioKit/blob/main/Sources/AudioKit/Internals/Engine/AudioEngine.swift
+https://connectsdk.com/en/latest/apis-ios/ios-airplayservice.html
+https://github.com/ConnectSDK/AirPlay-Direct-POC
+https://pyatv.dev/development/scan_pair_and_connect/
+https://developer.spotify.com/documentation/web-api/reference/get-a-users-available-devices

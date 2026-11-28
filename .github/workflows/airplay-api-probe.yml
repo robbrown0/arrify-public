@@ -1,0 +1,127 @@
+name: AirPlay API investigation
+on:
+  push:
+    branches: ['investigate/airplay-destination-names-20261128']
+    paths: ['ios/**', '.github/workflows/airplay-api-probe.yml']
+permissions:
+  contents: read
+jobs:
+  sdk-and-simulator:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Record compiler and public SDK surface
+        run: |
+          mkdir -p build/airplay-probe
+          xcodebuild -version | tee build/airplay-probe/toolchain.txt
+          xcrun swift --version | tee -a build/airplay-probe/toolchain.txt
+          xcrun --sdk iphonesimulator --show-sdk-version | tee -a build/airplay-probe/toolchain.txt
+          SDK_PATH=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          python3 - "$SDK_PATH" <<'PY' > build/airplay-probe/public-sdk.txt
+          import pathlib,sys
+          sdk=pathlib.Path(sys.argv[1])
+          for framework in ['AVFAudio','AVKit','AVRouting','AVSystemRouting','NowPlaying']:
+              headers=sdk/'System/Library/Frameworks'/f'{framework}.framework'/'Headers'
+              print('\nFRAMEWORK',framework)
+              for p in sorted(headers.glob('*.h')):
+                  lines=p.read_text(errors='replace').splitlines()
+                  for i,line in enumerate(lines):
+                      if any(s.lower() in line.lower() for s in ['routeDisplayName','currentRoute','selectedRoutes','selectedDevices','routeSharingPolicy','supportedExtensionAvailable','outputDevice','destination','portName','AVSystemRouteControllerObserver']):
+                          print(f'{p.name}:{i+1}: {line}')
+          PY
+          cat build/airplay-probe/public-sdk.txt
+          python3 - <<'PY' > build/airplay-probe/sdk-framework-details.txt
+          import pathlib,subprocess
+          for platform in ['iphoneos','iphonesimulator']:
+              sdk=pathlib.Path(subprocess.check_output(['xcrun','--sdk',platform,'--show-sdk-path'],text=True).strip())
+              print('\nPLATFORM',platform,'SDK',sdk)
+              for framework in ['AVRouting','AVSystemRouting','NowPlaying','MediaDevice','DeviceDiscoveryExtension']:
+                  p=sdk/'System/Library/Frameworks'/f'{framework}.framework'
+                  print('FRAMEWORK',framework,'EXISTS',p.exists())
+                  if p.exists():
+                      for file in sorted(p.rglob('*')):
+                          if file.suffix in ['.h','.swiftinterface','.modulemap']:print(file.relative_to(sdk))
+              for framework,filename in [('AVKit','AVPlaybackRouteSelecting.h'),('AVKit','AVRoutePickerView.h'),('AVRouting','AVCustomRoutingController.h'),('AVFAudio','AVAudioSessionRoute.h'),('AVSystemRouting','AVSystemRouteController.h'),('AVSystemRouting','AVSystemRoute.h'),('AudioToolbox','AudioSession.h')]:
+                  f=sdk/'System/Library/Frameworks'/f'{framework}.framework'/'Headers'/filename
+                  if f.exists():print('\nHEADER',f,'\n',f.read_text(errors='replace'))
+          PY
+      - name: Typecheck device-only routing APIs
+        run: |
+          DEVICE_SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun swiftc -parse-as-library -swift-version 6 -sdk "$DEVICE_SDK" -target arm64e-apple-ios27.0 -import-objc-header ios/tools/AirPlayLegacyRouteProbe.h -typecheck ios/tools/AirPlayAPIProbe.swift 2>&1 | tee build/airplay-probe/device-api-typecheck.txt
+      - name: Compile public routing API probe
+        run: |
+          mkdir -p build/airplay-probe/Probe.app
+          SDK_PATH=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          ARCH=$(uname -m)
+          xcrun clang -fobjc-arc -isysroot "$SDK_PATH" -target "$ARCH-apple-ios27.0-simulator" -c ios/tools/AirPlayLegacyRouteProbe.m -o build/airplay-probe/LegacyRoute.o 2>&1 | tee build/airplay-probe/legacy-compile.txt
+          xcrun swiftc -parse-as-library -swift-version 6 -sdk "$SDK_PATH" -target "$ARCH-apple-ios27.0-simulator" -import-objc-header ios/tools/AirPlayLegacyRouteProbe.h ios/tools/AirPlayAPIProbe.swift build/airplay-probe/LegacyRoute.o -o build/airplay-probe/Probe.app/Probe
+          python3 - <<'PY'
+          import plistlib,pathlib
+          info={'CFBundleIdentifier':'com.robnets.arrify.airplay-api-probe','CFBundleExecutable':'Probe','CFBundleName':'AirPlay API Probe','CFBundlePackageType':'APPL','CFBundleVersion':'1','CFBundleShortVersionString':'1.0','LSRequiresIPhoneOS':True,'UIDeviceFamily':[1,2],'MinimumOSVersion':'27.0','MDESupportsUniversalURLPlayback':True,'UILaunchScreen':{},'UIApplicationSceneManifest':{'UIApplicationSupportsMultipleScenes':False,'UISceneConfigurations':{'UIWindowSceneSessionRoleApplication':[{'UISceneConfigurationName':'Probe'}]}}}
+          pathlib.Path('build/airplay-probe/Probe.app/Info.plist').write_bytes(plistlib.dumps(info))
+          PY
+          codesign --force --sign - build/airplay-probe/Probe.app
+      - name: Run on iOS 27 simulator
+        timeout-minutes: 18
+        run: |
+          python3 - <<'PY'
+          import datetime,json,pathlib,subprocess,time
+          root=pathlib.Path('build/airplay-probe')
+          bundle='com.robnets.arrify.airplay-api-probe'
+          with (root/'simulator-lifecycle.txt').open('w',buffering=1) as log:
+              def run(command,timeout=30,check=True):
+                  log.write(datetime.datetime.now(datetime.timezone.utc).isoformat()+' '+repr(command)+'\n')
+                  result=subprocess.run(command,text=True,stdout=log,stderr=subprocess.STDOUT,timeout=timeout)
+                  log.write('exit='+str(result.returncode)+'\n')
+                  if check:result.check_returncode()
+              devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j'],text=True))
+              device=next(x['udid'] for runtime,entries in devices['devices'].items() if 'iOS-27' in runtime for x in entries if 'iPad' in x['name'])
+              run(['xcrun','simctl','boot',device],timeout=360,check=False)
+              run(['xcrun','simctl','bootstatus',device,'-b'],timeout=360)
+              run(['xcrun','simctl','install',device,str(root/'Probe.app')],timeout=180)
+              container=subprocess.check_output(['xcrun','simctl','get_app_container',device,bundle,'data'],text=True,timeout=20).strip()
+              report=pathlib.Path(container)/'Documents/probe.jsonl'
+              command=['xcrun','simctl','launch','--terminate-running-process',device,bundle]
+              log.write(datetime.datetime.now(datetime.timezone.utc).isoformat()+' '+repr(command)+'\n')
+              launch=subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT)
+              try:
+                  for _ in range(120):
+                      if report.exists():
+                          raw=report.read_text()
+                          (root/'simulator.txt').write_text(raw)
+                          try:rows=[json.loads(line) for line in raw.splitlines()]
+                          except json.JSONDecodeError:rows=[]
+                          if any(row.get('event')=='probe-finished' for row in rows):
+                              assert any(row.get('event')=='settled' for row in rows)
+                              print(raw);break
+                      if launch.poll() not in [None,0]:raise RuntimeError('Simulator launch failed: '+str(launch.returncode))
+                      time.sleep(1)
+                  else:raise RuntimeError('No completed probe report after launch; inspect simulator-lifecycle.txt')
+              finally:
+                  if launch.poll() is None:
+                      launch.terminate()
+                      try:launch.wait(timeout=5)
+                      except subprocess.TimeoutExpired:launch.kill();launch.wait()
+          PY
+      - name: Test integrated receiver diagnostics
+        if: always()
+        timeout-minutes: 18
+        run: |
+          python3 ios/tools/generate_project.py
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for runtime,devices in d["devices"].items() if "iOS-27" in runtime for x in devices if "iPad" in x["name"]))')
+          set -o pipefail
+          xcodebuild test -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/app-tests -resultBundlePath build/airplay-probe/ReceiverDiagnostics.xcresult -parallel-testing-enabled NO -only-testing:ArrifyAppTests/AirPlayReceiverDiscoveryTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/airplay-probe/app-tests.txt
+      - name: Test existing output-name formatter
+        if: always()
+        timeout-minutes: 10
+        run: |
+          set -o pipefail
+          swift test --package-path ios --filter SelectedOutputNamesTests 2>&1 | tee build/airplay-probe/output-name-tests.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: airplay-public-api-evidence
+          path: build/airplay-probe
+          retention-days: 7

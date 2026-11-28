@@ -188,6 +188,7 @@ import Network
         deviceId = UserDefaults.standard.string(forKey: key) ?? UUID().uuidString.lowercased()
         UserDefaults.standard.set(deviceId, forKey: key)
         heartbeatSequence = HeartbeatSequence(previous: UserDefaults.standard.integer(forKey: "arrify.native.heartbeat-sequence"))
+        routeDiagnostics.discovery.onChange = { [weak self] in self?.refreshOutput(trigger: "airplay-discovery") }
         // Route music through AVAudioSession; external item playback can open
         // a video-style receiver surface even when the source contains only audio.
         player.allowsExternalPlayback = false
