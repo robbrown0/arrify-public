@@ -64,6 +64,7 @@ jobs:
           PY
           codesign --force --sign - build/airplay-probe/Probe.app
       - name: Run on iOS 27 simulator
+        timeout-minutes: 5
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for runtime,devices in d["devices"].items() if "iOS-27" in runtime for x in devices if "iPad" in x["name"]))')
           xcrun simctl boot "$DEVICE" || true
@@ -77,10 +78,10 @@ jobs:
           for _ in range(30):
               if report.exists():
                   rows=[json.loads(line) for line in report.read_text().splitlines()]
-                  if any(row.get('event')=='settled' for row in rows):
+                  if any(row.get('event')=='probe-finished' for row in rows):
                       print(report.read_text());break
               time.sleep(1)
-          else:raise RuntimeError('Probe did not produce a settled route snapshot')
+          else:raise RuntimeError('Probe did not finish its bounded route experiment')
           PY
       - name: Test integrated receiver diagnostics
         run: |

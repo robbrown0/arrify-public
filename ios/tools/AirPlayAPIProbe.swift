@@ -7,10 +7,13 @@ import Network
 import AVSystemRouting
 #endif
 
-@MainActor func report(_ event: String, _ extra: [String: Any] = [:]) {
-    let session = AVAudioSession.sharedInstance()
-    var result: [String: Any] = ["event": event, "os": UIDevice.current.systemVersion,
-        "outputs": session.currentRoute.outputs.map { ["name": $0.portName, "uid": $0.uid, "type": $0.portType.rawValue] }]
+@MainActor func report(_ event: String, _ extra: [String: Any] = [:], includeRoute: Bool = true) {
+    var result: [String: Any] = ["event": event, "os": UIDevice.current.systemVersion]
+    if includeRoute {
+        result["outputs"] = AVAudioSession.sharedInstance().currentRoute.outputs.map {
+            ["name": $0.portName, "uid": $0.uid, "type": $0.portType.rawValue]
+        }
+    }
     extra.forEach { result[$0.key] = $0.value }
     if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
        let text = String(data: data, encoding: .utf8) {
@@ -40,7 +43,7 @@ final class RouteObserver: NSObject, AVSystemRouteControllerObserver {
 
 @main @MainActor final class ProbeApp: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        report("application-start", ["legacyRoute": AirPlayLegacyRouteProbe()])
+        report("application-start")
         return true
     }
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
@@ -57,6 +60,7 @@ final class RouteObserver: NSObject, AVSystemRouteControllerObserver {
     let observer = RouteObserver()
     #endif
     let picker = AVRoutePickerView()
+    var legacyFinished = false
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
         let controller = UIViewController()
@@ -79,12 +83,31 @@ final class RouteObserver: NSObject, AVSystemRouteControllerObserver {
                 ["label": control.accessibilityLabel ?? "", "value": control.accessibilityValue ?? ""]
             }
             report("settled", ["pickerLabel": picker.accessibilityLabel ?? "",
-                               "pickerValue": picker.accessibilityValue ?? "", "publicControlAccessibility": controls,
-                               "legacyRoute": AirPlayLegacyRouteProbe()])
+                               "pickerValue": picker.accessibilityValue ?? "", "publicControlAccessibility": controls])
             #if canImport(AVSystemRouting)
             AVSystemRouteController.shared.removeObserver(observer)
             #endif
-            exit(0)
+            // Deprecated C APIs must not block launch or hold the baseline probe hostage.
+            report("legacy-probe-start")
+            DispatchQueue.global().async {
+                let result = AirPlayLegacyRouteProbe()
+                let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+                let json = data.flatMap { String(data: $0, encoding: .utf8) } ?? "unencodable"
+                DispatchQueue.main.async {
+                    guard !self.legacyFinished else { return }
+                    self.legacyFinished = true
+                    report("legacy-route-result", ["json": json], includeRoute: false)
+                    report("probe-finished", includeRoute: false)
+                    exit(0)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                guard !self.legacyFinished else { return }
+                self.legacyFinished = true
+                report("legacy-probe-timeout", includeRoute: false)
+                report("probe-finished", includeRoute: false)
+                exit(0)
+            }
         }
     }
 }
