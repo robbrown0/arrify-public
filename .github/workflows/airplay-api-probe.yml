@@ -16,6 +16,7 @@ jobs:
           mkdir -p build/airplay-probe
           xcodebuild -version | tee build/airplay-probe/toolchain.txt
           xcrun swift --version | tee -a build/airplay-probe/toolchain.txt
+          xcrun --sdk iphonesimulator --show-sdk-version | tee -a build/airplay-probe/toolchain.txt
           SDK_PATH=$(xcrun --sdk iphonesimulator --show-sdk-path)
           python3 - "$SDK_PATH" <<'PY' > build/airplay-probe/public-sdk.txt
           import pathlib,sys
@@ -30,6 +31,21 @@ jobs:
                           print(f'{p.name}:{i+1}: {line}')
           PY
           cat build/airplay-probe/public-sdk.txt
+          python3 - <<'PY' > build/airplay-probe/sdk-framework-details.txt
+          import pathlib,subprocess
+          for platform in ['iphoneos','iphonesimulator']:
+              sdk=pathlib.Path(subprocess.check_output(['xcrun','--sdk',platform,'--show-sdk-path'],text=True).strip())
+              print('\nPLATFORM',platform,'SDK',sdk)
+              for framework in ['AVRouting','AVSystemRouting','NowPlaying','MediaDevice','DeviceDiscoveryExtension']:
+                  p=sdk/'System/Library/Frameworks'/f'{framework}.framework'
+                  print('FRAMEWORK',framework,'EXISTS',p.exists())
+                  if p.exists():
+                      for file in sorted(p.rglob('*')):
+                          if file.suffix in ['.h','.swiftinterface','.modulemap']:print(file.relative_to(sdk))
+              for framework,filename in [('AVKit','AVPlaybackRouteSelecting.h'),('AVKit','AVRoutePickerView.h'),('AVRouting','AVCustomRoutingController.h'),('AVFAudio','AVAudioSessionRoute.h')]:
+                  f=sdk/'System/Library/Frameworks'/f'{framework}.framework'/'Headers'/filename
+                  if f.exists():print('\nHEADER',f,'\n',f.read_text(errors='replace'))
+          PY
       - name: Compile public routing API probe
         run: |
           mkdir -p build/airplay-probe/Probe.app

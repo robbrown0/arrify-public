@@ -3,7 +3,9 @@ import UIKit
 import AVKit
 import AVFAudio
 import Network
+#if canImport(AVSystemRouting)
 import AVSystemRouting
+#endif
 
 @MainActor func report(_ event: String, _ extra: [String: Any] = [:]) {
     let session = AVAudioSession.sharedInstance()
@@ -17,6 +19,7 @@ import AVSystemRouting
     }
 }
 
+#if canImport(AVSystemRouting)
 final class RouteObserver: NSObject, AVSystemRouteControllerObserver {
     func systemRouteController(_ controller: AVSystemRouteController, handle event: AVSystemRouteEvent) async -> Bool {
         await report("extension-route-event", ["name": event.route.routeDisplayName,
@@ -24,10 +27,13 @@ final class RouteObserver: NSObject, AVSystemRouteControllerObserver {
         return false
     }
 }
+#endif
 
 @main @MainActor final class ProbeApp: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
+    #if canImport(AVSystemRouting)
     let observer = RouteObserver()
+    #endif
     let picker = AVRoutePickerView()
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         let controller = UIViewController()
@@ -38,17 +44,22 @@ final class RouteObserver: NSObject, AVSystemRouteControllerObserver {
         window.rootViewController = controller
         window.makeKeyAndVisible()
         self.window = window
+        #if canImport(AVSystemRouting)
         let registered = AVSystemRouteController.shared.addObserver(observer)
         report("start", ["extensionAvailable": AVSystemRouteController.supportedExtensionAvailable,
                          "observerRegistered": registered])
+        #else
+        report("start", ["AVSystemRoutingModuleAvailable": false])
+        #endif
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [self] in
             let controls = picker.subviews.compactMap { $0 as? UIControl }.map { control in
                 ["label": control.accessibilityLabel ?? "", "value": control.accessibilityValue ?? ""]
             }
             report("settled", ["pickerLabel": picker.accessibilityLabel ?? "",
-                               "pickerValue": picker.accessibilityValue ?? "", "publicControlAccessibility": controls,
-                               "extensionAvailable": AVSystemRouteController.supportedExtensionAvailable])
+                               "pickerValue": picker.accessibilityValue ?? "", "publicControlAccessibility": controls])
+            #if canImport(AVSystemRouting)
             AVSystemRouteController.shared.removeObserver(observer)
+            #endif
             exit(0)
         }
         return true
