@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import MediaPlayer
+import CoreFoundation
 
 /// A fresh native control reads the selected output's volume from MediaPlayer.
 /// Never seed it from AVAudioSession.outputVolume, a remembered phone volume, or
@@ -14,6 +15,8 @@ final class VolumeControlContainer: UIView {
     private var refreshTask: Task<Void, Never>?
     private var refreshPending = false
     private var alignPending = false
+    private var layoutObservation: NativeVolumeLayoutObservation?
+    private var layoutSuspended = false
 
     init(volumeView: MPVolumeView, centersNativeHeight: Bool = false,
          notifications: NotificationCenter = .default,
@@ -42,24 +45,52 @@ final class VolumeControlContainer: UIView {
         let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
         view.showsRouteButton = false
         view.tintColor = .white
+        #if targetEnvironment(simulator)
+        // Simulator has no receiver-backed volume slider. Opt-in UI coverage
+        // supplies a real UIKit slider with deliberately late native geometry.
+        // This fixture cannot be compiled into a physical-device release.
+        if ProcessInfo.processInfo.environment["ARRIFY_UI_TESTING"] == "1",
+           ProcessInfo.processInfo.environment["ARRIFY_UI_VOLUME_LAYOUT"] == "1" {
+            view.showsVolumeSlider = false
+            let slider = UISlider(frame: CGRect(x: 0, y: -8, width: 300, height: 30))
+            slider.autoresizingMask = [.flexibleWidth]
+            slider.tintColor = .white; slider.value = 0.35
+            slider.accessibilityIdentifier = "nativeVolumeLayoutFixture"
+            slider.accessibilityValue = "Initial native layout"
+            view.addSubview(slider)
+            Task { @MainActor [weak view, weak slider] in
+                try? await Task.sleep(for: .milliseconds(900))
+                guard let view, let slider, view.window != nil, slider.superview === view else { return }
+                slider.frame.origin.y = -14
+                slider.accessibilityValue = "Late native layout"
+            }
+        }
+        #endif
         return view
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     @objc nonisolated private func outputChanged(_ notification: Notification) {
-        Task { @MainActor [weak self] in self?.requestRefresh() }
+        let foreground = notification.name == UIApplication.didBecomeActiveNotification
+        Task { @MainActor [weak self] in
+            if foreground { self?.layoutSuspended = false }
+            self?.requestRefresh()
+        }
     }
 
     @objc nonisolated private func suspendRefresh(_ notification: Notification) {
         Task { @MainActor [weak self] in
             self?.refreshTask?.cancel()
             self?.refreshTask = nil
+            self?.layoutSuspended = true
+            self?.layoutObservation = nil
         }
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        updateLayoutObservation()
         guard window != nil else {
             refreshTask?.cancel(); refreshTask = nil
             return
@@ -74,6 +105,7 @@ final class VolumeControlContainer: UIView {
     /// Coalesce route-negotiation bursts. Ordinary SwiftUI updates, playback
     /// ticks and changes to track titles never replace a control under a finger.
     func requestRefresh() {
+        updateLayoutObservation()
         refreshPending = true
         refreshTask?.cancel(); refreshTask = nil
         guard window != nil else { return }
@@ -138,6 +170,22 @@ final class VolumeControlContainer: UIView {
         }
     }
 
+    private func updateLayoutObservation() {
+        guard centersNativeHeight, window != nil, !layoutSuspended else {
+            layoutObservation = nil
+            return
+        }
+        guard layoutObservation == nil else { return }
+        // MediaPlayer may insert or relayout its slider after both our parent
+        // layout and deferred alignment have finished. Observe completed main
+        // run-loop work while attached, rather than subclassing MPVolumeView,
+        // relying on a delay, or adding a timer that wakes an idle app.
+        layoutObservation = NativeVolumeLayoutObservation { [weak self] in
+            guard let self, self.window?.isHidden == false else { return }
+            self.alignVisibleTrack()
+        }
+    }
+
     private func alignVisibleTrack() {
         guard centersNativeHeight else { return }
         func visibleSlider(in view: UIView) -> UISlider? {
@@ -148,7 +196,7 @@ final class VolumeControlContainer: UIView {
             return nil
         }
         guard let slider = visibleSlider(in: volumeView) else {
-            volumeView.transform = .identity
+            if volumeView.transform != .identity { volumeView.transform = .identity }
             return
         }
         let track = slider.trackRect(forBounds: slider.bounds)
@@ -157,8 +205,31 @@ final class VolumeControlContainer: UIView {
         guard center.y.isFinite else { return }
         // Move drawing and hit testing together; never alter the slider's frame,
         // value or targets. This translation cannot accumulate across layouts.
-        volumeView.transform = CGAffineTransform(translationX: 0, y: bounds.midY - center.y)
+        let alignment = CGAffineTransform(translationX: 0, y: bounds.midY - center.y)
+        // An already-centered control must produce no repeated geometry writes
+        // or animations. Moving the whole view keeps drawing and hit testing
+        // together; the native slider's frame, value and targets stay untouched.
+        let current = volumeView.transform
+        if abs(current.ty - alignment.ty) > 0.01 || current.tx != 0 ||
+           current.a != 1 || current.b != 0 || current.c != 0 || current.d != 1 {
+            UIView.performWithoutAnimation { volumeView.transform = alignment }
+        }
     }
+}
+
+/// Public run-loop observation only; it does not create a wakeup source. The
+/// helper owns removal even if its UIView is released without another layout.
+private final class NativeVolumeLayoutObservation {
+    private let observer: CFRunLoopObserver
+    init(_ afterLayout: @escaping @MainActor @Sendable () -> Void) {
+        observer = CFRunLoopObserverCreateWithHandler(kCFAllocatorDefault,
+            CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max) { _, _ in
+                // Registered solely on the main run loop.
+                MainActor.assumeIsolated { afterLayout() }
+            }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+    }
+    deinit { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }
 }
 
 struct SystemVolumeSlider: UIViewRepresentable {
