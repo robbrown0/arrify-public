@@ -229,8 +229,9 @@ final class LaunchTests: XCTestCase {
         let detail = XCTAttachment(screenshot:XCUIScreen.main.screenshot()); detail.name = "Book details directly from the audiobook player"; detail.lifetime = .keepAlways; add(detail)
     }
 
-    @MainActor func testAudiobookScrollingLoadsPagesInListAndGridAndRetriesAtTheBoundary() {
-        let app = openBookFixture(["ARRIFY_UI_BOOK_PAGING":"1"],expectedBook:"book-page-001")
+    @MainActor func testAudiobookListLoadsPagesRetriesAndKeepsPositionAfterDetails() {
+        let app = openBookFixture(["ARRIFY_UI_BOOK_PAGING":"1","ARRIFY_UI_BOOK_PAGE_FAILURE":"1"],expectedBook:"book-page-001")
+        if app.buttons["Show book list"].exists { app.buttons["Show book list"].tap() }
         let shelf = app.scrollViews["audiobookShelfScroll"]
         let last = app.buttons["audiobook-book-page-036"]
         XCTAssertFalse(app.buttons["More books"].exists)
@@ -250,9 +251,13 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(last.isHittable,"Returning from details must retain all loaded pages")
         XCTAssertEqual(last.frame.minY,beforeDetails,accuracy:3,"Returning from details must preserve the browsing position")
         let list = XCTAttachment(screenshot:app.screenshot()); list.name = "Audiobook continuous list reaches final page"; list.lifetime = .keepAlways; add(list)
-        let grid = app.buttons["Show cover grid"]
-        for _ in 0..<24 where !grid.isHittable { shelf.swipeDown() }
-        XCTAssertTrue(grid.isHittable); grid.tap()
+    }
+
+    @MainActor func testAudiobookGridLoadsPagesAfterChangingFilters() {
+        let app = openBookFixture(["ARRIFY_UI_BOOK_PAGING":"1"],expectedBook:"book-page-001")
+        let shelf = app.scrollViews["audiobookShelfScroll"]
+        let last = app.buttons["audiobook-book-page-036"]
+        if app.buttons["Show cover grid"].exists { app.buttons["Show cover grid"].tap() }
         app.buttons["audiobookFilter-started"].tap()
         XCTAssertTrue(app.buttons["audiobook-book-page-001"].waitForExistence(timeout:15))
         XCTAssertFalse(last.exists,"Changing filters starts a new page sequence")

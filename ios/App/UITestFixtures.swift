@@ -74,7 +74,7 @@ actor UITestTransport: HTTPTransport {
                     let filter = values.first { $0.name == "filter" }?.value ?? "all"
                     // A durable first-page boundary failure exercises explicit
                     // retry independently from automatic transient-read recovery.
-                    if page == 1 && !bookPageFailed {
+                    if page == 1 && !bookPageFailed && ProcessInfo.processInfo.environment["ARRIFY_UI_BOOK_PAGE_FAILURE"] == "1" {
                         bookPageFailed = true
                         return HTTPResult(status:400,data:Data(#"{"error":{"code":"fixture_page_failure","message":"This page is temporarily unavailable."}}"#.utf8))
                     }
