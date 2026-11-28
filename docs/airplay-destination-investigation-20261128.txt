@@ -47,6 +47,10 @@ Network and Mac tests
 - Native AppKit AVRoutePickerView instantiated in a window: public button
   accessibility provides a menu action, not a selected receiver set in this
   VM. Native macOS AVAudioSession is explicitly unavailable at typecheck.
+- Read-only native runtime investigation found undocumented AVOutputContext
+  getters. Shared presentation/system-audio contexts returned nil; the default
+  context had no device name or output devices. The type is absent from the
+  VM's public Swift SDK. No private runtime API was added to Arrify.
 
 Public API and module review
 
@@ -98,9 +102,20 @@ Validation
 Native Mac exact-implementation discovery and stop/clear: passed, 25 records.
 Hosted iOS tests cover same-name/shared-group collisions, removal/replacement,
 stale callbacks after stop/restart/clear, record bounds and TXT field filtering.
-Dedicated CI also builds the integrated app and runs existing output-name
-formatter tests. See the branch's AirPlay API investigation workflow for the
-final commit's build/test status; do not infer success from a probe launch PID.
+All four hosted tests passed with zero failures under Xcode 27.1 / iOS 27,
+including a complete integrated app/test-bundle build. A physical-device
+Release build and entitlement checks also passed under Xcode 26.5. The four
+committed test bodies separately passed in the Mac VM using a standalone
+assertion adapter because its Command Line Tools do not include XCTest.
+
+Run 46167641747 preserves the successful hosted test output. Its route probe
+failed during simulator boot before the probe ran, and the step later timed
+out compiling the separate existing formatter tests after the four hosted
+tests had passed. The workflow budgets were corrected and formatter testing
+split into a separate step. These infrastructure outcomes do not establish a
+selected-route result or a fully passing workflow. Broader PR checks remain
+separate; inspect their current status rather than inferring success from a
+launch PID or the successful app build.
 
 Remaining experiment
 
