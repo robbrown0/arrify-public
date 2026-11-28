@@ -158,9 +158,24 @@ def _safe_component(value: str, maximum: int = 160) -> str:
     return cleaned[:maximum]
 
 
+def _disc_folder_number(value: str) -> str:
+    """Recognize format/disc directories, without treating volume titles as discs."""
+    match = re.fullmatch(
+        r"(?:(?:enhanced[\s_-]*)?cd|disc|disk|digital[\s_-]*media|(?:7|10|12)[\s_-]*(?:inch[\s_-]*)?vinyl)"
+        r"[\s_-]*(\d{1,3})(?:[\s_-]*of[\s_-]*\d{1,3})?", value,
+        flags=re.IGNORECASE,
+    )
+    return str(int(match[1])) if match and int(match[1]) > 0 else ""
+
+
 def _metadata(relative: str) -> tuple[str, str, str]:
-    parts = Path(relative).parts
+    parts = list(Path(relative).parts)
     title = _safe_component(Path(parts[-1]).stem)
+    # Artist/Album/CD 01/Track belongs to Album. Keep the full relative path
+    # as its immutable identity, and require both album and artist ancestors.
+    while (len(parts) >= 4 and _disc_folder_number(parts[-2])
+           and parts[-3].casefold() not in {'music', 'itunes', 'various', 'various artists'}):
+        del parts[-2]
     album = _safe_component(parts[-2]) if len(parts) >= 2 else ""
     artist = _safe_component(parts[-3]) if len(parts) >= 3 else ""
     return title or "Untitled", artist, album
@@ -254,6 +269,9 @@ CATALOG_JOIN = " FROM tracks t LEFT JOIN track_metadata m ON m.track_id=t.id "
 
 def _public_row(row: sqlite3.Row | dict[str, object]) -> dict[str, object]:
     result = dict(row)
+    parts = Path(str(result.get("relative_path", ""))).parts
+    if not result.get("disc_number") and len(parts) >= 4:
+        result["disc_number"] = _disc_folder_number(parts[-2])
     result["title"] = _display_title(str(result.get("title", "")))
     result["artist"] = _display_artist(str(result.get("artist", "")))
     result["album"] = _display_album(str(result.get("album", "")))
@@ -264,6 +282,20 @@ def _public_row(row: sqlite3.Row | dict[str, object]) -> dict[str, object]:
     result.pop("raw_artist", None)
     result.pop("raw_album", None)
     return result
+
+
+def _playlist_path_variants(track):
+    """Keep previously audited path identities usable after disc-folder repairs."""
+    keys = set(track.keys())
+    if {'raw_artist', 'raw_title', 'raw_album'}.issubset(keys):
+        variants = [(str(track['raw_artist']), str(track['raw_title']), str(track['raw_album']))]
+        parts = Path(str(track['relative_path'])).parts if 'relative_path' in keys else ()
+        if len(parts) >= 4 and _disc_folder_number(parts[-2]):
+            legacy = (_safe_component(parts[-3]), _safe_component(Path(parts[-1]).stem), _safe_component(parts[-2]))
+            if legacy not in variants:
+                variants.append(legacy)
+        return variants
+    return [(str(track['artist']), str(track['title']), str(track['album']))]
 
 
 class Catalog:
@@ -352,16 +384,9 @@ class Catalog:
 
     @staticmethod
     def _playlist_match(track: sqlite3.Row, wanted: dict[str, object]) -> int:
-        keys = set(track.keys()) if isinstance(track, sqlite3.Row) else set(track)
-        if {"raw_artist", "raw_title", "raw_album"}.issubset(keys):
-            # Playlist manifests were audited against this immutable identity.
-            # Canonical tags improve presentation but must never retarget a
-            # curated entry to a different copy or recording.
-            variants = [(str(track["raw_artist"]), str(track["raw_title"]),
-                         str(track["raw_album"]))]
-        else:
-            variants = [(str(track["artist"]), str(track["title"]),
-                         str(track["album"]))]
+        # Match both the corrected path display and the former, exact disc path
+        # identity. Never substitute embedded tags from a different recording.
+        variants = _playlist_path_variants(track)
         wanted_artists = {_music_key(str(value)) for value in wanted["artists"]}
         wanted_title = _music_key(str(wanted["title"]))
         wanted_album = _music_key(str(wanted.get("album", "")))
@@ -413,8 +438,8 @@ class Catalog:
             available=[r for r in available if exclusions.get((r['source'],r['relative_path'])) != (r['size'],r['modified_ns'])]
             by_artist: dict[str, list[sqlite3.Row]] = {}
             for row in available:
-                raw_artist_key = _music_key(str(row["raw_artist"]))
-                by_artist.setdefault(raw_artist_key, []).append(row)
+                for artist_key in {_music_key(artist) for artist, _, _ in _playlist_path_variants(row)}:
+                    by_artist.setdefault(artist_key, []).append(row)
             resolved: list[tuple[str, int, int]] = []
             channel_weights={}
             self.radio_artists={int(r['id']):_music_key(str(r['artist'])) for r in available}
