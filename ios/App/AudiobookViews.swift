@@ -6,6 +6,7 @@ struct AudiobookShelf: View {
     let model: AppModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var section = "books"
+    @State private var loadedTaskKey: String?
     @AppStorage("audiobookListLayout") private var listLayout = true
     @AppStorage("audiobookSort") private var savedSort = "title"
     @Bindable private var shelf: AudiobookShelfStore
@@ -75,8 +76,17 @@ struct AudiobookShelf: View {
             .task(id:taskKey) {
                 guard scenePhase == .active else { return }
                 guard section == "books" else { return }
-                do { if !shelf.query.isEmpty { try await Task.sleep(for:.milliseconds(250)) }; await shelf.load() } catch {}
+                let key = taskKey
+                // Details/menus are not a new shelf request. Keep the loaded
+                // pages and native scroll anchor when returning to this view.
+                if loadedTaskKey == key && shelf.hasLoaded && !shelf.needsRecovery { return }
+                do {
+                    if !shelf.query.isEmpty { try await Task.sleep(for:.milliseconds(250)) }
+                    await shelf.load()
+                    if !Task.isCancelled && taskKey == key && shelf.message == nil { loadedTaskKey = key }
+                } catch {}
             }
+            .onChange(of:scenePhase) { if scenePhase == .background { loadedTaskKey = nil } }
             .refreshable { await shelf.load() }
             .task(id:recoveryKey) {
                 if scenePhase == .active && shelf.filter != "downloads" && shelf.needsRecovery { await shelf.reconnect() }
@@ -790,6 +800,6 @@ private struct AudiobookScopedShelf: View {
                 if shelf.hasLoaded && shelf.items.isEmpty && shelf.next == nil && !shelf.loading && shelf.message == nil { ContentUnavailableView("No books yet", systemImage:"books.vertical", description:Text("Available books in this library will appear here.")) }
                 AudiobookShelfNextPage(shelf:shelf)
             }.padding(24)
-        }.navigationTitle(name).task { await shelf.load() }.refreshable { await shelf.load() }
+        }.navigationTitle(name).task { if !shelf.hasLoaded { await shelf.load() } }.refreshable { await shelf.load() }
     }
 }

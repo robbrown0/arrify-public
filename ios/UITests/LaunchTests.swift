@@ -20,6 +20,11 @@ final class LaunchTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Your books will appear here when available."].exists)
         app.buttons["Home"].firstMatch.tap(); app.buttons["Library"].firstMatch.tap()
         app.buttons["Audiobooks"].firstMatch.tap()
+        // Returning from details/tabs preserves the loaded shelf. Explicitly
+        // refresh to exercise a failed read without requiring a navigation reload.
+        let heading = app.staticTexts["Continue listening"].firstMatch
+        let pull = heading.coordinate(withNormalizedOffset:CGVector(dx:0.7,dy:0.5))
+        pull.press(forDuration:0.1,thenDragTo:pull.withOffset(CGVector(dx:0,dy:260)))
         // The Continue listening rail and failure message can move this row
         // below the phone viewport. Reveal it before checking retention; lazy
         // accessibility membership is not the store's loaded-book membership.
@@ -238,6 +243,12 @@ final class LaunchTests: XCTestCase {
         for _ in 0..<24 where !last.isHittable { shelf.swipeUp() }
         XCTAssertTrue(last.isHittable,"Continuous scrolling must reach the final book without a More tap")
         XCTAssertFalse(retry.exists); XCTAssertFalse(app.buttons["More books"].exists)
+        let beforeDetails = last.frame.minY
+        last.tap()
+        XCTAssertTrue(app.buttons["listenAudiobook"].waitForExistence(timeout:10))
+        app.navigationBars["Audiobook"].buttons.element(boundBy:0).tap()
+        XCTAssertTrue(last.isHittable,"Returning from details must retain all loaded pages")
+        XCTAssertEqual(last.frame.minY,beforeDetails,accuracy:3,"Returning from details must preserve the browsing position")
         let list = XCTAttachment(screenshot:app.screenshot()); list.name = "Audiobook continuous list reaches final page"; list.lifetime = .keepAlways; add(list)
         let grid = app.buttons["Show cover grid"]
         for _ in 0..<24 where !grid.isHittable { shelf.swipeDown() }

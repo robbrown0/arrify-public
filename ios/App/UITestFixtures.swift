@@ -102,6 +102,11 @@ actor UITestTransport: HTTPTransport {
                 result = ["items":stale || bookPosition > 0 && !bookFinished ? [listed] : []]
             }
             else if path.contains("/book/") {
+                if ProcessInfo.processInfo.environment["ARRIFY_UI_BOOK_PAGING"] == "1", let index = Int(path.split(separator:"-").last ?? "") {
+                    var selected = book
+                    selected["id"] = String(format:"book-page-%03d",index); selected["title"] = String(format:"Story %03d",index)
+                    return HTTPResult(status:200,data:try JSONSerialization.data(withJSONObject:selected))
+                }
                 bookReadCount += 1
                 if bookReadCount == 1, ProcessInfo.processInfo.environment["ARRIFY_UI_UNREAD_READ_RACE"] == "1" {
                     await withCheckedContinuation { oldBookRead = $0 }
