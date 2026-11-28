@@ -542,3 +542,28 @@ class AudiobookHTTPTests(unittest.TestCase):
         self.assertEqual(code, 200)
         for private in ('private-admin-password', 'access-', 'refresh-', 'contentUrl', 'password'):
             self.assertNotIn(private.encode(), body)
+
+    def test_native_http_distinguishes_changed_audio_from_a_saved_position_conflict(self):
+        from app.native_auth import NativeSessions
+        pair = NativeSessions(self.a).login({'username':'readerone', 'password':'a-strong-password', 'device_name':'iPad'})
+        headers = {'Authorization':'Bearer ' + pair['access_token']}
+        book = self.books.book(1, 'book-one')
+        checkpoint = {'book_id':book['id'], 'source_revision':book['source_revision'],
+                      'audio_revision':book['audio_revision'], 'session_id':'http-offline-session',
+                      'device_id':self.device, 'base_remote_stamp':0, 'seq':1, 'position':30}
+        original = self.fixture.item
+        def changed(book_id='book-one'):
+            value = original(book_id)
+            value['media']['tracks'][0]['metadata'] = {'mtimeMs':987654}
+            return value
+        with patch.object(self.fixture, 'item', side_effect=changed):
+            code, body, _ = self.call('/api/v1/audiobooks/offline-progress', 'POST', checkpoint,
+                                     authenticated=False, csrf=False, headers=headers)
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)['error']['code'], 'audiobook_edition_changed')
+        self.books.provider.user(1, 'PATCH', '/api/me/progress/book-one', {'currentTime':90,'isFinished':False})
+        code, body, _ = self.call('/api/v1/audiobooks/offline-progress', 'POST', checkpoint,
+                                 authenticated=False, csrf=False, headers=headers)
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)['error']['code'], 'audiobook_conflict')
+        self.assertEqual(self.books.remote_progress(1, 'book-one')['currentTime'], 90)

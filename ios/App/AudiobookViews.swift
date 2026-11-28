@@ -14,7 +14,7 @@ struct AudiobookShelf: View {
     private var showsLoading: Bool { !downloaded && (shelf.loading || !shelf.hasLoaded && shelf.message == nil) }
     private var showsEmpty: Bool {
         if downloaded { return displayed.isEmpty }
-        return shelf.hasLoaded && !shelf.loading && displayed.isEmpty && shelf.message == nil
+        return shelf.hasLoaded && !shelf.loading && displayed.isEmpty && shelf.next == nil && shelf.message == nil
     }
     private var taskKey: String { shelf.requestKey + ":" + section + ":" + String(scenePhase == .active) }
     private var recoveryKey: String { taskKey + ":" + String(shelf.needsRecovery) }

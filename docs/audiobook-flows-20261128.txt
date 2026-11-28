@@ -92,6 +92,13 @@ tests passed. Native focused and full qualification, UI screenshots, current
 service/job/stream state and backup checks remain required before release.
 Actual source hashes, CI results, screenshots and deployment/rollback receipts
 belong in the private release record rather than guessed success claims here.
+The combined-source web/server baseline passed. A further 16 local checks passed
+for HTTP edition-vs-position conflicts and the merged album parser. The first
+iPad focused run passed all 29 selected app checks, reading-state UI and recovery
+UI; its download layout selector needed updating from static text to the new
+accessible title button. Its independent catalog boundary case hit simulator
+keyboard focus before sign-in. Preserve every geometry assertion and qualify
+the corrected candidate; neither issue is waived for release.
 
 Remaining design limits to keep explicit
 Audio identity uses provider file/layout metadata, not an expensive full-file
