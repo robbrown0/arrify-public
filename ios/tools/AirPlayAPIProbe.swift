@@ -16,6 +16,15 @@ import AVSystemRouting
        let text = String(data: data, encoding: .utf8) {
         print("AIRPLAY_API_PROBE " + text)
         fflush(stdout)
+        let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("probe.jsonl")
+        let line = Data((text + "\n").utf8)
+        if FileManager.default.fileExists(atPath: file.path), let handle = try? FileHandle(forWritingTo: file) {
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: line)
+            try? handle.close()
+        } else { try? line.write(to: file) }
     }
 }
 
@@ -30,17 +39,31 @@ final class RouteObserver: NSObject, AVSystemRouteControllerObserver {
 #endif
 
 @main @MainActor final class ProbeApp: UIResponder, UIApplicationDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        report("application-start")
+        return true
+    }
+    func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: "Probe", sessionRole: session.role)
+        configuration.delegateClass = ProbeScene.self
+        return configuration
+    }
+}
+
+@MainActor final class ProbeScene: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     #if canImport(AVSystemRouting)
     let observer = RouteObserver()
     #endif
     let picker = AVRoutePickerView()
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
+        guard let scene = scene as? UIWindowScene else { return }
         let controller = UIViewController()
         controller.view.backgroundColor = .systemBackground
         picker.frame = CGRect(x: 40, y: 80, width: 250, height: 60)
         controller.view.addSubview(picker)
-        let window = UIWindow(frame: UIScreen.main.bounds)
+        let window = UIWindow(windowScene: scene)
         window.rootViewController = controller
         window.makeKeyAndVisible()
         self.window = window
@@ -62,6 +85,5 @@ final class RouteObserver: NSObject, AVSystemRouteControllerObserver {
             #endif
             exit(0)
         }
-        return true
     }
 }
