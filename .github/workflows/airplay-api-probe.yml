@@ -10,7 +10,7 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Record compiler and public SDK surface
         run: |
           mkdir -p build/airplay-probe
@@ -49,7 +49,7 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl install "$DEVICE" build/airplay-probe/Probe.app
           xcrun simctl launch --console --terminate-running-process "$DEVICE" com.robnets.arrify.airplay-api-probe | tee build/airplay-probe/simulator.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: airplay-public-api-evidence
