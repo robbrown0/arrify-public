@@ -20,9 +20,14 @@ final class LaunchTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Your books will appear here when available."].exists)
         app.buttons["Home"].firstMatch.tap(); app.buttons["Library"].firstMatch.tap()
         app.buttons["Audiobooks"].firstMatch.tap()
+        // The Continue listening rail and failure message can move this row
+        // below the phone viewport. Reveal it before checking retention; lazy
+        // accessibility membership is not the store's loaded-book membership.
+        app.scrollViews["audiobookShelfScroll"].swipeUp()
         let reconnecting = app.staticTexts["Reconnecting to your bookshelf…"]
         XCTAssertTrue(reconnecting.waitForExistence(timeout:20))
         XCTAssertTrue(book.exists,"A failed refresh must retain the known book")
+        XCTAssertTrue(book.isHittable,"The retained book must remain available during the failed refresh")
         XCTAssertFalse(app.staticTexts["Your books will appear here when available."].exists)
         XCTAssertTrue(reconnecting.waitForNonExistence(timeout:15),"Recovery continues while this screen is visible")
         XCTAssertTrue(book.exists)
