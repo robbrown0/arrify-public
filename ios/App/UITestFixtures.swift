@@ -43,6 +43,7 @@ actor UITestTransport: HTTPTransport {
     private let songs = #"[{"id":1,"title":"Just Like a Pill","artist":"P!nk","album":"M!ssundaztood","artist_id":"bbbbbbbbbbbbbbbbbbbbbbbb","album_id":"aaaaaaaaaaaaaaaaaaaaaaaa","popularity":{"doubloons":2,"rising":true,"evidence":[{"source":"Fixture chart","url":"https://example.com/chart"}]}},{"id":2,"title":"Try","artist":"P!nk","album":"The Truth About Love"}]"#
     private var recoveryFailures: [String: Int] = [:]
     private var bookshelfReads = 0
+    private var bookshelfOutageUntil = Date.distantPast
     private var bookPageFailed = false
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
@@ -53,7 +54,8 @@ actor UITestTransport: HTTPTransport {
             }
             if path.hasSuffix("/library"), ProcessInfo.processInfo.environment["ARRIFY_UI_SHELF_RECOVERY"] == "1" {
                 bookshelfReads += 1
-                if bookshelfReads == 1 || (3...6).contains(bookshelfReads) { throw URLError(.timedOut) }
+                if bookshelfReads == 3 { bookshelfOutageUntil = Date().addingTimeInterval(15) }
+                if bookshelfReads == 1 || Date() < bookshelfOutageUntil { throw URLError(.timedOut) }
             }
             let body = (try? JSONSerialization.jsonObject(with:request.httpBody ?? Data())) as? [String:Any] ?? [:]
             if path.hasSuffix("/preferences"), request.httpMethod == "POST" { bookPreferences.merge(body) { _,new in new } }

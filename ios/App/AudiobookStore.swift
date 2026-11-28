@@ -49,7 +49,8 @@ import CryptoKit
         if scope != key { items = []; next = nil; hasLoaded = false; scope = key; needsRecovery = false; failedMore = false }
         let token = UUID(); generation = token
         let query = query, filter = filter, library = library, sort = sort, author = author, series = series, page = more ? next ?? 0 : 0
-        loading = true; message = nil
+        loading = true
+        if !needsRecovery { message = nil }
         defer { if generation == token { loading = false } }
         do {
             let value = try await ReadRecovery.load(wait:wait, valid:{ self.generation == token && self.account == owner && self.requestKey == key }) {
@@ -64,7 +65,7 @@ import CryptoKit
                     else { items.append(book) }
                 }
             } else { items = incoming }
-            libraries = value.libraries; next = value.nextPage; hasLoaded = true; needsRecovery = false; failedMore = false
+            libraries = value.libraries; next = value.nextPage; hasLoaded = true; needsRecovery = false; failedMore = false; message = nil
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
             guard generation == token, owner == account, key == requestKey else { return }
             failedMore = more

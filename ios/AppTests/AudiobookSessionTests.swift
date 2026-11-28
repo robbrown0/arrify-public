@@ -34,7 +34,13 @@ final class AudiobookSessionTests: XCTestCase {
         let repeatedPages = await transport.pages
         XCTAssertEqual(repeatedPages,failedPages,"A stale footer callback must not bypass the failed-page Retry action")
         XCTAssertTrue(shelf.failedNextPage)
-        await shelf.retry()
+        await transport.holdSecondPage()
+        let retry = Task { await shelf.retry() }
+        for _ in 0..<100 { if await transport.waiting { break }; try await Task.sleep(for:.milliseconds(10)) }
+        let retryWaiting = await transport.waiting; XCTAssertTrue(retryWaiting)
+        XCTAssertTrue(shelf.loading)
+        XCTAssertNotNil(shelf.message,"Reconnecting status must remain until a fresh read actually succeeds")
+        await transport.release(); await retry.value
         XCTAssertEqual(shelf.items.map(\.id),["one","two","three"])
         XCTAssertFalse(shelf.failedNextPage); XCTAssertNil(shelf.message)
         let pages = await transport.pages; XCTAssertEqual(pages,[0,1,1,1,1,1])

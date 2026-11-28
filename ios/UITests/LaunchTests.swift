@@ -18,13 +18,10 @@ final class LaunchTests: XCTestCase {
         let book = app.buttons["audiobook-book-one"]
         XCTAssertTrue(book.waitForExistence(timeout:20),"The first failed request must recover without a Retry tap")
         XCTAssertFalse(app.staticTexts["Your books will appear here when available."].exists)
-        app.buttons["Home"].firstMatch.tap(); app.buttons["Library"].firstMatch.tap()
-        app.buttons["Audiobooks"].firstMatch.tap()
-        // Returning from details/tabs preserves the loaded shelf. Explicitly
-        // refresh to exercise a failed read without requiring a navigation reload.
-        let heading = app.staticTexts["Continue listening"].firstMatch
-        let pull = heading.coordinate(withNormalizedOffset:CGVector(dx:0.7,dy:0.5))
-        pull.press(forDuration:0.1,thenDragTo:pull.withOffset(CGVector(dx:0,dy:260)))
+        // Start the failed refresh from the known loaded shelf. A fixed viewport
+        // coordinate stays stable while native refresh changes the content offset.
+        let pull = app.scrollViews["audiobookShelfScroll"].coordinate(withNormalizedOffset:CGVector(dx:0.8,dy:0.2))
+        pull.press(forDuration:0.1,thenDragTo:pull.withOffset(CGVector(dx:0,dy:300)))
         // The Continue listening rail and failure message can move this row
         // below the phone viewport. Reveal it before checking retention; lazy
         // accessibility membership is not the store's loaded-book membership.

@@ -99,6 +99,9 @@ through three pages in list and cover-grid layouts.
 Departing footer callbacks cannot retry an already failed page; Retry and the
 normal reconnect policy retain control. UI fixtures choose their initial layout
 without inheriting another test's saved grid preference.
+Reconnecting status remains visible through a retry until fresh data succeeds;
+loaded rows stay available throughout. The outage fixture represents a brief
+sustained outage, rather than a two-second status window that automation can miss.
 https://developer.apple.com/documentation/swiftui/view/ongeometrychange(for:of:action:)
 
 Release qualification still runs the complete app and UI suites on both device

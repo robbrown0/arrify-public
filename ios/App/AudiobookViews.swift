@@ -195,6 +195,7 @@ private struct AudiobookShelfNextPage: View {
         if shelf.failedNextPage, let message = shelf.message {
             VStack(spacing:8) {
                 Text(message).font(.footnote).foregroundStyle(.secondary)
+                if shelf.loading { ProgressView().controlSize(.small) }
                 Button("Retry") { Task { await shelf.retry() } }.disabled(shelf.loading).accessibilityIdentifier("audiobookPageRetry")
             }.frame(maxWidth:.infinity).padding(.vertical,8)
         } else if let page = shelf.next {
