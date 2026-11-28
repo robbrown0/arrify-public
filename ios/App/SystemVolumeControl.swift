@@ -48,11 +48,11 @@ final class VolumeControlContainer: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    nonisolated @objc private func outputChanged(_ notification: Notification) {
+    @objc nonisolated private func outputChanged(_ notification: Notification) {
         Task { @MainActor [weak self] in self?.requestRefresh() }
     }
 
-    nonisolated @objc private func suspendRefresh(_ notification: Notification) {
+    @objc nonisolated private func suspendRefresh(_ notification: Notification) {
         Task { @MainActor [weak self] in
             self?.refreshTask?.cancel()
             self?.refreshTask = nil
