@@ -6,6 +6,47 @@ import ArrifyCore
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
+    @MainActor func testSilentAudioFixturesHaveFinalizedNativeFrameCounts() throws {
+        for seconds in [0.5,1.0,180.0] {
+            let url = try UITestAudiobookAudio.make(seconds:seconds)
+            defer { try? FileManager.default.removeItem(at:url) }
+            try autoreleasepool {
+                let reader = try AVAudioFile(forReading:url)
+                XCTAssertEqual(reader.length,AVAudioFramePosition(seconds*8000))
+                XCTAssertEqual(reader.fileFormat.sampleRate,8000)
+                XCTAssertEqual(reader.fileFormat.channelCount,1)
+            }
+        }
+    }
+    @MainActor func testTimelineReplacesPreviousItemClockWithCurrentItemTimeAndLength() async throws {
+        let (player, _) = try await fixture(cachedNext: true)
+        defer { player.stop() }
+        let item = try XCTUnwrap(player.player.currentItem)
+        player.position = 203
+        player.duration = 196
+        XCTAssertTrue(player.updatePlaybackTimeline())
+        XCTAssertEqual(player.position, item.currentTime().seconds, accuracy: 0.2)
+        XCTAssertEqual(player.duration, item.duration.seconds, accuracy: 0.01)
+        XCTAssertLessThan(player.position, 30)
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertTrue(player.player.currentItem === item)
+    }
+
+    @MainActor func testPlayingBeyondEstimatedDurationDoesNotClaimCompletionOrAdvance() async throws {
+        let (player, _) = try await fixture(cachedNext: true)
+        defer { player.stop() }
+        let item = player.player.currentItem
+        let track = player.state?.currentTrackId
+        player.position = 203
+        player.duration = 196
+        XCTAssertNil(player.timeline.remaining)
+        XCTAssertNil(player.timeline.duration)
+        XCTAssertEqual(player.progress, 0)
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertTrue(player.player.currentItem === item)
+        XCTAssertEqual(player.state?.currentTrackId, track)
+    }
+
     @MainActor func testAudiobookHandoffPreservesSystemMetadataAndCachedMusicSuccessors() async throws {
         let (player, _) = try await fixture(cachedNext:true)
         defer { player.stop() }
@@ -29,49 +70,50 @@ final class PlaybackTransitionTests: XCTestCase {
         executionTimeAllowance = 60
     }
 
-    @MainActor func fixture(cachedNext: Bool = false, windowSize: Int = 2, onHistoryRecorded: (@MainActor () -> Void)? = nil, audioSession: any PlaybackAudioSession = UITestAudioSession(), backgroundTasks: any PlaybackBackgroundTasks = SystemPlaybackBackgroundTasks()) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
+    @MainActor func fixture(cachedNext: Bool = false, windowSize: Int = 2, queueSize: Int? = nil, downloadProbe: StartupCacheProbe? = nil, makePlayerItem: @escaping (URL) -> AVPlayerItem = { AVPlayerItem(url: $0) }, onHistoryRecorded: (@MainActor () -> Void)? = nil, audioSession: any PlaybackAudioSession = UITestAudioSession(), backgroundTasks: any PlaybackBackgroundTasks = SystemPlaybackBackgroundTasks()) async throws -> (PlaybackCoordinator, CallResumeTransitionTransport) {
         let transport = CallResumeTransitionTransport()
         let api = APIClient(transport: transport, store: UITestStore())
         try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
         // Real local silent audio keeps AVQueuePlayer deterministic and offline.
-        let audio = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
-        let format = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)!
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8000 * 180)!
-        buffer.frameLength = buffer.frameCapacity
-        buffer.floatChannelData![0].initialize(repeating: 0, count: Int(buffer.frameLength))
-        do {
-            let file = try AVAudioFile(forWriting: audio, settings: [
-                AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 8000, AVNumberOfChannelsKey: 1,
-                AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false
-            ])
-            try file.write(from: buffer)
-        }
-        let bytes = try Data(contentsOf: audio)
-        try FileManager.default.removeItem(at: audio)
+        let bytes = UITestAudiobookAudio.data(seconds:180)
         await transport.setSize(bytes.count)
-        await transport.setWindowSize(windowSize)
+        await transport.setWindowSize(queueSize ?? windowSize)
+        if queueSize != nil { await transport.useRollingWindow() }
         let cache = AudioCache(download: { url in
+            if let downloadProbe { return try await downloadProbe.download(url, bytes: bytes) }
             let target = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
             try bytes.write(to: target)
             return (target, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
-        let coordinator = PlaybackCoordinator(api: api, audioSession: audioSession, cache: cache, backgroundTasks: backgroundTasks)
+        var initialItem: AVPlayerItem?, arranging = true
+        let coordinator = PlaybackCoordinator(api: api, audioSession: audioSession, cache: cache, backgroundTasks: backgroundTasks, makePlayerItem: { url in
+            let item = makePlayerItem(url)
+            if arranging, initialItem == nil { initialItem = item }
+            return item
+        })
         coordinator.onHistoryRecorded = onHistoryRecorded
         await transport.setOwner(coordinator.deviceId)
         let manifest = try await api.manifest(deviceId: coordinator.deviceId, epoch: 1, profile: "original")
         await cache.fill(manifest, api: api)
+        for media in manifest.items {
+            let file = try XCTUnwrap(cache.file(for:media))
+            let frames = try autoreleasepool { try AVAudioFile(forReading:file).length }
+            XCTAssertEqual(frames,AVAudioFramePosition(8000*180))
+        }
         await coordinator.send("resume")
         for _ in 0..<500 where coordinator.player.items().count < windowSize || !coordinator.isPlaying {
             if coordinator.playbackFailed { break }
             try await Task.sleep(for: .milliseconds(20))
         }
         guard coordinator.player.items().count == windowSize, coordinator.isPlaying else {
-            let error = coordinator.player.currentItem?.error as NSError?
-            let detail = "Fixture failed to play: \(error?.domain ?? "none") / \(error?.code ?? 0), \(coordinator.message ?? "no message")"
+            let item = coordinator.player.currentItem ?? initialItem
+            let error = item?.error as NSError?
+            let detail = "Fixture failed to play: \(error?.domain ?? "none") / \(error?.code ?? 0), status=\(item?.status.rawValue ?? -1), duration=\(item?.duration.seconds ?? -1), queue=\(coordinator.player.items().count), control=\(coordinator.player.timeControlStatus.rawValue), \(coordinator.message ?? "no message")"
             coordinator.stop()
             XCTFail(detail)
             throw NSError(domain: "PlaybackFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: detail])
         }
+        arranging = false; initialItem = nil
         // Existing network-path regressions exercise an unverified successor.
         // Cached continuity is covered separately with cachedNext: true.
         if !cachedNext {
@@ -136,6 +178,23 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertFalse(player.showsPauseControl)
     }
 
+    @MainActor func testReadAheadKeepsVerifiedLocalSuccessors() async throws {
+        let (player, _) = try await fixture(cachedNext:true,windowSize:4)
+        defer { player.stop() }
+        let state = try XCTUnwrap(player.state)
+        let manifest = try await player.api.manifest(deviceId:player.deviceId,epoch:state.ownerEpoch,profile:"original")
+        let original = player.player.items()
+        XCTAssertEqual(original.count,4)
+        XCTAssertTrue(original.allSatisfy { ($0.asset as? AVURLAsset)?.url.isFileURL == true })
+        for _ in 0..<3 {
+            try await player.refreshCachedSuccessors(manifest,expectedRevision:state.queueRevision)
+            XCTAssertEqual(player.player.items().map { ObjectIdentifier($0) },original.map { ObjectIdentifier($0) },
+                           "Read-ahead must not discard already verified and prebuffered local items")
+            XCTAssertTrue(player.player.currentItem === original.first)
+            XCTAssertEqual(player.state?.currentTrackId,state.currentTrackId)
+        }
+    }
+
     @MainActor func testLostCachedTransitionAcknowledgementRetriesSameIDWithoutReplay() async throws {
         let (player, transport) = try await fixture(cachedNext: true)
         defer { player.stop() }
@@ -145,13 +204,18 @@ final class PlaybackTransitionTests: XCTestCase {
         player.player.pause()
         NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: first)
         for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(player.player.currentItem === next,"The cached successor must be retained before its acknowledgement")
         await transport.releaseNext()
         for _ in 0..<100 { if await transport.nextCommits == 1 { break }; try await Task.sleep(for: .milliseconds(10)) }
-        try await Task.sleep(for: .milliseconds(100))
-        await player.reconcile()
-        for _ in 0..<100 { if await transport.nextRequests >= 2 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<100 {
+            await player.reconcile()
+            if await transport.nextRequests >= 2 { break }
+            try await Task.sleep(for:.milliseconds(10))
+        }
+        let requests = await transport.nextRequests
         let commits = await transport.nextCommits
         let ids = await transport.transitionIds
+        XCTAssertGreaterThanOrEqual(requests,2,"A lost acknowledgement must actually retry before checking idempotency")
         XCTAssertEqual(commits, 1)
         XCTAssertEqual(Set(ids).count, 1)
         XCTAssertTrue(player.player.currentItem === next)
@@ -161,19 +225,28 @@ final class PlaybackTransitionTests: XCTestCase {
     @MainActor func testThreeCachedSkipsContinueOfflineAndReconcileInOrder() async throws {
         let (player, transport) = try await fixture(cachedNext: true, windowSize: 4)
         defer { player.stop() }
-        await transport.failTransitions(true)
         for expected in 2...4 {
-            for _ in 0..<200 where player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
+            for _ in 0..<500 where player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
             let start = ProcessInfo.processInfo.systemUptime
-            await player.send("next")
-            XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 0.5)
+            var completed = false
+            let skip = Task { await player.send("next"); completed = true }
+            for _ in 0..<500 where !completed { try await Task.sleep(for:.milliseconds(10)) }
+            guard completed else {
+                await transport.allowTransitionsImmediately(); await transport.releaseNext(); await skip.value
+                XCTFail("Cached navigation waited for a blocked server acknowledgement"); return
+            }
+            let elapsed = ProcessInfo.processInfo.systemUptime-start
+            let commits = await transport.nextCommits
+            XCTAssertEqual(commits,0,"All three local skips must complete before any acknowledgement")
+            print("NEXT_LATENCY cached-offline command_ms=\(Int(elapsed*1000)) acknowledgements=\(commits)")
             XCTAssertEqual(player.state?.currentTrackId, expected)
             await player.reconcile()
             XCTAssertEqual(player.state?.currentTrackId, expected)
+            await skip.value
         }
         let last = player.player.currentItem
         await transport.allowTransitionsImmediately()
-        await transport.failTransitions(false)
+        await transport.releaseNext()
         for _ in 0..<200 {
             await player.reconcile()
             if await transport.nextCommits == 3 { break }
@@ -206,6 +279,113 @@ final class PlaybackTransitionTests: XCTestCase {
         await player.send("next")
         await player.send("next")
         XCTAssertEqual(player.state?.currentTrackId, 2)
+    }
+
+    @MainActor func testFourthSkipUsesRefreshedWindowBeforeLaterAcknowledgementsFinish() async throws {
+        let (player, transport) = try await fixture(cachedNext: true, windowSize: 4, queueSize: 7)
+        defer { player.stop() }
+        for expected in 2...4 {
+            for _ in 0..<500 where player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
+            await player.send("next")
+            XCTAssertEqual(player.state?.currentTrackId, expected)
+        }
+        for _ in 0..<500 where player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
+        var completed = false
+        let start = ProcessInfo.processInfo.systemUptime
+        let fourth = Task { await player.send("next"); completed = true }
+        await transport.releaseNext() // Commit only 1 -> 2. The next acknowledgement remains held.
+        for _ in 0..<500 where !completed || player.navigationPending || !player.isPlaying { try await Task.sleep(for: .milliseconds(10)) }
+        let elapsed = ProcessInfo.processInfo.systemUptime-start
+        let commitsBeforeRelease = await transport.nextCommits
+        XCTAssertTrue(completed, "Replenished, authorized audio must not wait for the other two acknowledgements")
+        XCTAssertFalse(player.navigationPending, "Measure real media progress, not just the command returning")
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(commitsBeforeRelease, 1)
+        XCTAssertEqual(player.state?.currentTrackId, 5)
+        print("NEXT_LATENCY refreshed-window actual_progress_ms=\(Int(elapsed*1000)) previous_acknowledgements_remaining=2")
+        await transport.allowTransitionsImmediately(); await transport.releaseNext()
+        await fourth.value
+        for _ in 0..<500 { if await transport.nextCommits == 4 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        let commits = await transport.nextCommits
+        XCTAssertEqual(commits, 4)
+        XCTAssertEqual(player.state?.currentTrackId, 5, "Acknowledgements must preserve the audible queue order")
+    }
+
+    @MainActor func testPauseCancelsSkipWaitingForCachedAcknowledgements() async throws {
+        let (player, transport) = try await fixture(cachedNext: true, windowSize: 4, queueSize: 7)
+        defer { player.stop() }
+        for _ in 0..<3 {
+            for _ in 0..<500 where player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
+            await player.send("next")
+        }
+        for _ in 0..<500 where player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
+        var skipped = false
+        let skip = Task { await player.send("next"); skipped = true }
+        await Task.yield()
+        let pause = Task { await player.send("pause") }
+        for _ in 0..<200 where !skipped { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(skipped, "Pause must cancel a waiting manual skip without waiting for network acknowledgements")
+        XCTAssertEqual(player.player.rate, 0)
+        await transport.allowTransitionsImmediately(); await transport.releaseNext()
+        await skip.value; await pause.value
+        XCTAssertEqual(player.state?.currentTrackId, 4)
+        XCTAssertEqual(player.player.rate, 0)
+        XCTAssertFalse(player.showsPauseControl)
+    }
+    @MainActor func testChangedAcknowledgedTailStopsBeforeSendingStaleTransitions() async throws {
+        let (player, transport) = try await fixture(cachedNext: true, windowSize: 4)
+        defer { player.stop() }
+        for expected in 2...4 {
+            for _ in 0..<500 where player.navigationPending { try await Task.sleep(for:.milliseconds(10)) }
+            await player.send("next")
+            XCTAssertEqual(player.state?.currentTrackId,expected)
+        }
+        await transport.removeUpcomingOnAcknowledgement()
+        await transport.releaseNext()
+        for _ in 0..<200 where player.message != "The queue changed. Tap Play to continue." { try await Task.sleep(for:.milliseconds(10)) }
+        let requests = await transport.nextRequests
+        XCTAssertEqual(requests,1,"A changed queue must reject the remaining local journal before another command")
+        XCTAssertEqual(player.message,"The queue changed. Tap Play to continue.")
+        XCTAssertEqual(player.player.rate,0)
+        XCTAssertFalse(player.showsPauseControl)
+        await transport.releaseNext()
+    }
+
+    @MainActor func testUncachedStartupPreemptsReadAheadUntilAudioAdvances() async throws {
+        let probe = StartupCacheProbe()
+        let audio = try UITestAudiobookAudio.make()
+        defer { try? FileManager.default.removeItem(at: audio) }
+        var installedUncached = false
+        var pausedAtInstall = false
+        var cache: AudioCache?
+        let (player, transport) = try await fixture(cachedNext: true, windowSize: 4, downloadProbe: probe, makePlayerItem: { url in
+            if !url.isFileURL { installedUncached = true; pausedAtInstall = cache?.startupPending == true }
+            return AVPlayerItem(url: audio)
+        })
+        cache = player.cache
+        defer { player.stop() }
+        let manifest = try await player.api.manifest(deviceId: player.deviceId, epoch: 1, profile: "original")
+        await probe.holdDownloads()
+        player.cache.invalidate(3)
+        let background = Task { await player.cache.fill(manifest, api: player.api) }
+        for _ in 0..<200 { if await probe.waiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        let waiting = await probe.waiting
+        XCTAssertTrue(waiting)
+        player.cache.invalidate(2)
+        for item in player.player.items().dropFirst() { player.player.remove(item) }
+        await transport.allowTransitionsImmediately()
+        let start = ProcessInfo.processInfo.systemUptime
+        await player.send("next")
+        for _ in 0..<500 where !installedUncached || !player.isPlaying || player.navigationPending { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(installedUncached)
+        XCTAssertTrue(pausedAtInstall, "A full-file cache download must not compete with the uncached item startup")
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertFalse(player.navigationPending)
+        let cancellations = await probe.cancellations
+        XCTAssertGreaterThan(cancellations, 0)
+        print("NEXT_LATENCY uncached actual_progress_ms=\(Int((ProcessInfo.processInfo.systemUptime-start)*1000)) background_cancelled=\(cancellations)")
+        await probe.releaseDownloads()
+        await background.value
     }
 
     @MainActor func testRejectedCachedTransitionStopsAndDoesNotReplayOldTrack() async throws {
@@ -858,6 +1038,10 @@ actor CallResumeTransitionTransport: HTTPTransport {
     private var size = 0
     private var current = 1
     private var windowSize = 2
+    private var rollingWindow = false
+    private var removeAcknowledgedUpcoming = false
+    func useRollingWindow() { rollingWindow = true }
+    func removeUpcomingOnAcknowledgement() { removeAcknowledgedUpcoming = true }
     private var immediateTransitions = false
     private var rejectedTransitions = false
     func setWindowSize(_ value: Int) { windowSize = value }
@@ -912,7 +1096,7 @@ actor CallResumeTransitionTransport: HTTPTransport {
             "server_time": revision, "queue_revision": revision, "owner_device_id": owner,
             "owner_epoch": 1, "intent": revision, "playing": playing, "observed": "playing",
             "seek_target_seconds": 0, "seek_intent": current, "play_id": current,
-            "upcoming_track_ids": current < windowSize ? Array((current + 1)...windowSize) : []
+            "upcoming_track_ids": removeAcknowledgedUpcoming && nextCommits > 0 ? [] : current < windowSize ? Array((current + 1)...min(windowSize, rollingWindow ? current + 3 : windowSize)) : []
         ] as [String: Any]))
     }
     func send(_ request: URLRequest) async throws -> HTTPResult {
@@ -972,7 +1156,7 @@ actor CallResumeTransitionTransport: HTTPTransport {
             if failingMedia { throw URLError(.notConnectedToInternet) }
             return HTTPResult(status: 200, data: try JSONSerialization.data(withJSONObject: [
                 "owner_epoch": 1, "queue_revision": revision, "retry_after_seconds": 1,
-                "items": Array(1...windowSize).map { ["track_id": $0, "profile": "original", "state": "ready",
+                "items": Array((rollingWindow ? current : 1)...min(windowSize, rollingWindow ? current + 3 : windowSize)).map { ["track_id": $0, "profile": "original", "state": "ready",
                     "url": "/api/v1/stream/\($0)", "mime_type": "audio/wav", "size_bytes": size, "source_revision": "fixture"] as [String: Any] }
             ] as [String: Any]))
         }
@@ -1060,5 +1244,24 @@ private actor CacheDownloadProbe {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try Data([1, 2, 3, 4]).write(to: file)
         return (file, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+actor StartupCacheProbe {
+    private var held = false
+    private(set) var waiting = false
+    private(set) var cancellations = 0
+    func holdDownloads() { held = true }
+    func releaseDownloads() { held = false }
+    func download(_ url: URL, bytes: Data) async throws -> (URL, URLResponse) {
+        if held {
+            waiting = true
+            do { while held { try await Task.sleep(for: .milliseconds(10)) } }
+            catch { cancellations += 1; waiting = false; throw error }
+            waiting = false
+        }
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        try bytes.write(to: target)
+        return (target, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }

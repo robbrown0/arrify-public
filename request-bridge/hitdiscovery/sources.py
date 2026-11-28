@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date
 from .matching import key
 from .store import now
@@ -82,12 +83,23 @@ def discover(http,store,historical_path,contact="",wikimedia=False):
             merged[k]['evidence'].extend(e for e in t['evidence'] if (e['source'],e['date']) not in seen)
     return list(merged.values()),health
 
+def release_year(value):
+    """Read a calendar-valid MusicBrainz year, month or date; unknown stays unknown."""
+    if not isinstance(value,str) or not re.fullmatch(r'[0-9]{4}(?:-[0-9]{2}(?:-[0-9]{2})?)?',value):
+        return None
+    parts=[int(part) for part in value.split('-')]
+    try:
+        date(parts[0],parts[1] if len(parts)>1 else 1,parts[2] if len(parts)>2 else 1)
+    except ValueError:
+        return None
+    return parts[0]
+
 def score(t):
     evidence=t['evidence']; today=date.today()
     best=max((100*(1-(min(int(e['rank']),100)-1)/100) * (1 if e['kind']=='year-end' else .9 if e['kind']=='weekly' else .75)*e.get('weight',1) for e in evidence if not e.get('unranked') and e.get('rank') is not None), default=0)
     independent=len({e.get('independent_family',e['source']) for e in evidence})
     weeks=len({e['date'][:10] for e in evidence})
-    year=int(t.get('release_date','2015')[:4])
+    year=release_year(t.get('release_date'))
     # Recency boosts, never gates out older eligible hits. Sales and streaming from Apple are one family.
-    recency=max(0,10-2*(today.year-year))
+    recency=max(0,10-2*(today.year-year)) if year is not None and year<=today.year else 0
     return round(best+min(15,5*(independent-1))+min(10,2*(weeks-1))+recency,2)

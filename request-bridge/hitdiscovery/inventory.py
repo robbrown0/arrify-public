@@ -49,24 +49,38 @@ def scan(lidarr,store,roots):
     from pathlib import Path
     metrics=Path(store.db.execute('PRAGMA database_list').fetchone()[2]).parent/'inventory-memory.json'
     beat(metrics,'inventory-start')
-    artists=lidarr.get('artist'); albums=lidarr.get('album'); tracks=[]
-    track_count=file_count=0
-    # Spool complete audit snapshots to disk. Keep only compact owned records
-    # in memory for matching; never retain all missing catalog tracks.
+    artists=lidarr.get('artist'); albums=[]; tracks=[]
+    track_count=file_count=track_albums=0
+    # Preserve the album/file catalog, but read tracks only for albums with
+    # files. An artist can have hundreds of thousands of missing tracks; an
+    # artist-wide track response can exhaust Lidarr before we can spool it.
     with tempfile.TemporaryFile(mode='w+t', dir=metrics.parent) as track_rows, tempfile.TemporaryFile(mode='w+t', dir=metrics.parent) as file_rows:
-        for artist in artists:
-            at=lidarr.get('track',artistId=artist['id'])
-            track_count+=len(at)
-            for t in at:
-                row={**t,'artist':artist['artistName'],'owned':bool(t.get('hasFile') or t.get('trackFileId')),
-                     'recording_ids':[t.get('foreignRecordingId')] if t.get('foreignRecordingId') else [],'isrcs':t.get('isrcs',[])}
-                track_rows.write(json.dumps(row)+'\n')
-                if row['owned']:
-                    tracks.append({k:row[k] for k in ('id','artistId','artist','title','album','owned','recording_ids','isrcs') if k in row})
-            del at
+        for index,artist in enumerate(artists,1):
+            artist_albums=lidarr.get('album',artistId=artist['id'])
+            albums.extend(artist_albums)
             af=lidarr.get('trackfile',artistId=artist['id']);file_count+=len(af)
+            # Use live file references as well as album statistics: the latter
+            # can briefly lag a completed import. Invalid identities abort
+            # before publishing a replacement ownership snapshot.
+            if any(type(f.get('albumId')) is not int or f['albumId']<=0 for f in af):
+                raise ValueError('Lidarr track file has no valid album identity')
+            album_ids={f['albumId'] for f in af}
+            album_ids.update(a['id'] for a in artist_albums if a.get('statistics',{}).get('trackFileCount',0)>0)
             for row in af:file_rows.write(json.dumps(row)+'\n')
             del af
+            for album_id in sorted(album_ids):
+                at=lidarr.get('track',albumId=album_id)
+                track_count+=len(at);track_albums+=1
+                for t in at:
+                    row={**t,'artist':artist['artistName'],'owned':bool(t.get('hasFile') or t.get('trackFileId')),
+                         'recording_ids':[t.get('foreignRecordingId')] if t.get('foreignRecordingId') else [],'isrcs':t.get('isrcs',[])}
+                    track_rows.write(json.dumps(row)+'\n')
+                    if row['owned']:
+                        tracks.append({k:row[k] for k in ('id','artistId','artist','title','album','owned','recording_ids','isrcs') if k in row})
+                del at
+            if index%25==0 or index==len(artists):
+                beat(metrics,'inventory-api',artists_scanned=index,artists_total=len(artists),
+                     catalog_tracks=track_count,track_files=file_count)
         for kind,rows in [('artist',artists),('album',albums)]:store.inventory(kind,rows)
         for kind,stream in [('track',track_rows),('trackfile',file_rows)]:
             stream.seek(0);store.inventory(kind,(json.loads(line) for line in stream))
@@ -80,6 +94,7 @@ def scan(lidarr,store,roots):
     summary={'lidarr_artists_cataloged':len(artists),'lidarr_artists_with_files':len({t['artistId'] for t in owned}),
              'lidarr_albums_cataloged':len(albums),'lidarr_albums_with_files':len(downloaded),
              'lidarr_owned_tracks':len(owned),'lidarr_track_files':file_count,'lidarr_catalog_tracks':track_count,
+             'lidarr_track_scope':'albums-with-files','lidarr_track_albums_scanned':track_albums,
              'monitored_empty_albums':sum(a['monitored'] and not a.get('statistics',{}).get('trackFileCount',0) for a in albums),
              'release_years':dict(sorted(Counter(a.get('releaseDate','unknown')[:4] for a in downloaded).items())),
              'genres':dict(Counter(g for a in downloaded for g in a.get('genres',[])).most_common()),

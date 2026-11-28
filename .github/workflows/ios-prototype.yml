@@ -38,6 +38,7 @@ jobs:
       fail-fast: false
       matrix:
         device: ${{ fromJSON((inputs.ipad_only || inputs.volume_alignment_only) && '["iPad"]' || '["iPhone","iPad"]') }}
+        suite: ${{ fromJSON((inputs.volume_alignment_only || inputs.navigation_refresh_only || inputs.read_recovery_only || inputs.audiobooks_only) && '["targeted"]' || '["app","ui"]') }}
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -49,22 +50,24 @@ jobs:
           xcodebuild -version
           swift --version
       - name: Test API contracts
+        if: matrix.suite != 'ui'
         working-directory: ios
         run: swift test
       - name: Build for physical devices without signing
-        if: matrix.device == 'iPhone' || inputs.ipad_only || inputs.volume_alignment_only
+        if: matrix.suite != 'ui' && (matrix.device == 'iPhone' || inputs.ipad_only || inputs.volume_alignment_only)
         run: xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build/device CODE_SIGNING_ALLOWED=NO build
       - name: Verify archive capability preservation
-        if: matrix.device == 'iPhone' || inputs.ipad_only || inputs.volume_alignment_only
+        if: matrix.suite != 'ui' && (matrix.device == 'iPhone' || inputs.ipad_only || inputs.volume_alignment_only)
         run: bash ios/tools/prepare_entitlements.sh build/device/Build/Products/Release-iphoneos/Arrify.app ios/App/Arrify.entitlements
       - name: Qualify playback app regressions
-        if: ${{ !inputs.volume_alignment_only && !inputs.navigation_refresh_only && !inputs.read_recovery_only && !inputs.audiobooks_only }}
+        if: matrix.suite == 'app'
         env:
           DEVICE_FAMILY: ${{ matrix.device }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
           xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath "build/${DEVICE_FAMILY}AppTests.xcresult" -only-testing:ArrifyAppTests CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test
       - name: Qualify app and UI regressions
+        if: matrix.suite != 'app'
         env:
           DEVICE_FAMILY: ${{ matrix.device }}
           VOLUME_ONLY: ${{ inputs.volume_alignment_only }}
@@ -75,10 +78,10 @@ jobs:
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
           ONLY_TESTS=(-only-testing:ArrifyUITests)
           if [ "$AUDIOBOOKS_ONLY" = "true" ]; then
-            ONLY_TESTS=(-only-testing:ArrifyAppTests/AudiobookDownloadTests -only-testing:ArrifyAppTests/AudiobookSessionTests -only-testing:ArrifyAppTests/PlaybackTransitionTests/testAudiobookHandoffPreservesSystemMetadataAndCachedMusicSuccessors -only-testing:ArrifyUITests/LaunchTests/testAudiobookShelfPlayerAndOptionalSettings -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testAirPlayMetadataEmbedsArtworkAndReplacesOldCover -only-testing:ArrifyUITests/LaunchTests/testArtistsSelectDistinctItemsAndVisiblePageRetry)
+            ONLY_TESTS=(-only-testing:ArrifyAppTests/AudiobookDownloadTests -only-testing:ArrifyAppTests/AudiobookSessionTests -only-testing:ArrifyAppTests/PlaybackTransitionTests/testAudiobookHandoffPreservesSystemMetadataAndCachedMusicSuccessors -only-testing:ArrifyAppTests/PlaybackTransitionTests/testReadAheadKeepsVerifiedLocalSuccessors -only-testing:ArrifyUITests/LaunchTests/testAudiobookShelfPlayerAndOptionalSettings -only-testing:ArrifyUITests/LaunchTests/testAudiobookAuthorSeriesNavigationAndBookNumbers -only-testing:ArrifyUITests/LaunchTests/testAudiobookChapterJumpHighlightsPlayingChapterAndCanMarkUnread -only-testing:ArrifyUITests/LaunchTests/testAudiobookDownloadPiePausesAndResumesWithoutPausingPlayback -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testAirPlayMetadataEmbedsArtworkAndReplacesOldCover -only-testing:ArrifyUITests/LaunchTests/testArtistsSelectDistinctItemsAndVisiblePageRetry)
           fi
           if [ "$VOLUME_ONLY" = "true" ]; then
-            ONLY_TESTS=(-only-testing:ArrifyAppTests/NowPlayingArtworkTests/testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testTabletVolumeUsesNativeHeightCenteredInControlRow -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible)
+            ONLY_TESTS=(-only-testing:ArrifyAppTests/VolumeControlTests -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testNativeVolumeGeometryFollowsContainerWithoutTrackOffsets -only-testing:ArrifyAppTests/NowPlayingArtworkTests/testTabletVolumeUsesNativeHeightCenteredInControlRow -only-testing:ArrifyUITests/LaunchTests/testTabletSearchKeepsHeaderAndPlayerVisible -only-testing:ArrifyUITests/LaunchTests/testTabletVolumeVisibleSliderStaysCenteredAfterLateLayoutAndRotation)
           fi
           if [ "$RECOVERY_ONLY" = "true" ]; then
             ONLY_TESTS=(-only-testing:ArrifyAppTests -only-testing:ArrifyUITests/LaunchTests/testHomePullRefreshRecoversSavedSongsWithoutVisitingLikedSongs -only-testing:ArrifyUITests/LaunchTests/testHomeRecoversBriefFailureAndPlayerCanRetrySavedSongs -only-testing:ArrifyUITests/LaunchTests/testAudiobookShelfRecoversAndKeepsKnownBooksDuringOutage)
@@ -88,7 +91,7 @@ jobs:
           fi
           xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/simulator -resultBundlePath "build/${DEVICE_FAMILY}Tests.xcresult" "${ONLY_TESTS[@]}" CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test
       - name: Export test screenshots
-        if: always()
+        if: always() && matrix.suite != 'app'
         env:
           DEVICE_FAMILY: ${{ matrix.device }}
         run: |
@@ -99,7 +102,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: arrify-prototype-${{ github.sha }}-${{ matrix.device }}
+          name: arrify-prototype-${{ github.sha }}-${{ matrix.device }}-${{ matrix.suite }}
           path: |
             build/screenshots
             build/*Tests.xcresult

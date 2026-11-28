@@ -2,7 +2,7 @@
 from collections import Counter,defaultdict
 from datetime import date
 from .matching import key
-from .sources import score
+from .sources import release_year,score
 
 def chart_rank(song):
     return min((int(e['rank']) for e in song['evidence'] if e.get('kind')=='year-end' and str(e.get('rank','')).isdigit() and not e.get('unranked')),default=101)
@@ -11,8 +11,8 @@ def core_hit(song,core_rank=50):
     return chart_rank(song)<=core_rank or any(e.get('kind')=='current' and e.get('chart_scope','national')=='national' and not e.get('unranked') and str(e.get('rank','')).isdigit() and 1<=int(e['rank'])<=20 for e in song['evidence'])
 
 def candidate_year(song):
-    value=song.get('release_date') or song.get('release_date_hint') or ''
-    if value[:4].isdigit(): return int(value[:4])
+    year=release_year(song.get('release_date')) or release_year(song.get('release_date_hint'))
+    if year is not None: return year
     years=[int(e['chart_year']) for e in song['evidence'] if e.get('chart_year')]
     return min(years,default=date.today().year)
 
@@ -24,7 +24,7 @@ def order_candidates(songs,core_rank=50):
         if year<2015 or year>date.today().year: deferred.append(song)
         else: buckets[year].append(song)
     for bucket in buckets.values():
-        bucket.sort(key=lambda s:(not core_hit(s,core_rank),chart_rank(s),-score(s|{'release_date':s.get('release_date_hint') or '2015'})))
+        bucket.sort(key=lambda s:(not core_hit(s,core_rank),chart_rank(s),-score(s|{'release_date':s.get('release_date_hint')})))
     result=[]
     while buckets:
         for year in sorted(list(buckets)):

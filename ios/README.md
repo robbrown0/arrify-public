@@ -306,7 +306,7 @@ Real-device checks still required: home Wi-Fi → cellular and back during playb
 
 Remote Live Activity state now includes a bounded inline JPEG thumbnail, rendered in the card instead of a permanent music-note icon. The app prepares the initial cover; server push updates carry the current cover when the app is suspended. No widget network request or public artwork URL is needed. Encoded covers stay below 2 KB and the server drops artwork if metadata would exceed its reserved payload budget. Missing artwork leaves a placeholder and never blocks transport controls. This is a cover inside the remote-control Live Activity, not Apple's full-screen local Now Playing presentation.
 
-The native `MPVolumeView` fills a 44-point container using UIKit autoresizing. Arrify does not subclass it, reposition its track, inspect its internal slider, or write volume values. MediaPlayer owns drawing, touch geometry, volume values, and receiver synchronization. Physical AirPlay volume behavior and Lock Screen APNs artwork must be validated in TestFlight.
+The native `MPVolumeView` fills a 44-point container using UIKit autoresizing. Arrify does not subclass it or write volume values. While the iPad mini-player is attached and active, a passive main-run-loop observer reads the visible slider geometry after layout work, including late MediaPlayer child insertion and replacement. It translates the whole native view only when alignment changes, moving drawing and hit testing together. Detaching or suspending removes the observer; it adds no timer or idle wakeups. MediaPlayer owns volume and receiver synchronization. Simulator coverage uses an explicitly enabled UIKit slider stand-in because the simulator has no receiver-backed control; physical AirPlay behavior still needs device validation.
 
 References: [Live Activity presentation and data limits](https://developer.apple.com/documentation/activitykit/displaying-live-data-with-live-activities), [native volume slider layout](https://developer.apple.com/documentation/mediaplayer/mpvolumeview/volumesliderrect(forbounds:)).
 
@@ -409,3 +409,23 @@ tests cannot validate receiver-volume behavior.
 iPad portrait artwork uses the available height within 48-point side margins instead
 of a 68%-of-screen-width cap. Controls retain their measured spacing and bottom
 padding; the layout still scrolls when larger text needs more room.
+
+### Receiver volume lifecycle
+
+The iPhone full-screen player and iPad mini/full-screen players refresh their native
+volume view after its first window attachment, audio-route changes, media-service
+resets, returning to the app, and reattaching a previously displayed control.
+The initial control waits for this refresh before accepting a first touch.
+Route notifications are coalesced;
+a pending refresh waits until an active drag finishes. Normal playback updates and
+layout changes preserve control identity. Opening or refreshing a control never
+copies a previous slider value, writes a volume, or changes the audio route.
+
+This removes an unsupported MPVolumeView subclass and addresses stale control
+lifecycle risks for both individual AirPlay receivers and groups. It is not a
+Sonos Connect integration: AirPlay's selected-output level is supplied by iOS,
+not a raw Sonos room percentage. A simulator cannot validate physical receiver
+levels, external volume-button changes, or group membership. Before calling the
+reported Sonos issue resolved, compare the actual control and audible response
+on both iPhone and iPad with one Sonos receiver and then a group; repeat after
+Control Center volume changes, route changes, foregrounding and reopening.

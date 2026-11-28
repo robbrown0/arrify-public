@@ -110,6 +110,12 @@ struct NowPlayingView: View {
                 .shadow(color: .black.opacity(0.25), radius: 20, y: 12)
         }.buttonStyle(.plain).accessibilityLabel("Show artwork")
     }
+    private var remainingTime: String {
+        guard let duration = playback.timeline.duration else { return "–:––" }
+        let seconds = seeking ? max(0, duration - seekPosition).rounded(.up) : playback.timeline.remainingDisplaySeconds
+        guard let seconds else { return "–:––" }
+        return "−" + time(seconds)
+    }
     private var controls: some View {
         VStack(spacing: 18) {
             HStack {
@@ -125,14 +131,14 @@ struct NowPlayingView: View {
             }
             if let transition = playback.transitionMessage { Text(transition).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("playbackTransition") }
             VStack(spacing: 4) {
-                Slider(value: Binding(get: { seeking ? seekPosition : min(playback.position, max(1, playback.duration)) }, set: { seekPosition = $0 }), in: 0...max(1, playback.duration)) { editing in
+                Slider(value: Binding(get: { seeking ? seekPosition : min(playback.position, max(1, playback.timeline.duration ?? 0)) }, set: { seekPosition = $0 }), in: 0...max(1, playback.timeline.duration ?? 0)) { editing in
                     if editing { seekPosition = playback.position }
                     seeking = editing
                     if !editing { Task { await playback.send("seek", seek: seekPosition) } }
-                }.disabled(playback.duration <= 0 || !playback.ownsOutput).accessibilityLabel("Playback position")
+                }.disabled(playback.timeline.duration == nil || !playback.ownsOutput).accessibilityLabel("Playback position")
                 HStack {
                     Text(time(seeking ? seekPosition : playback.position)); Spacer()
-                    Text("−" + time(max(0, playback.duration - (seeking ? seekPosition : playback.position))))
+                    Text(remainingTime)
                 }.font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.55))
             }
             HStack {
@@ -360,82 +366,6 @@ struct AirPlayPicker: UIViewRepresentable {
         uiView.accessibilityHint = enabled ? nil : "Play on this device to choose an AirPlay speaker"
         if enabled { uiView.accessibilityTraits.remove(.notEnabled) }
         else { uiView.accessibilityTraits.insert(.notEnabled) }
-    }
-}
-// Keep the native control's identity stable during route-name and playback updates.
-// MediaPlayer owns receiver-volume synchronization; never seed it from the phone's
-// outputVolume or write a remembered value when this view appears.
-// Observe native layout without altering the system slider's frame or value.
-final class LayoutReportingVolumeView: MPVolumeView {
-    var didLayout: (() -> Void)?
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        didLayout?()
-    }
-}
-
-final class VolumeControlContainer: UIView {
-    let volumeView: MPVolumeView
-    private let centersNativeHeight: Bool
-    init(volumeView: MPVolumeView, centersNativeHeight: Bool = false) {
-        self.volumeView = volumeView
-        self.centersNativeHeight = centersNativeHeight
-        super.init(frame: .zero)
-        volumeView.frame = bounds
-        volumeView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(volumeView)
-        if centersNativeHeight, let reportingView = volumeView as? LayoutReportingVolumeView {
-            reportingView.didLayout = { [weak self] in self?.alignVisibleTrack() }
-        }
-    }
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        guard centersNativeHeight else { return }
-        volumeView.transform = .identity
-        volumeView.frame = bounds
-        volumeView.layoutIfNeeded()
-        alignVisibleTrack()
-    }
-    // MPVolumeView's drawing-rectangle API does not necessarily describe the
-    // laid-out UISlider on current iPadOS. Read public UISlider geometry only;
-    // translate the entire MPVolumeView so drawing and hit testing move together.
-    private func alignVisibleTrack() {
-        guard centersNativeHeight else { return }
-        func visibleSlider(in view: UIView) -> UISlider? {
-            for child in view.subviews where !child.isHidden && child.alpha > 0 {
-                if let slider = child as? UISlider { return slider }
-                if let slider = visibleSlider(in: child) { return slider }
-            }
-            return nil
-        }
-        guard let slider = visibleSlider(in: volumeView) else {
-            volumeView.transform = .identity
-            return
-        }
-        let track = slider.trackRect(forBounds: slider.bounds)
-        guard !track.isEmpty else { return }
-        let center = slider.convert(CGPoint(x: track.midX, y: track.midY), to: volumeView)
-        guard center.y.isFinite else { return }
-        // Measure in untransformed native coordinates: repeated layouts cannot drift.
-        volumeView.transform = CGAffineTransform(translationX: 0, y: bounds.midY - center.y)
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-}
-
-struct SystemVolumeSlider: UIViewRepresentable {
-    var centersNativeHeight = false
-    var onCreate: (MPVolumeView) -> Void = { _ in }
-    func makeUIView(context: Context) -> VolumeControlContainer {
-        let view: MPVolumeView = centersNativeHeight
-            ? LayoutReportingVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
-            : MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
-        view.showsRouteButton = false; view.tintColor = .white
-        onCreate(view)
-        return VolumeControlContainer(volumeView: view, centersNativeHeight: centersNativeHeight)
-    }
-    func updateUIView(_ uiView: VolumeControlContainer, context: Context) {}
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: VolumeControlContainer, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? 300, height: proposal.height ?? 44)
     }
 }
 

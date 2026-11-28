@@ -24,6 +24,7 @@ jobs:
       fail-fast: false
       matrix:
         device: [iPhone, iPad]
+        suite: [app, ui]
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -31,22 +32,25 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Qualify API and playback policy
+        if: matrix.suite == 'app'
         working-directory: ios
         run: swift test
       - name: Qualify all playback app regressions
+        if: matrix.suite == 'app'
         env:
           DEVICE_FAMILY: ${{ matrix.device }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
           xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath build/TestFlightAppTests.xcresult -only-testing:ArrifyAppTests CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test
       - name: Qualify all UI regressions
+        if: matrix.suite == 'ui'
         env:
           DEVICE_FAMILY: ${{ matrix.device }}
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(next(x["udid"] for group in d["devices"].values() for x in group if x["name"].startswith(os.environ["DEVICE_FAMILY"])))')
           xcodebuild -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -resultBundlePath build/TestFlightQualification.xcresult -only-testing:ArrifyUITests CODE_SIGNING_ALLOWED=NO -test-timeouts-enabled YES -default-test-execution-time-allowance 300 -maximum-test-execution-time-allowance 600 test
       - name: Export screenshots
-        if: always()
+        if: always() && matrix.suite == 'ui'
         run: |
           if [ -d build/TestFlightQualification.xcresult ]; then
             xcrun xcresulttool export attachments --path build/TestFlightQualification.xcresult --output-path build/screenshots
@@ -55,7 +59,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: testflight-qualification-${{ inputs.build_number }}-${{ matrix.device }}-${{ github.run_attempt }}
+          name: testflight-qualification-${{ inputs.build_number }}-${{ matrix.device }}-${{ matrix.suite }}-${{ github.run_attempt }}
           path: |
             build/TestFlightQualification.xcresult
             build/TestFlightAppTests.xcresult

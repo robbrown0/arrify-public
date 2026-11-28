@@ -582,13 +582,20 @@ extension NowPlayingArtworkTests {
             XCTAssertEqual(volume.frame, container.bounds)
         }
     }
-    @MainActor func testTabletVolumeUsesNativeHeightCenteredInControlRow() {
+    @MainActor func testTabletVolumeUsesNativeHeightCenteredInControlRow() async throws {
         // A real UISlider supplies asymmetric geometry even when the simulator
         // omits MPVolumeView's system slider. This is a layout regression test,
         // not a claim of physical-device visual verification.
-        let volume = LayoutReportingVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
-        let container = VolumeControlContainer(volumeView: volume, centersNativeHeight: true)
-        container.frame = CGRect(x: 0, y: 0, width: 130, height: 44)
+        let volume = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
+        let container = VolumeControlContainer(volumeView: volume, centersNativeHeight: true,
+                                               notifications: NotificationCenter(), makeVolumeView: { volume })
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = UIViewController()
+        window.isHidden = false
+        window.rootViewController?.view.addSubview(container)
+        defer { container.removeFromSuperview(); window.isHidden = true }
+        container.frame = CGRect(x: 20, y: 100, width: 130, height: 44)
+        container.refreshIfIdle()
         container.layoutIfNeeded()
         for child in volume.subviews { child.isHidden = true }
         let slider = UISlider(frame: CGRect(x: 0, y: -8, width: 130, height: 30))
@@ -597,16 +604,21 @@ extension NowPlayingArtworkTests {
             container.frame.size.width = width
             container.setNeedsLayout()
             container.layoutIfNeeded()
+            // Let any initial deferred parent alignment finish BEFORE the
+            // system slider moves again. A real MediaPlayer child can relayout
+            // later without scheduling another parent layout.
+            try await Task.sleep(for: .milliseconds(60))
             for y in [-8.0, 0.0, 6.0] {
                 slider.frame = CGRect(x: 0, y: y, width: width, height: 30)
                 let originalFrame = slider.frame
-                // Native layout may change after the parent has already laid out.
-                volume.didLayout?()
+                // Deliberately do not invalidate/layout the parent here. The
+                // previous test did, hiding the build47 late-layout regression.
+                try await Task.sleep(for: .milliseconds(60))
                 let track = slider.trackRect(forBounds: slider.bounds)
                 XCTAssertEqual(slider.convert(track, to: container).midY, container.bounds.midY, accuracy: 0.5)
                 XCTAssertEqual(slider.frame, originalFrame, "Never reposition the native slider itself")
                 let settledTransform = volume.transform
-                volume.didLayout?()
+                container.setNeedsLayout(); container.layoutIfNeeded()
                 XCTAssertEqual(volume.transform, settledTransform, "Repeated layout must not accumulate an offset")
                 let point = CGPoint(x: track.midX, y: track.midY)
                 let displayedPoint = slider.convert(point, to: container)

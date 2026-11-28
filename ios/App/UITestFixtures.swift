@@ -21,6 +21,8 @@ actor UITestTransport: HTTPTransport {
     private var bookDevice = ""
     private var bookEpoch = 1
     private var bookMarks: [[String:Any]] = []
+    private var bookReadCount = 0
+    private var oldBookRead: CheckedContinuation<Void,Never>?
     private var owner: String? = (ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1") ? "other-device" : nil
     private var playing = ProcessInfo.processInfo.environment["ARRIFY_UI_ROW_PLAYBACK"] == "1" || ProcessInfo.processInfo.environment["ARRIFY_UI_REMOTE_OWNER"] == "1"
     private var currentTrack = ProcessInfo.processInfo.environment["ARRIFY_UI_LONG_LIST"] == "1" ? 75 : 1
@@ -48,16 +50,26 @@ actor UITestTransport: HTTPTransport {
             let body = (try? JSONSerialization.jsonObject(with:request.httpBody ?? Data())) as? [String:Any] ?? [:]
             if path.hasSuffix("/preferences"), request.httpMethod == "POST" { bookPreferences.merge(body) { _,new in new } }
             if path.hasSuffix("/play") { bookDevice = body["device_id"] as? String ?? ""; owner = bookDevice; playing = false; bookEpoch += 1 }
-            if path.hasSuffix("/progress") { bookPosition = body["position"] as? Double ?? bookPosition }
+            if path.hasSuffix("/progress") || path.hasSuffix("/offline-progress") { bookPosition = body["position"] as? Double ?? bookPosition }
+            if path.hasSuffix("/offline-progress") { oldBookRead?.resume(); oldBookRead = nil }
             if path.hasSuffix("/bookmark") { bookMarks.append(["time":body["position"] ?? bookPosition,"title":body["title"] ?? "Bookmark"]) }
-            let book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Good Story","author":"A Writer","narrator":"A Reader","series":"","description":"A story worth listening to.","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":120,"progress":["currentTime":bookPosition,"lastUpdate":0,"isFinished":false],
+            let book: [String:Any] = ["id":"book-one","library_id":"books","title":"A Good Story","author":"A Writer","narrator":"A Reader","series":"Stories","authors":[["id":"writer-one","name":"A Writer"]],"series_entries":[["id":"series-one","name":"Stories","sequence":"2.5"]],"published_year":"2024","description":"A story worth listening to.","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":120,"progress":["currentTime":bookPosition,"lastUpdate":0,"isFinished":false],
                 "parts":[["index":0,"start":0,"duration":120,"size_bytes":1920044,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+String(repeating:"a",count:43)+"/0"]],
                 "chapters":[["title":"Beginning","start":0,"end":60],["title":"The next chapter","start":60,"end":120]],"bookmarks":bookMarks]
             let result: [String:Any]
             if path.hasSuffix("/status") { result = ["enabled":true,"preferences":bookPreferences] }
             else if path.hasSuffix("/library") { result = ["libraries":[["id":"books","name":"Books"]],"library_id":"books","items":[book],"total":1,"next_page":NSNull()] }
+            else if path.hasSuffix("/authors") { result = ["items":[["id":"writer-one","name":"A Writer"]],"library_id":"books","total":1] }
+            else if path.hasSuffix("/series") { result = ["items":[["id":"series-one","name":"Stories"]],"library_id":"books","total":1] }
             else if path.hasSuffix("/continue") { result = ["items":[book]] }
-            else if path.contains("/book/") { result = book }
+            else if path.contains("/book/") {
+                bookReadCount += 1
+                if bookReadCount == 1, ProcessInfo.processInfo.environment["ARRIFY_UI_UNREAD_READ_RACE"] == "1" {
+                    await withCheckedContinuation { oldBookRead = $0 }
+                    try? await Task.sleep(for:.milliseconds(500))
+                }
+                result = book
+            }
             else if path.hasSuffix("/play") || path.hasSuffix("/download") { result = ["book":book,"position":bookPosition,"lease":String(repeating:"a",count:43),"revision":1,"queue":[],"preferences":bookPreferences,"music_epoch":bookEpoch,"music_intent":1] }
             else if path.hasSuffix("/state") { result = ["book_id":"book-one","lease":String(repeating:"a",count:43),"device_id":bookDevice,"active":true,"position":bookPosition,"revision":1,"queue":[],"preferences":bookPreferences] }
             else if path.hasSuffix("/preferences") { result = bookPreferences }
@@ -217,15 +229,40 @@ actor UITestTransport: HTTPTransport {
     }
 }
 @MainActor enum UITestAudiobookAudio {
-    static func make(seconds: Double = 120) throws -> URL {
+    static func data(seconds: Double = 120) -> Data {
         precondition(seconds.isFinite && seconds > 0 && seconds <= 600)
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
-        let format = AVAudioFormat(standardFormatWithSampleRate:8000, channels:1)!
-        let buffer = AVAudioPCMBuffer(pcmFormat:format, frameCapacity:AVAudioFrameCount(8000*seconds))!
-        buffer.frameLength = buffer.frameCapacity
-        buffer.floatChannelData![0].initialize(repeating:0, count:Int(buffer.frameLength))
-        let file = try AVAudioFile(forWriting:url, settings:[AVFormatIDKey:kAudioFormatLinearPCM, AVSampleRateKey:8000, AVNumberOfChannelsKey:1, AVLinearPCMBitDepthKey:16, AVLinearPCMIsFloatKey:false, AVLinearPCMIsBigEndianKey:false])
-        try file.write(from:buffer); return url
+        let frames = Int((8000*seconds).rounded()), payload = UInt32(frames*2)
+        precondition(frames > 0)
+        var data = Data(); data.reserveCapacity(44+Int(payload))
+        func append<T: FixedWidthInteger>(_ value: T) {
+            var little = value.littleEndian
+            withUnsafeBytes(of:&little) { data.append(contentsOf:$0) }
+        }
+        // Write a finalized PCM WAV header before exposing any bytes. AVAudioFile
+        // writers can defer header finalization until their Objective-C lifetime ends.
+        data.append(contentsOf:"RIFF".utf8); append(UInt32(36)+payload)
+        data.append(contentsOf:"WAVEfmt ".utf8); append(UInt32(16))
+        append(UInt16(1)); append(UInt16(1)); append(UInt32(8000)); append(UInt32(16000))
+        append(UInt16(2)); append(UInt16(16)); data.append(contentsOf:"data".utf8); append(payload)
+        data.append(Data(count:Int(payload)))
+        return data
     }
+    static func make(seconds: Double = 120) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        try data(seconds:seconds).write(to:url,options:.atomic); return url
+    }
+}
+/// Keep a real download delegate at 50% until the UI pauses it. No live network.
+final class UITestBookDownloadProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.path.contains("/audiobooks/stream/") == true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard let url = request.url else { return }
+        let total = 1920044
+        let response = HTTPURLResponse(url:url,statusCode:200,httpVersion:"HTTP/1.1",headerFields:["Content-Type":"audio/wav","Content-Length":String(total)])!
+        client?.urlProtocol(self,didReceive:response,cacheStoragePolicy:.notAllowed)
+        client?.urlProtocol(self,didLoad:Data(count:total/2))
+    }
+    override func stopLoading() {}
 }
 #endif

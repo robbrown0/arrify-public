@@ -1,0 +1,105 @@
+Arrify discovery release-date correction — 2026-11-27
+
+Problem and behavior
+The running helper repeatedly fails at score(): int('') raises ValueError.
+Read-only inspection found ten cached resolved records with blank release dates.
+A release date must be a real calendar-valid YYYY, YYYY-MM or YYYY-MM-DD string.
+Missing, null, whitespace, malformed and non-string values receive no recency
+bonus. Dates in future years receive no recency bonus. Evidence scores remain
+unchanged. No date or release year is written, guessed, or substituted.
+
+Discovery now defers a cached resolved recording with an invalid first-release
+date to the unresolved report with a metadata-review reason. It continues other
+songs. This also prevents the later per-year acquisition counters from failing.
+Malformed chart hints cannot fail candidate ordering. Chart-year fallback is
+used only to schedule metadata resolution; it is never stored as release metadata.
+Existing requests, transfers and cached source metadata are not rewritten.
+
+Regression tests
+Four focused tests cover missing and invalid types, blank and malformed strings,
+invalid calendar dates, valid partial dates, historical dates, future-year bonus,
+evidence preservation, no mutation, and an entire engine.run() with invalid cached
+records plus a valid song, checking durable complete status and report export.
+They failed on the old implementation (7 assertion failures, 12 errors).
+The corrected source passes all four. Ninety request regression tests also pass.
+The same four tests must pass under the production helper image/user before use.
+The full server suite is being checked in its documented Docker test environment;
+a host-only broad run cannot qualify release assets at /opt/arrify.
+
+Deployment construction
+Only the discovery helper is authorized for recreation in this task.
+Base image: sha256:175e89e49fb42d2d816c30187672d8f72132ce6ce97f0bd898854cb8f3cf8d94
+Candidate tag: hitdiscovery:release-dates-20261127
+Release directory: /home/rob/arrify-ops/discovery-release-20261127
+
+The live sources.py and engine.py contain existing chart-focus customizations.
+Stage the three live modules, then apply only this commit's request-bridge delta
+with patch --fuzz=0. Preserve those pre-existing customizations. coverage.py matches
+main. module-hashes.json records the inspected originals and staged results.
+Build deployment/discovery-release-dates/Dockerfile using the release context,
+with BASE_IMAGE pointing at a locally pinned tag of the captured base image ID.
+Set staged Python modes to 0644. No entrypoint, user, environment or other image
+configuration changes; all original image layers must remain the common prefix.
+
+The private Compose proposal changes only services.hitdiscovery.image. All
+existing binds, including api.py, album_index.py, inventory.py, metadata_transport,
+preparation.py and expansion.py, must remain identical. No player, requests,
+watchdog, Lidarr, downloader or VPN recreation is authorized or required.
+Preserve the private Compose backup and fresh SQLite online backup with verified
+quick_check and SHA-256. A code rollback must not restore an older database.
+
+Drain and verification
+Wait for acquisition-worker phase waiting and no expansion lock, then SIGTERM
+only the helper. Its handler sets the stop event and lets the current discovery
+run finish. Do not force-kill ongoing discovery or acquisition work. Revalidate
+Compose drift, image identity, queues and worker drain before recreation.
+Recreate hitdiscovery only with --no-deps --no-build --pull never. Preserve all
+other container IDs and mounts. Verify running module hashes and configuration,
+health and report/run-complete status. Measure Lidarr memory throughout a complete
+run; compare container identity/restarts, anonymous memory and OOM counters.
+
+Rollback
+If verification fails due to this change, restore only the helper's old image
+entry after checking no unrelated Compose drift, then recreate only hitdiscovery
+in a safe job window. The original image and all original override files remain
+available. Never restore this backup over new acquisition history.
+
+Coordination
+The configured Hive Mind START_HERE and PROTOCOL connector reads returned 404.
+No hub claim/ACK could be posted. Work is isolated on its own source branch;
+this fix does not change the audiobook draft branches or dirty live source.
+
+Deployment and full-run verification completed — 2026-11-27
+Source commit 8cdbf07a77fdb317a2453cddcf0e380d31020057, PR #69.
+Image sha256:65c6cc9f09fe5db86f54828b9ae91d141d3c33fced72399cd8cd86a7845e9eb6.
+Only hitdiscovery was recreated at 18:04:34 UTC. Mounted API/album-index/memory/
+metadata/preparation/expansion overrides, environment values and network mode
+were verified identical. Requests, watchdog, player and VPN container IDs stayed
+unchanged. Live source and old override files were never overwritten.
+
+Discovery run 3332 completed 18:04:35–18:18:23 UTC (13m48s), processing 11,784
+candidates and reporting 1,026 missing songs. One invalid-date record in this run
+was deferred with the explicit metadata-review reason; no fabricated release
+year. No new album acquisition was initiated by the discovery run.
+
+Four focused regressions passed in the source and exact helper image under the
+production UID; 90 request regressions passed. The full documented Docker server
+suite passed: 769 tests in 808.136 seconds. GitHub release-baseline checks passed.
+A broad host-only attempt lacks required /opt/arrify release assets; it is not the
+release qualification result.
+
+All 3,163 request IDs and 2,786 transfer IDs were retained. Normal reconciliation
+updated existing job states during the full run; compare private snapshots for
+transition aggregates. Media binds remained read-only. Nothing was restored from
+backup or removed from live data. The fresh 3,052,228,608-byte SQLite online
+snapshot passes quick_check and a repeated SHA-256 check:
+a6db6630823a1c4b914c1951eeb31c72df06e6a96e16221c86542468fffdbcea
+It is private/discovery.snapshot.sqlite3 in the release directory (not in Git).
+
+Lidarr was not restarted; its identity remained unchanged. Docker-reported memory
+was 415.5 MiB before deployment, 375.8–520.2 MiB over 26 samples during the complete
+run, and approximately 431 MiB afterward, against a 4 GiB limit. Anonymous memory
+was 112.7–271.5 MiB during the run. There were zero OOM kills or container restarts.
+This is a bounded observation of one complete run, not a long-term leak guarantee.
+Existing upstream metadata cooldowns still produce deferred resolutions. No
+scan policy, downloader settings, VPN configuration or SSH behavior was changed.
