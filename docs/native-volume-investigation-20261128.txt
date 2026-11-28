@@ -1,0 +1,130 @@
+Volume investigation and implementation contract (2026-11-28 UTC)
+
+Observed problem
+The user reports that an initial downward drag can make AirPlay playback much
+louder before it decreases. A physical volume-down press corrects the displayed
+level. The current implementation embeds MPVolumeView, has no volume setter,
+does not seed a saved output level, and uses the system audio session. A stale
+starting level is a hypothesis; its origin is not yet proven.
+
+The required product supports Sonos AND other AirPlay speakers. The desired UX
+has fine one-percentage-point taps, immediate feedback, and correct updates from
+hardware buttons, Control Center and other controllers. Room names alone are not
+device identities. A room can contain a primary speaker and bonded satellites.
+
+Native lifecycle correction
+The reviewed PR73 change is composed into this candidate without editing its
+separate worktree. It removes an MPVolumeView subclass, which Apple explicitly
+disallows. It refreshes native controls after first window attachment, route
+changes, media-service reset and foreground/reattachment. Event bursts coalesce;
+an active drag finishes before replacement. Opening/replacing a control never
+copies a volume value, sends a volume action or activates/reroutes playback.
+Ordinary playback and layout updates retain control identity. This corrects a
+concrete unsupported use and lifecycle risks; it does not prove the audible
+first-touch defect is resolved or provide a universal one-point setter.
+
+First implementation: read-only measurements
+The existing opt-in selected-output capture did not include numeric volume values
+and referenced only the expanded control. Add separate observations for:
+- AVAudioSession.outputVolume, the observed player's gain and every registered
+  native volume view. These are separate domains, not interchangeable authority.
+- Each public UISlider's raw value/range, tracking/enabled state and geometry.
+- Hardware/system volume-change events, with precise observation and recording
+  timestamps. A queued callback from an older capture cannot enter a newer one.
+
+Both expanded and tablet controls register weak references. Capture remains local,
+explicitly enabled, limited to ten minutes/120 snapshots and cleared on sign-out.
+No audio, credentials, song metadata or network upload is added. The observer
+never changes a slider value/frame, activates an audio session, sends a control
+action, or sends a speaker-volume command. It is not a shipped volume fix.
+The internal weak registry is excluded from Observation: registration during
+UIViewRepresentable creation must not establish a SwiftUI rendering dependency.
+Visible capture state remains observable. A focused regression checks both.
+
+The regressions preserve distinct stale/native and system levels, verify no value
+actions or geometry writes, cover two control locations and duplicate registration, ensure
+late previous-capture callbacks are dropped, and retain bounded/unknown readback.
+
+Public-platform boundaries
+Apple documents MPVolumeView as the iOS system-volume interface and outputVolume
+as read-only/KVO-observable. AVPlayer.volume is player-relative gain. Replacing a
+speaker-volume control with that gain would change its meaning. MPVolumeView's
+actual volume/routing behavior cannot be verified in the Simulator.
+https://developer.apple.com/documentation/mediaplayer/mpvolumeview
+https://developer.apple.com/documentation/avfaudio/avaudiosession/outputvolume
+https://developer.apple.com/documentation/avfoundation/avplayer/volume
+
+Apple's iOS slider guidance directs audio-volume UIs to the volume view. A custom
+control must keep that platform contract; an implementation-detail slider value
+or a private selector is not a new universal receiver-volume API.
+https://developer.apple.com/design/human-interface-guidelines/sliders
+https://developer.apple.com/design/human-interface-guidelines/steppers
+
+MediaDeviceRoutingManager is an iOS27 device-extension reporting API. It is not
+a current-SDK method for setting arbitrary built-in AirPlay receiver volume.
+https://developer.apple.com/documentation/mediadevice/mediadeviceroutingmanager
+
+Industry reference
+Sonos recommends receiver events, restrained command rates and gesture-aware
+feedback. UI updates must not themselves produce volume writes. Its group API
+preserves member relationships, while mute is distinct from setting volume zero.
+https://docs.sonos.com/docs/volume
+Sonos's relative command adds an integer delta to current group volume, with
+receiver clamping. This is a useful model for +/-1 intent without a stale absolute
+starting level. The Sonos protocol is not a generic AirPlay control API.
+https://docs.sonos.com/reference/groupvolume-setrelativevolume-groupid
+https://docs.sonos.com/reference/groupvolume-getvolume-groupid
+Sonos subscriptions supply ordered state updates through authenticated callbacks.
+https://docs.sonos.com/docs/subscribe
+Home Assistant documents its local Sonos integration and UPnP/network dependency.
+That is a useful local-control reference, not proof of generic AirPlay support.
+https://www.home-assistant.io/integrations/sonos/
+
+Next implementation gates
+1. Measure the untouched native control and system observations at a low existing
+   level, then after a normal physical volume-down action. Compare with receiver
+   readback where available. No loud first-drag reproduction is required for this
+   first measurement. Preserve separate raw values and route identities.
+2. Identify the stale source/lifecycle before replacing bindings. Use one common
+   route-aware presentation across music, audiobooks and compact/expanded views.
+   Confirm target, capabilities and current authority; never restore a remembered
+   level on appearance, reconnection or route change.
+3. Prefer current-receiver relative commands when publicly supported. For generic
+   AirPlay retain public system routing/volume facilities. Exact receiver step
+   resolution must be verified; do not substitute app gain or invent confirmed
+   percentage when receiver readback is unavailable.
+4. Separate gesture intent, pending commands and confirmed feedback. First touch
+   must not emit a stale absolute level. Serialize/coalesce user commands, cancel
+   obsolete route/ownership work, and never blindly replay an ambiguous relative
+   write. External events update state without generating another write.
+5. Preserve group balance, fixed-volume states, mute, pause, output ownership,
+   original audio quality and account boundaries. Provide clear unsupported/stale
+   states rather than a zero/default-max value. Keep large targets and VoiceOver.
+6. Add functional regressions for displayed80/receiver16 then Down, rapid +/- taps,
+   delayed/out-of-order feedback, external changes, route handoff, foregrounding,
+   fixed/missing targets, mute and queued writes after ownership changes.
+7. Require physical AirPlay qualification on Sonos and a non-Sonos receiver for
+   first touch, fine steps, hardware/Control Center changes, groups, backgrounding
+   and reconnection. Simulator geometry or fake receiver timings are not that proof.
+
+First device check for the qualified candidate
+Start the local capture in Settings > Audio output diagnostics while already
+playing on the intended output at a comfortable existing level. Capture the
+untouched control, press hardware volume-down once, and capture again. Share
+the local report explicitly. This first check does not require reproducing the
+loud first drag. Compare observations with receiver readback if available; do
+not infer an exact receiver percentage from the phone or player's gain.
+
+The complete volume panel still requires device-specific precision support.
+AVRoutePickerView remains the universal supported nearby-AirPlay list; do not
+replace it with a room-name scan that omits receivers or selects bonded parts.
+Sonos group-relative +/-1 and its ordered events are a distinct adapter, not a
+claim that every AirPlay receiver exposes the same controls. Never show a custom
+step as confirmed until its authority acknowledges it. A failed/unknown relative
+write is reconciled by a read, not blindly repeated. Do not ship decorative +/-
+buttons backed by stale absolute values or undocumentable system-volume writes.
+
+Release status
+Build46 contains the previously qualified audiobook/music corrections. This branch
+is an evidence-gathering step for the new volume issue. No behavior-changing
+volume fix is claimed until its implementation and physical checks are complete.
