@@ -903,13 +903,16 @@ extension LaunchTests {
             let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 slider.exists && previous.exists && (slider.value as? String) == "Late native layout" &&
                 slider.frame.height > 0 && previous.frame.height > 0 &&
+                app.frame.contains(slider.frame) && app.frame.contains(previous.frame) &&
                 abs(slider.frame.midY - previous.frame.midY) <= 1
             }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed)
             XCTAssertTrue(previous.waitForExistence(timeout: 5))
             XCTAssertEqual(slider.frame.midY, previous.frame.midY, accuracy: 1,
                            "Check the visible UIKit slider, not its always-centered 44-point wrapper")
-            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            // Capture the complete screen: app-element cropping can combine
+            // landscape AX bounds with a panel-native buffer and lose controls.
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = name; screenshot.lifetime = .keepAlways; add(screenshot)
         }
         assertVisibleAlignment("iPad late native volume alignment portrait")
