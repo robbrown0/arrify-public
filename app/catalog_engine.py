@@ -161,7 +161,7 @@ def _safe_component(value: str, maximum: int = 160) -> str:
 def _disc_folder_number(value: str) -> str:
     """Recognize format/disc directories, without treating volume titles as discs."""
     match = re.fullmatch(
-        r"(?:cd|disc|disk|digital[\s_-]*media|(?:7|10|12)[\s_-]*(?:inch[\s_-]*)?vinyl)"
+        r"(?:(?:enhanced[\s_-]*)?cd|disc|disk|digital[\s_-]*media|(?:7|10|12)[\s_-]*(?:inch[\s_-]*)?vinyl)"
         r"[\s_-]*(\d{1,3})(?:[\s_-]*of[\s_-]*\d{1,3})?", value,
         flags=re.IGNORECASE,
     )

@@ -16,7 +16,8 @@ class CatalogEngineTests(unittest.TestCase):
     def test_disc_directories_keep_album_and_artist_with_disc_order(self):
         for folder, number in [('CD 01', '1'), ('cd02', '2'),
                                ('Digital Media 01', '1'), ('12 Vinyl 02', '2'),
-                               ('7 Vinyl 01', '1'), ('Disc 2 of 3', '2')]:
+                               ('7 Vinyl 01', '1'), ('Disc 2 of 3', '2'),
+                               ('Enhanced CD 01', '1')]:
             with self.subTest(folder=folder):
                 path = 'Artist/Album (2008)/' + folder + '/01 - Song.flac'
                 self.assertEqual(_metadata(path), ('01 - Song', 'Artist', 'Album (2008)'))
