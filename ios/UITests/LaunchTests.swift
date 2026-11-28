@@ -146,6 +146,15 @@ final class LaunchTests: XCTestCase {
     }
     @MainActor func testAudiobookActionsUnreadAndFinishedStayConsistentAcrossShelves() {
         let app = openBookFixture(["ARRIFY_UI_STALE_BOOK_PROGRESS":"1"])
+        app.buttons["Home"].firstMatch.tap()
+        let homeBook = app.buttons["homeContinueBook-book-one"]
+        XCTAssertTrue(homeBook.waitForExistence(timeout:10))
+        homeBook.tap()
+        XCTAssertTrue(app.buttons["detailBookActions"].waitForExistence(timeout:10))
+        XCTAssertFalse(app.buttons["audiobookPlayPause"].exists,"Home title navigation must not autoplay either")
+        app.navigationBars["Audiobook"].buttons.element(boundBy:0).tap()
+        XCTAssertFalse(app.descendants(matching:.any)["homePullRefresh"].exists,"Navigation/layout must not arm refresh")
+        app.buttons["Library"].firstMatch.tap()
         let card = app.buttons["continue-audiobook-book-one"]
         XCTAssertTrue(card.waitForExistence(timeout:15))
         app.buttons["continueBookActions-book-one"].tap()
@@ -579,6 +588,7 @@ final class LaunchTests: XCTestCase {
         let recent = app.buttons["homeRecentTrack-1"]
         XCTAssertTrue(recent.waitForExistence(timeout: 10))
         let beforePull = recent.label
+        XCTAssertFalse(app.descendants(matching:.any)["homePullRefresh"].exists,"Player dismissal must not leave a layout-triggered spinner")
         // Start above the horizontal rails and pull beyond the native refresh threshold.
         // ScrollView's accessibility frame extends under the status bar. Anchor
         // the touch to visible content so this tests Home instead of system chrome.
@@ -589,6 +599,7 @@ final class LaunchTests: XCTestCase {
         start.press(forDuration: 0.1, thenDragTo: end)
         expectation(for: NSPredicate(format: "label != %@", beforePull), evaluatedWith: recent)
         waitForExpectations(timeout: 10)
+        XCTAssertTrue(app.descendants(matching:.any)["homePullRefresh"].waitForNonExistence(timeout:10),"Completed refresh must clear its indicator")
         XCTAssertTrue(app.buttons["recentlyPlayedAll"].exists)
         app.buttons["expandPlayer"].tap()
         XCTAssertFalse(app.buttons["retrySavedSongsRefresh"].exists)
@@ -637,6 +648,7 @@ final class LaunchTests: XCTestCase {
             XCTAssertTrue(!title.exists || title.frame.minY < initialTitleY - 100, "Minimizing the player must not reset Home to the top")
             XCTAssertEqual(playlist.frame.minY, scrolledY, accuracy: 3,
                            "Home must retain its exact browsing position after player dismissal")
+            XCTAssertFalse(app.descendants(matching:.any)["homePullRefresh"].exists,"Returning to Home must not create a refresh without a pull")
         }
     }
     @MainActor func testHomeRecentSongsAndFullScreenSongActions() {

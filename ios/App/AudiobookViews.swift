@@ -494,6 +494,31 @@ private extension Audiobook {
     var shelfSummary: String { readingState == .finished ? "Finished" : AudiobookTimeline.time(readingState == .started ? remaining : duration) + (readingState == .started ? " left" : "") }
 }
 
+/// Home shares book navigation and commands with the audiobook library.
+struct AudiobookContinueRow: View {
+    let model: AppModel
+    let initial: Audiobook
+    private var book: Audiobook { model.books.presentation(initial) }
+    var body: some View {
+        HStack(spacing:12) {
+            NavigationLink { AudiobookDetail(model:model,initial:book) } label: {
+                HStack(spacing:16) {
+                    RemoteCover(path:book.cover,title:book.title,artwork:model.artwork,placeholderSymbol:"book.closed")
+                        .frame(width:72,height:72).clipShape(RoundedRectangle(cornerRadius:10))
+                    VStack(alignment:.leading,spacing:5) {
+                        Text(book.title).font(.headline).foregroundStyle(.primary)
+                        Text(book.author).font(.subheadline).foregroundStyle(.secondary)
+                        Text(book.shelfSummary).font(.caption).foregroundStyle(.secondary)
+                    }.frame(maxWidth:.infinity,alignment:.leading)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel("Book details for " + book.title).accessibilityIdentifier("homeContinueBook-" + book.id)
+            Button { model.books.play(book) } label: { Image(systemName:"play.circle.fill").font(.largeTitle).frame(width:44,height:44) }
+                .buttonStyle(.plain).tint(.green).accessibilityLabel("Resume " + book.title).accessibilityIdentifier("homeResumeBook-" + book.id)
+            AudiobookActionsMenu(model:model,initial:book,identifier:"homeContinueBookActions-" + book.id)
+        }.frame(maxWidth:.infinity,minHeight:80)
+    }
+}
+
 /// Every book surface uses the same commands and the same live progress model.
 /// Cover/title navigation is independent of the explicit listening action.
 private struct AudiobookActionsMenu: View {

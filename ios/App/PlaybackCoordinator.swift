@@ -648,13 +648,6 @@ import Network
             PlaybackDiagnostics.event("navigation-coalesced")
             return
         }
-        if action == "next", !automatic, !commandInFlight, advanceCachedSuccessor(automatic: false) {
-            controlRevision += 1
-            navigationPending = true; navigationStarted = ProcessInfo.processInfo.systemUptime
-            navigationTarget = desiredKey
-            synchronizeCachedTransitions()
-            return
-        }
         let tapTrack = state?.currentTrackId
         let tapPlay = state?.playId
         let navigationRevision = controlRevision
@@ -675,6 +668,25 @@ import Network
             if commandInFlight { pendingPause = true; return }
         } else if !automatic && ["play", "resume", "takeover", "next", "previous", "queue_jump", "seek"].contains(action) {
             cancelRecovery()
+        }
+        var activatedForNavigation = false
+        if navigation, action == "next", !commandInFlight {
+            // An interruption-ended notification can be lost while suspended.
+            // Reactivate on this explicit intent before checking cached playback;
+            // otherwise a verified local successor unnecessarily waits for POST.
+            if ownsOutput, state?.playing == true, !offlinePausePending,
+               !permission.allowsPlayback(ownsOutput:true,serverPlaying:true,mediaReady:true) {
+                guard await activateExplicitSession(generation:requestGeneration,revision:navigationRevision) else { finishNavigation(); return }
+                activatedForNavigation = true
+            }
+            guard requestGeneration == sessionGeneration, controlRevision == navigationRevision,
+                  !pendingPause, !Task.isCancelled else { finishNavigation(); return }
+            if state?.currentTrackId != tapTrack || state?.playId != tapPlay { finishNavigation(); return }
+            if !commandInFlight, advanceCachedSuccessor(automatic:false) {
+                controlRevision += 1; navigationTarget = desiredKey
+                synchronizeCachedTransitions()
+                return
+            }
         }
         if !cachedTransitions.isEmpty || cachedSyncTask != nil || cachedReconcileRequired {
             synchronizeCachedTransitions()
@@ -715,6 +727,7 @@ import Network
         let endedPlay = state?.playId
         let explicitPlayback = !automatic && ["play", "resume", "takeover", "next", "previous", "queue_jump"].contains(action)
         controlRevision += 1
+        let commandRevision = controlRevision
         commandInFlight = true
         defer {
             commandInFlight = false
@@ -747,19 +760,17 @@ import Network
             }
             if automatic && (state?.currentTrackId != endedTrack || state?.playId != endedPlay || !ownsOutput) { await apply(fresh); return }
             if explicitPlayback && (!needsTakeover || action == "takeover") {
-                // A quick stop/restart must not let the previous session deactivate
-                // audio after the new session has already activated it.
-                await deactivationTask?.value
-                guard requestGeneration == sessionGeneration else { finishNavigation(); return }
-                do { try await audioSession.activate(); guard requestGeneration == sessionGeneration else { finishNavigation(); return }; outputSelectionChanged(trigger: "session-activated") }
-                catch {
-                    guard requestGeneration == sessionGeneration else { return }
-                    if RequestCancellation.matches(error) { finishNavigation(); return }
-                    player.pause(); permission.userPause()
-                    message = "Audio output is unavailable. Tap Play to try again."
-                    finishNavigation(); return
+                if !activatedForNavigation {
+                    guard await activateExplicitSession(generation:requestGeneration,revision:commandRevision) else { finishNavigation(); return }
                 }
-                if !pendingPause { permission.userPlayAfterSessionActivation() }; recoveryUsed = false; resetProgressClock()
+                guard requestGeneration == sessionGeneration, controlRevision == commandRevision,
+                      !pendingPause, !Task.isCancelled else { finishNavigation(); return }
+                if navigation && (state?.currentTrackId != tapTrack || state?.playId != tapPlay) { finishNavigation(); return }
+                // Cache readiness can change while an older control/activation
+                // completes. Recheck the exact authorized successor before POST.
+                if navigation, action == "next", advanceCachedSuccessor(automatic:false) {
+                    navigationTarget = desiredKey; synchronizeCachedTransitions(); return
+                }
                 // AVPlayer cannot recover a failed item by calling play() on it again.
                 if !busy && desiredKey != nil && loadedKey == nil {
                     cancelPreparation(); prepareTask = nil
@@ -799,6 +810,23 @@ import Network
             message = error.localizedDescription
             PlaybackDiagnostics.event("command-failed")
             liveUpdatePending = true
+        }
+    }
+    private func activateExplicitSession(generation: UUID, revision: Int) async -> Bool {
+        // A quick stop/restart must await the prior session's deactivation.
+        await deactivationTask?.value
+        guard generation == sessionGeneration, revision == controlRevision, !pendingPause, !Task.isCancelled else { return false }
+        do {
+            try await audioSession.activate()
+            guard generation == sessionGeneration, revision == controlRevision, !pendingPause, !Task.isCancelled else { return false }
+            outputSelectionChanged(trigger:"session-activated")
+            permission.userPlayAfterSessionActivation(); recoveryUsed = false; resetProgressClock()
+            return true
+        } catch {
+            guard generation == sessionGeneration, revision == controlRevision, !RequestCancellation.matches(error), !Task.isCancelled else { return false }
+            player.pause(); permission.userPause()
+            message = "Audio output is unavailable. Tap Play to try again."
+            return false
         }
     }
     func retry() {
@@ -1034,7 +1062,7 @@ import Network
     /// This only replaces the authorized current item; it never advances the queue.
     func recoverServerRoute() {
         guard ProcessInfo.processInfo.systemUptime >= routeSettlingUntil else { return }
-        guard routeRecoveryTask == nil, !busy, loadedKey != nil, loadedKey != completedKey,
+        guard !navigationPending, routeRecoveryTask == nil, !busy, loadedKey != nil, loadedKey != completedKey,
               permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true),
               let current = player.currentItem, let id = state?.currentTrackId,
               queuedTracks[ObjectIdentifier(current)] == id, let epoch = state?.ownerEpoch else { return }

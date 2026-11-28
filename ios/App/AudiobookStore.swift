@@ -77,10 +77,7 @@ import CryptoKit
         return value
     }
     func applyProgress(_ book: Audiobook, refreshMembership: Bool = true) {
-        if let progress = book.progress {
-            progressOverrides[book.id] = progress
-            if progressOverrides.count > 512, let oldest = progressOverrides.min(by:{ ($0.value.lastUpdate ?? 0) < ($1.value.lastUpdate ?? 0) })?.key, oldest != book.id { progressOverrides[oldest] = nil }
-        }
+        if let progress = book.progress { rememberProgress(book.id,progress:progress) }
         if !refreshMembership {
             items = items.map { $0.id == book.id ? presentation($0) : $0 }.filter { $0.readingState.matches(filter) }
             return
@@ -94,8 +91,16 @@ import CryptoKit
         else if ["unstarted","started","finished"].contains(filter) { next = nil; Task { [weak self] in await self?.load() } }
     }
     func recordProgress(_ id: String, progress: AudiobookProgress) {
-        progressOverrides[id] = progress
+        rememberProgress(id,progress:progress)
         items = items.map(presentation).filter { $0.readingState.matches(filter) }
+    }
+    private func rememberProgress(_ id: String, progress: AudiobookProgress) {
+        guard (progress.lastUpdate ?? 0) >= (progressOverrides[id]?.lastUpdate ?? 0) else { return }
+        progressOverrides[id] = progress
+        if progressOverrides.count > 512,
+           let oldest = progressOverrides.filter({ $0.key != id }).min(by:{ ($0.value.lastUpdate ?? 0) < ($1.value.lastUpdate ?? 0) })?.key {
+            progressOverrides[oldest] = nil
+        }
     }
     func reconnect() async {
         let owner = account, key = requestKey

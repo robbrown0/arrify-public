@@ -58,6 +58,32 @@ also shows deferred cached-transition sync and failed network reads. Distinguish
 server/transport delay, avoidable client serialization and native/device startup.
 Do not attribute every stop to Wi-Fi. Preserve queue, ownership, pause and quality.
 
+Next and Home corrections
+- Explicit Next now reactivates an interrupted session before checking verified
+  cached successors. Recheck again after an older control completes. Do not wait
+  for the Next acknowledgement when existing queue/owner/media fences authorize
+  local playback. Coalesce taps during activation; a newer pause/interrupt/account
+  change cancels that intent. Noncached and unverified transitions still require
+  server confirmation; an older mutation with unknown outcome stays serialized.
+- Navigation suppresses old-current-song recovery while awaiting its transition.
+  This prevents the logged old song restart eight seconds into a pending Next.
+- Home's refresh offset previously armed on layout alone and never disarmed as
+  the offset returned. Only a real released drag can now start refresh. Retraction,
+  programmatic scrolling, cancellation and leaving Home clear the gesture state.
+  The spinner means an actual refresh is running; an armed drag uses an arrow.
+- Home's audiobook title/cover now opens the same book details and actions as the
+  audiobook shelf, with a separate Resume control.
+Apple's scroll phase API distinguishes user interaction from layout/animation:
+https://developer.apple.com/documentation/swiftui/scrollphase
+https://developer.apple.com/design/human-interface-guidelines/progress-indicators
+
+Album handoff preserved
+Merged main commit e567a56290c3e8f867686827244b567524dec61c (PR 76) is
+included. app/catalog_engine.py matches the deployed handoff SHA256
+c4eeca1eca28906d1c22d880e8b62e1f83f402bcbfde279be2f92adfa3b28e14.
+Build from the merged source, not the live image's temporary album overlay.
+Preserve completed metadata and playlist repairs and all existing service config.
+
 Validation and deployment
 Four new server regressions were run before the implementation in an isolated
 runtime: stale membership and metadata-only grant replacement failed; the new

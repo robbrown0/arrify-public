@@ -971,32 +971,45 @@ struct SearchScreen: View {
 /// Home shows account-scoped listening history and playlists.
 private struct HomePullRefresh: ViewModifier {
     let action: @MainActor () async -> Void
-    @State private var armed = false
-    @State private var refreshing = false
+    @State private var gesture = PullRefreshGesture()
+    @State private var refreshTask: Task<Void, Never>?
+    @State private var generation = UUID()
     func body(content: Content) -> some View {
         content
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.contentInsets.top < -72
-            } action: { _, beyondThreshold in
-                if beyondThreshold { armed = true }
+            .onScrollGeometryChange(for: Double.self) { geometry in
+                Double(geometry.contentOffset.y + geometry.contentInsets.top)
+            } action: { _, offset in
+                gesture.offsetChanged(offset)
             }
-            .onScrollPhaseChange { oldPhase, newPhase in
-                if newPhase == .tracking { armed = false }
-                guard oldPhase == .interacting, newPhase != .interacting else { return }
-                let shouldRefresh = armed; armed = false
-                guard shouldRefresh, !refreshing else { return }
-                refreshing = true
+            .onScrollPhaseChange { _, newPhase in
+                let phase: PullRefreshGesture.Phase
+                switch newPhase {
+                case .tracking: phase = .tracking
+                case .interacting: phase = .dragging
+                case .decelerating: phase = .settling
+                case .idle: phase = .idle
+                default: phase = .programmatic
+                }
+                guard gesture.phaseChanged(to:phase) else { return }
+                let token = UUID(); generation = token
                 PlaybackDiagnostics.event("home-pull-refresh")
-                Task {
+                refreshTask = Task { @MainActor in
                     await action()
-                    refreshing = false
+                    guard generation == token, !Task.isCancelled else { return }
+                    gesture.finish(); refreshTask = nil
                 }
             }
             .overlay(alignment: .top) {
-                if armed || refreshing {
+                if gesture.isRefreshing {
                     ProgressView().tint(.green).padding(.top, 8)
-                        .accessibilityLabel("Refreshing Home").allowsHitTesting(false)
+                        .accessibilityLabel("Refreshing Home").accessibilityIdentifier("homePullRefresh").allowsHitTesting(false)
+                } else if gesture.isArmed {
+                    Image(systemName:"arrow.down").foregroundStyle(.green).padding(.top,8)
+                        .accessibilityLabel("Release to refresh").allowsHitTesting(false)
                 }
+            }
+            .onDisappear {
+                generation = UUID(); refreshTask?.cancel(); refreshTask = nil; gesture.reset()
             }
     }
 }
@@ -1022,13 +1035,7 @@ struct HomeScreen: View {
                         VStack(alignment:.leading, spacing:16) {
                             Text("Continue listening").font(.title2.bold())
                             ForEach(model.books.resumeBooks.prefix(4)) { book in
-                                Button { model.books.play(book) } label: {
-                                    HStack(spacing:16) {
-                                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork).frame(width:72, height:72).clipShape(RoundedRectangle(cornerRadius:10))
-                                        VStack(alignment:.leading, spacing:5) { Text(book.title).font(.headline); Text(book.author).font(.subheadline).foregroundStyle(.secondary); Text(AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary) }
-                                        Spacer(); Image(systemName:"play.circle.fill").font(.largeTitle)
-                                    }.frame(maxWidth:.infinity, minHeight:80).contentShape(Rectangle())
-                                }.buttonStyle(.plain)
+                                AudiobookContinueRow(model:model,initial:book)
                             }
                         }
                     }
