@@ -1,0 +1,28 @@
+Sonos relative-volume operator probe
+
+This is a separate diagnostic tool, not an Arrify runtime adapter. It reads the
+previous private discovery/capability files, verifies the primary device's live
+identity and advertised services, and limits topology to that single room plus
+bonded satellites. No addresses or device identifiers are committed here.
+
+Without --probe-one-step it sends only GETs and SOAP Get actions. The optional
+live mode is precisely: read the existing unmuted level, send relative -1, verify
+the response and current level/mute/topology, then send relative +1 only if those
+observations match. It never increases above the initial requested baseline.
+If another controller changes the observed state, it stops without restoring.
+An ambiguous write is never retried, and no remembered absolute volume is sent.
+There is no playback, mute, power, route, SetVolume or arbitrary RPC command.
+
+The two relative writes can briefly change the live room's audible level. Operator
+use is separate from pure unit tests. Successful numeric readback establishes only
+that device's relative command and HTTP response time; it does not establish
+Arrify touch/feedback correctness, audible quality, or generic AirPlay precision.
+
+Run focused offline regressions:
+python3 -m unittest discover -s tests -p test_sonos_relative_volume_probe.py -v
+
+Read-only preflight:
+python3 tools/sonos_relative_volume_probe.py --discovery PRIVATE_DISCOVERY_JSON --capabilities PRIVATE_CAPABILITIES_JSON
+
+Only an intentional live test adds --probe-one-step. Save operator results in the
+private operations directory. Do not add the private input files to Git.
