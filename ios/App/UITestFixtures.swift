@@ -43,6 +43,7 @@ actor UITestTransport: HTTPTransport {
     private let songs = #"[{"id":1,"title":"Just Like a Pill","artist":"P!nk","album":"M!ssundaztood","artist_id":"bbbbbbbbbbbbbbbbbbbbbbbb","album_id":"aaaaaaaaaaaaaaaaaaaaaaaa","popularity":{"doubloons":2,"rising":true,"evidence":[{"source":"Fixture chart","url":"https://example.com/chart"}]}},{"id":2,"title":"Try","artist":"P!nk","album":"The Truth About Love"}]"#
     private var recoveryFailures: [String: Int] = [:]
     private var bookshelfReads = 0
+    private var bookPageFailed = false
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
         if path.hasPrefix("/api/v1/audiobooks/"), ProcessInfo.processInfo.environment["ARRIFY_UI_AUDIOBOOKS"] == "1" {
@@ -66,6 +67,25 @@ actor UITestTransport: HTTPTransport {
             let result: [String:Any]
             if path.hasSuffix("/status") { result = ["enabled":true,"preferences":bookPreferences] }
             else if path.hasSuffix("/library") {
+                if ProcessInfo.processInfo.environment["ARRIFY_UI_BOOK_PAGING"] == "1" {
+                    let values = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)?.queryItems ?? []
+                    let page = Int(values.first { $0.name == "page" }?.value ?? "0") ?? 0
+                    guard (0...2).contains(page) else { throw APIError.invalidResponse }
+                    let filter = values.first { $0.name == "filter" }?.value ?? "all"
+                    // A durable first-page boundary failure exercises explicit
+                    // retry independently from automatic transient-read recovery.
+                    if page == 1 && !bookPageFailed {
+                        bookPageFailed = true
+                        return HTTPResult(status:400,data:Data(#"{"error":{"code":"fixture_page_failure","message":"This page is temporarily unavailable."}}"#.utf8))
+                    }
+                    let items: [[String:Any]] = (page*12+1...min(36,(page+1)*12)).map { index in
+                        var item = book
+                        item["id"] = String(format:"book-page-%03d",index); item["title"] = String(format:"Story %03d",index)
+                        item["progress"] = ["currentTime":filter == "started" ? 40 : filter == "finished" ? 120 : 0,"lastUpdate":0,"isFinished":filter == "finished"]
+                        return item
+                    }
+                    return HTTPResult(status:200,data:try JSONSerialization.data(withJSONObject:["libraries":[["id":"books","name":"Books"]],"library_id":"books","items":items,"total":36,"next_page":page < 2 ? page+1 as Any : NSNull()]))
+                }
                 var listed = book
                 if ProcessInfo.processInfo.environment["ARRIFY_UI_STALE_BOOK_PROGRESS"] == "1" { listed["progress"] = ["currentTime":40,"lastUpdate":0,"isFinished":false] }
                 let filter = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{ $0.name == "filter" })?.value ?? "all"

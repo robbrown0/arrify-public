@@ -63,9 +63,9 @@ struct AudiobookShelf: View {
                 } else {
                     AudiobookGroupBrowser(model:model, kind:section, library:shelf.library, query:shelf.query).id(section + shelf.library)
                 }
-                if section == "books" && showsLoading { ProgressView().frame(maxWidth:.infinity) }
+                if section == "books" && showsLoading && shelf.next == nil { ProgressView().frame(maxWidth:.infinity) }
                 if section == "books" && showsEmpty { emptyShelf }
-                if section == "books" && shelf.next != nil && !downloaded { Button("More books") { Task { await shelf.load(more:true) } }.disabled(shelf.loading) }
+                if section == "books" && !downloaded { AudiobookShelfNextPage(shelf:shelf) }
             }.padding(24)
         }.accessibilityIdentifier("audiobookShelfScroll").background(Color.black).navigationTitle("Audiobooks")
             .searchable(text:$shelf.query, prompt:section == "books" ? "Books, authors, narrators" : "Search " + section)
@@ -88,7 +88,7 @@ struct AudiobookShelf: View {
         }
     }
     @ViewBuilder private var recoveryStatus: some View {
-        if !downloaded, let message = shelf.message {
+        if !downloaded, !shelf.failedNextPage, let message = shelf.message {
             Text(message).foregroundStyle(.secondary)
             Button("Try again") { Task { await shelf.retry() } }
         }
@@ -132,6 +132,50 @@ struct AudiobookShelf: View {
         return shelf.items.map(model.books.presentation).filter { $0.readingState.matches(shelf.filter) }
     }
     private func filterTitle(_ value: String) -> String { ["all":"All books", "unstarted":"Not started", "started":"In progress", "finished":"Finished", "downloads":"Downloaded"][value] ?? value }
+}
+
+/// Visibility, rather than lazy prefetch/onAppear, starts one page request.
+/// A stable task identity keeps repeated layout events from cancelling a read.
+private struct AutomaticAudiobookPage: View {
+    let page: Int
+    let loading: Bool
+    let label: String
+    let load: @MainActor (Int) async -> Void
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var visible = false
+    @State private var inFlight = false
+    @State private var request = 0
+    var body: some View {
+        ProgressView().frame(maxWidth:.infinity,minHeight:44).accessibilityLabel(label)
+            .onScrollVisibilityChange(threshold:0.1) { visible = $0; requestPage() }
+            .onChange(of:loading) { if !loading { requestPage() } }
+            .onChange(of:scenePhase) { if scenePhase == .active { requestPage() } }
+            .task(id:request) {
+                guard request > 0, inFlight else { return }
+                defer { inFlight = false }
+                guard !Task.isCancelled else { return }
+                await load(page)
+            }
+    }
+    private func requestPage() {
+        guard visible, !inFlight, !loading, scenePhase == .active else { return }
+        inFlight = true; request += 1
+    }
+}
+
+private struct AudiobookShelfNextPage: View {
+    let shelf: AudiobookShelfStore
+    var body: some View {
+        if shelf.failedNextPage, let message = shelf.message {
+            VStack(spacing:8) {
+                Text(message).font(.footnote).foregroundStyle(.secondary)
+                Button("Retry") { Task { await shelf.retry() } }.disabled(shelf.loading).accessibilityIdentifier("audiobookPageRetry")
+            }.frame(maxWidth:.infinity).padding(.vertical,8)
+        } else if let page = shelf.next {
+            AutomaticAudiobookPage(page:page,loading:shelf.loading,label:"Loading more books") { await shelf.loadNextPage($0) }
+                .id(shelf.requestKey + ":page:" + String(page))
+        }
+    }
 }
 
 private struct AudiobookShelfCard: View {
@@ -676,6 +720,7 @@ private struct AudiobookGroupBrowser: View {
     @State private var loaded = false
     @State private var loading = false
     @State private var message: String?
+    @State private var failedMore = false
     @State private var identity = UUID()
     private var key: String { kind + "\u{0}" + library + "\u{0}" + query + "\u{0}" + author }
     var body: some View {
@@ -690,22 +735,34 @@ private struct AudiobookGroupBrowser: View {
                 }.buttonStyle(.plain)
                 Divider()
             }
-            if loading { ProgressView().padding() }
+            if loading && next == nil { ProgressView().padding() }
             if loaded && items.isEmpty && message == nil { ContentUnavailableView.search(text:query) }
-            if let message { Text(message).foregroundStyle(.secondary).padding(); Button("Try again") { Task { await load(more:false) } } }
-            if next != nil { Button("More " + kind) { Task { await load(more:true) } }.padding().disabled(loading) }
+            if let message { Text(message).foregroundStyle(.secondary).padding(); Button("Retry") { Task { await load(more:failedMore) } }.disabled(loading) }
+            else if let page = next {
+                AutomaticAudiobookPage(page:page,loading:loading,label:"Loading more " + kind) { page in
+                    guard next == page, !loading else { return }; await load(more:true)
+                }.id(key + ":page:" + String(page))
+            }
         }.task(id:key) { await load(more:false) }
     }
     @MainActor private func load(more: Bool) async {
+        if more { guard !loading, loaded, next != nil else { return } }
+        let page = more ? next ?? 0 : 0
         let ticket = UUID(); identity = ticket; loading = true; message = nil
         defer { if identity == ticket { loading = false } }
         do {
             if !query.isEmpty { try await Task.sleep(for:.milliseconds(250)) }
-            let result = try await model.api.audiobookGroups(kind, library:library, page:more ? next ?? 0 : 0, query:query, author:author)
+            let result = try await model.api.audiobookGroups(kind, library:library, page:page, query:query, author:author)
             guard identity == ticket, !Task.isCancelled else { return }
-            items = more ? items + result.items : result.items; next = result.nextPage; loaded = true
+            if let nextPage = result.nextPage, nextPage <= page { throw APIError.invalidResponse }
+            if more {
+                for item in result.items {
+                    if let index = items.firstIndex(where:{ $0.id == item.id }) { items[index] = item } else { items.append(item) }
+                }
+            } else { items = result.items }
+            next = result.nextPage; loaded = true; failedMore = false
         } catch where RequestCancellation.matches(error) || Task.isCancelled {} catch {
-            guard identity == ticket else { return }; message = "This view couldn’t be updated. Try again."
+            guard identity == ticket else { return }; failedMore = more; message = "This view couldn’t be updated. Try again."
         }
     }
 }
@@ -728,10 +785,10 @@ private struct AudiobookScopedShelf: View {
                     Text("All books").font(.title2.bold())
                 }
                 ForEach(shelf.items) { book in AudiobookShelfRow(model:model, book:book, selectedSeries:shelf.series) }
-                if shelf.loading { ProgressView().frame(maxWidth:.infinity) }
-                if let message = shelf.message { Text(message).foregroundStyle(.secondary); Button("Try again") { Task { await shelf.retry() } } }
-                if shelf.hasLoaded && shelf.items.isEmpty && !shelf.loading && shelf.message == nil { ContentUnavailableView("No books yet", systemImage:"books.vertical", description:Text("Available books in this library will appear here.")) }
-                if shelf.next != nil { Button("More books") { Task { await shelf.load(more:true) } }.disabled(shelf.loading) }
+                if shelf.loading && shelf.next == nil { ProgressView().frame(maxWidth:.infinity) }
+                if !shelf.failedNextPage, let message = shelf.message { Text(message).foregroundStyle(.secondary); Button("Try again") { Task { await shelf.retry() } } }
+                if shelf.hasLoaded && shelf.items.isEmpty && shelf.next == nil && !shelf.loading && shelf.message == nil { ContentUnavailableView("No books yet", systemImage:"books.vertical", description:Text("Available books in this library will appear here.")) }
+                AudiobookShelfNextPage(shelf:shelf)
             }.padding(24)
         }.navigationTitle(name).task { await shelf.load() }.refreshable { await shelf.load() }
     }

@@ -224,7 +224,34 @@ final class LaunchTests: XCTestCase {
         let detail = XCTAttachment(screenshot:XCUIScreen.main.screenshot()); detail.name = "Book details directly from the audiobook player"; detail.lifetime = .keepAlways; add(detail)
     }
 
-    @MainActor private func openBookFixture(_ environment: [String:String]) -> XCUIApplication {
+    @MainActor func testAudiobookScrollingLoadsPagesInListAndGridAndRetriesAtTheBoundary() {
+        let app = openBookFixture(["ARRIFY_UI_BOOK_PAGING":"1"],expectedBook:"book-page-001")
+        let shelf = app.scrollViews["audiobookShelfScroll"]
+        let last = app.buttons["audiobook-book-page-036"]
+        XCTAssertFalse(app.buttons["More books"].exists)
+        XCTAssertFalse(last.exists,"A prefetched footer must not drain the library before scrolling")
+        let retry = app.buttons["audiobookPageRetry"]
+        for _ in 0..<20 where !retry.isHittable { shelf.swipeUp() }
+        XCTAssertTrue(retry.waitForExistence(timeout:10)); XCTAssertTrue(retry.isHittable)
+        XCTAssertTrue(app.buttons["audiobook-book-page-012"].exists,"A failed page must keep the loaded page at its scroll position")
+        retry.tap()
+        for _ in 0..<24 where !last.isHittable { shelf.swipeUp() }
+        XCTAssertTrue(last.isHittable,"Continuous scrolling must reach the final book without a More tap")
+        XCTAssertFalse(retry.exists); XCTAssertFalse(app.buttons["More books"].exists)
+        let list = XCTAttachment(screenshot:app.screenshot()); list.name = "Audiobook continuous list reaches final page"; list.lifetime = .keepAlways; add(list)
+        let grid = app.buttons["Show cover grid"]
+        for _ in 0..<24 where !grid.isHittable { shelf.swipeDown() }
+        XCTAssertTrue(grid.isHittable); grid.tap()
+        app.buttons["audiobookFilter-started"].tap()
+        XCTAssertTrue(app.buttons["audiobook-book-page-001"].waitForExistence(timeout:15))
+        XCTAssertFalse(last.exists,"Changing filters starts a new page sequence")
+        for _ in 0..<30 where !last.isHittable { shelf.swipeUp() }
+        XCTAssertTrue(last.isHittable,"The cover grid must use the same continuous paging")
+        XCTAssertFalse(app.buttons["More books"].exists)
+        let covers = XCTAttachment(screenshot:app.screenshot()); covers.name = "Audiobook continuous cover grid reaches final page"; covers.lifetime = .keepAlways; add(covers)
+    }
+
+    @MainActor private func openBookFixture(_ environment: [String:String],expectedBook: String = "book-one") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
         for (key,value) in environment { app.launchEnvironment[key] = value }
@@ -235,7 +262,7 @@ final class LaunchTests: XCTestCase {
         app.buttons["signIn"].tap()
         XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout:20)); app.buttons["Library"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Audiobooks"].firstMatch.waitForExistence(timeout:20)); app.buttons["Audiobooks"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["audiobook-book-one"].waitForExistence(timeout:15))
+        XCTAssertTrue(app.buttons["audiobook-" + expectedBook].waitForExistence(timeout:15))
         return app
     }
 

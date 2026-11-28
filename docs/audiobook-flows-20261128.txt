@@ -84,6 +84,19 @@ c4eeca1eca28906d1c22d880e8b62e1f83f402bcbfde279be2f92adfa3b28e14.
 Build from the merged source, not the live image's temporary album overlay.
 Preserve completed metadata and playlist repairs and all existing service config.
 
+Continuous audiobook browsing
+The additional user request removes More books and the equivalent author/series
+page buttons. A shared footer uses native scroll visibility (not lazy prefetch)
+to request the next page. Lists, cover grids, author scopes and series scopes use
+the same behavior. Loaded rows retain their identities and scroll position; an
+exhausted page cursor removes the footer. Page failures keep the existing rows
+and expose Retry at the boundary. The shelf coalesces concurrent page callbacks,
+rejects stale cursors/scope/account responses, deduplicates overlapping rows and
+rejects non-advancing provider cursors. Native regressions cover rapid callbacks,
+failed-page retry, late responses after a search/account change, and scrolling
+through three pages in list and cover-grid layouts.
+https://developer.apple.com/documentation/swiftui/view/onscrollvisibilitychange(threshold:_:)
+
 Validation and deployment
 Four new server regressions were run before the implementation in an isolated
 runtime: stale membership and metadata-only grant replacement failed; the new

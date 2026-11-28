@@ -3,6 +3,49 @@ import ArrifyCore
 @testable import Arrify
 
 final class AudiobookSessionTests: XCTestCase {
+    @MainActor private func pagingShelf(_ transport: BookPageTransport) async throws -> AudiobookShelfStore {
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://fixture.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        return AudiobookShelfStore(api:api,wait:{ _ in })
+    }
+    @MainActor func testBookPagingCoalescesRapidBoundaryRequestsAndStopsAtTheLastPage() async throws {
+        let transport = BookPageTransport(), shelf = try await pagingShelf(transport)
+        await shelf.load(); await transport.holdSecondPage()
+        let next = Task { await shelf.loadNextPage(1) }
+        for _ in 0..<100 { if await transport.waiting { break }; try await Task.sleep(for:.milliseconds(10)) }
+        let waiting = await transport.waiting; XCTAssertTrue(waiting)
+        await shelf.loadNextPage(1); await shelf.load(more:true)
+        await transport.release(); await next.value
+        XCTAssertEqual(shelf.items.map(\.id),["one","two","three"],"Overlapping page rows retain stable identities and order")
+        await shelf.loadNextPage(1) // Old footer callback after the cursor moved.
+        await shelf.loadNextPage(2); await shelf.loadNextPage(2)
+        XCTAssertEqual(shelf.items.map(\.id),["one","two","three","four"])
+        XCTAssertNil(shelf.next)
+        let pages = await transport.pages; XCTAssertEqual(pages,[0,1,2])
+    }
+    @MainActor func testBookPageFailureKeepsLoadedRowsAndRetryUsesTheFailedPage() async throws {
+        let transport = BookPageTransport(), shelf = try await pagingShelf(transport)
+        await shelf.load(); await transport.failSecondPage()
+        await shelf.loadNextPage(1)
+        XCTAssertEqual(shelf.items.map(\.id),["one","two"])
+        XCTAssertEqual(shelf.next,1); XCTAssertTrue(shelf.failedNextPage)
+        await shelf.retry()
+        XCTAssertEqual(shelf.items.map(\.id),["one","two","three"])
+        XCTAssertFalse(shelf.failedNextPage); XCTAssertNil(shelf.message)
+        let pages = await transport.pages; XCTAssertEqual(pages,[0,1,1,1,1,1])
+    }
+    @MainActor func testOldBookPageCannotAppendAfterChangingSearchOrSigningOut() async throws {
+        for clear in [false,true] {
+            let transport = BookPageTransport(), shelf = try await pagingShelf(transport)
+            await shelf.load(); await transport.holdSecondPage()
+            let old = Task { await shelf.loadNextPage(1) }
+            for _ in 0..<100 { if await transport.waiting { break }; try await Task.sleep(for:.milliseconds(10)) }
+            if clear { shelf.clear() } else { shelf.query = "New"; await shelf.load() }
+            await transport.release(); await old.value
+            XCTAssertEqual(shelf.items.map(\.id),clear ? [] : ["new-one","new-two"])
+            XCTAssertFalse(shelf.loading); XCTAssertNil(shelf.message)
+        }
+    }
     @MainActor func testMultipartBookPlaysShortFinalChapterFromItsExactStart() async throws {
         let transport = BookSessionTransport(multipart:true)
         let api = APIClient(transport:transport, store:UITestStore())
@@ -270,6 +313,29 @@ final class AudiobookSessionTests: XCTestCase {
         }
     }
 
+}
+
+private actor BookPageTransport: HTTPTransport {
+    private let fallback = UITestTransport()
+    private var hold = false, failures = 0
+    private var continuation: CheckedContinuation<Void,Never>?
+    private(set) var waiting = false
+    private(set) var pages: [Int] = []
+    func holdSecondPage() { hold = true }
+    func failSecondPage() { failures = 4 }
+    func release() { hold = false; continuation?.resume(); continuation = nil }
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        guard request.url?.path == "/api/v1/audiobooks/library" else { return try await fallback.send(request) }
+        let values = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)?.queryItems ?? []
+        let page = Int(values.first { $0.name == "page" }?.value ?? "0") ?? 0
+        let query = values.first { $0.name == "q" }?.value ?? ""
+        pages.append(page)
+        if page == 1 && hold { waiting = true; await withCheckedContinuation { continuation = $0 } }
+        if page == 1 && failures > 0 { failures -= 1; throw URLError(.timedOut) }
+        let ids = !query.isEmpty ? ["new-one","new-two"] : page == 0 ? ["one","two"] : page == 1 ? ["two","three"] : ["four"]
+        let books = ids.map { ["id":$0,"library_id":"books","title":$0,"author":"Writer","narrator":"Reader","series":"","description":"","cover":"","duration":120] as [String:Any] }
+        return HTTPResult(status:200,data:try JSONSerialization.data(withJSONObject:["items":books,"libraries":[["id":"books","name":"Books"]],"library_id":"books","total":4,"next_page":page < 2 ? page+1 as Any : NSNull()]))
+    }
 }
 @MainActor private final class BookPartRequests {
     weak var store: AudiobookStore?
