@@ -134,16 +134,106 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(download.label.lowercased().contains("download"))
         let downloadScreenshot = XCTAttachment(screenshot:app.screenshot()); downloadScreenshot.name = "Audiobook cover and download circle"; downloadScreenshot.lifetime = .keepAlways; add(downloadScreenshot)
         app.buttons["Close audiobook player"].tap()
+        app.buttons["detailBookActions"].tap()
         let unread = app.buttons["markAudiobookUnread"]
-        for _ in 0..<5 where !unread.isHittable { app.swipeUp() }
         XCTAssertTrue(unread.waitForExistence(timeout:10)); unread.tap()
-        let reset = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in !app.buttons["Play from beginning"].exists },object:nil)
+        let listen = app.buttons["listenAudiobook"]
+        let reset = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in listen.exists && listen.label.contains("Listen now") },object:nil)
         XCTAssertEqual(XCTWaiter.wait(for:[reset],timeout:20),.completed)
-        XCTAssertFalse(app.buttons["Play from beginning"].exists)
-        let stale = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in app.buttons["Play from beginning"].exists },object:nil)
+        let stale = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in listen.label.contains("Continue listening") },object:nil)
         stale.isInverted = true
         XCTAssertEqual(XCTWaiter.wait(for:[stale],timeout:2),.completed)
     }
+    @MainActor func testAudiobookActionsUnreadAndFinishedStayConsistentAcrossShelves() {
+        let app = openBookFixture(["ARRIFY_UI_STALE_BOOK_PROGRESS":"1"])
+        app.buttons["Home"].firstMatch.tap()
+        let homeBook = app.buttons["homeContinueBook-book-one"]
+        XCTAssertTrue(homeBook.waitForExistence(timeout:10))
+        homeBook.tap()
+        XCTAssertTrue(app.buttons["detailBookActions"].waitForExistence(timeout:10))
+        XCTAssertFalse(app.buttons["audiobookPlayPause"].exists,"Home title navigation must not autoplay either")
+        app.navigationBars["Audiobook"].buttons.element(boundBy:0).tap()
+        XCTAssertFalse(app.descendants(matching:.any)["homePullRefresh"].exists,"Navigation/layout must not arm refresh")
+        app.buttons["Library"].firstMatch.tap()
+        let card = app.buttons["continue-audiobook-book-one"]
+        XCTAssertTrue(card.waitForExistence(timeout:15))
+        app.buttons["continueBookActions-book-one"].tap()
+        for title in ["Book details","Play next","Add to Up Next","Mark as unread","Mark as finished"] { XCTAssertTrue(app.buttons[title].waitForExistence(timeout:5),title) }
+        app.buttons["Book details"].tap()
+        XCTAssertTrue(app.buttons["listenAudiobook"].waitForExistence(timeout:10))
+        XCTAssertFalse(app.buttons["audiobookPlayPause"].exists,"Opening details must not start playback")
+        XCTAssertTrue(app.buttons["detailBookActions"].exists)
+        app.navigationBars["Audiobook"].buttons.element(boundBy:0).tap()
+        app.buttons["audiobookFilter-started"].tap()
+        let row = app.buttons["audiobook-book-one"]
+        XCTAssertTrue(row.waitForExistence(timeout:10))
+        app.buttons["shelfBookActions-book-one"].tap()
+        for title in ["Book details","Play next","Add to Up Next","Mark as unread","Mark as finished"] { XCTAssertTrue(app.buttons[title].waitForExistence(timeout:5),title) }
+        app.buttons["Book details"].tap()
+        XCTAssertTrue(app.buttons["listenAudiobook"].waitForExistence(timeout:10))
+        app.buttons["detailBookActions"].tap()
+        XCTAssertTrue(app.buttons["markAudiobookFinished"].waitForExistence(timeout:5))
+        app.buttons["markAudiobookUnread"].tap()
+        let reset = XCTNSPredicateExpectation(predicate:NSPredicate(format:"label CONTAINS %@","Listen now"),object:app.buttons["listenAudiobook"])
+        XCTAssertEqual(XCTWaiter.wait(for:[reset],timeout:15),.completed)
+        app.navigationBars["Audiobook"].buttons.element(boundBy:0).tap()
+        XCTAssertTrue(app.staticTexts["No books in progress"].waitForExistence(timeout:10))
+        app.scrollViews["audiobookShelfScroll"].swipeDown()
+        XCTAssertFalse(row.exists,"A stale refresh must not resurrect a reset book")
+        app.buttons["audiobookFilter-unstarted"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout:10))
+        app.buttons["audiobookFilter-all"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout:10))
+        XCTAssertFalse(card.exists,"Unread must leave Continue listening too")
+        app.buttons["shelfBookActions-book-one"].tap(); app.buttons["markAudiobookFinished"].tap()
+        app.buttons["audiobookFilter-finished"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout:10))
+        XCTAssertTrue(row.staticTexts["Finished"].exists)
+        XCTAssertFalse(app.buttons["audiobookPlayPause"].exists,"Reading-status changes must never autoplay")
+        let image = XCTAttachment(screenshot:XCUIScreen.main.screenshot()); image.name = "Consistent audiobook actions and reading shelves"; image.lifetime = .keepAlways; add(image)
+    }
+
+    @MainActor func testAudiobookRecoveryKeepsChaptersAndPlayerOpensBookDetails() {
+        let app = openBookFixture(["ARRIFY_UI_BOOK_EDITION_CONFLICT":"1"])
+        app.buttons["audiobook-book-one"].tap()
+        XCTAssertTrue(app.buttons["listenAudiobook"].waitForExistence(timeout:10)); app.buttons["listenAudiobook"].tap()
+        let review = app.buttons["reviewAudiobookPlace"]
+        XCTAssertTrue(review.waitForExistence(timeout:15))
+        let scroll = app.scrollViews["audiobookPlayerScroll"]
+        for _ in 0..<5 where !review.isHittable { scroll.swipeUp() }
+        XCTAssertTrue(app.buttons["audiobookPlayerChapter-0.0"].exists)
+        XCTAssertTrue(app.buttons["audiobookPlayerChapter-60.0"].exists)
+        XCTAssertFalse(app.buttons["Resume server position"].exists)
+        XCTAssertFalse(app.buttons["Keep this device’s position"].exists)
+        let player = XCTAttachment(screenshot:XCUIScreen.main.screenshot()); player.name = "Audiobook recovery card with intact chapters"; player.lifetime = .keepAlways; add(player)
+        review.tap()
+        XCTAssertTrue(app.buttons["useRemoteAudiobookPlace"].waitForExistence(timeout:10))
+        XCTAssertTrue(app.staticTexts["0:40"].exists); XCTAssertTrue(app.staticTexts["0:20"].exists)
+        let sheet = XCTAttachment(screenshot:XCUIScreen.main.screenshot()); sheet.name = "Choose an audiobook saved place"; sheet.lifetime = .keepAlways; add(sheet)
+        app.buttons["Done"].tap()
+        let cover = app.buttons["audiobookPlayerCoverDetails"]
+        for _ in 0..<6 where !cover.isHittable { scroll.swipeDown() }
+        XCTAssertTrue(cover.isHittable); cover.tap()
+        XCTAssertTrue(app.buttons["listenAudiobook"].waitForExistence(timeout:10))
+        XCTAssertTrue(app.buttons["detailBookActions"].exists)
+        let detail = XCTAttachment(screenshot:XCUIScreen.main.screenshot()); detail.name = "Book details directly from the audiobook player"; detail.lifetime = .keepAlways; add(detail)
+    }
+
+    @MainActor private func openBookFixture(_ environment: [String:String]) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
+        for (key,value) in environment { app.launchEnvironment[key] = value }
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout:30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout:20)); app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Audiobooks"].firstMatch.waitForExistence(timeout:20)); app.buttons["Audiobooks"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["audiobook-book-one"].waitForExistence(timeout:15))
+        return app
+    }
+
     @MainActor func testAudiobookDownloadPiePausesAndResumesWithoutPausingPlayback() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
@@ -170,7 +260,8 @@ final class LaunchTests: XCTestCase {
         let download = app.buttons["audiobookPlayerDownload"]
         XCTAssertTrue(download.waitForExistence(timeout:10)); XCTAssertEqual(download.label,"Pause download")
         XCTAssertEqual(download.frame.width,44,accuracy:1); XCTAssertEqual(download.frame.height,44,accuracy:1)
-        let title = app.staticTexts["audiobookPlayerTitle"]
+        let title = app.buttons["audiobookPlayerTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout:10))
         XCTAssertLessThanOrEqual(title.frame.maxX,download.frame.minX)
         XCTAssertEqual(title.frame.midY,download.frame.midY,accuracy:1)
         XCTAssertLessThanOrEqual(download.frame.maxX,app.scrollViews["audiobookPlayerScroll"].frame.maxX-32)
@@ -498,6 +589,7 @@ final class LaunchTests: XCTestCase {
         let recent = app.buttons["homeRecentTrack-1"]
         XCTAssertTrue(recent.waitForExistence(timeout: 10))
         let beforePull = recent.label
+        XCTAssertFalse(app.descendants(matching:.any)["homePullRefresh"].exists,"Player dismissal must not leave a layout-triggered spinner")
         // Start above the horizontal rails and pull beyond the native refresh threshold.
         // ScrollView's accessibility frame extends under the status bar. Anchor
         // the touch to visible content so this tests Home instead of system chrome.
@@ -508,6 +600,7 @@ final class LaunchTests: XCTestCase {
         start.press(forDuration: 0.1, thenDragTo: end)
         expectation(for: NSPredicate(format: "label != %@", beforePull), evaluatedWith: recent)
         waitForExpectations(timeout: 10)
+        XCTAssertTrue(app.descendants(matching:.any)["homePullRefresh"].waitForNonExistence(timeout:10),"Completed refresh must clear its indicator")
         XCTAssertTrue(app.buttons["recentlyPlayedAll"].exists)
         app.buttons["expandPlayer"].tap()
         XCTAssertFalse(app.buttons["retrySavedSongsRefresh"].exists)
@@ -556,6 +649,7 @@ final class LaunchTests: XCTestCase {
             XCTAssertTrue(!title.exists || title.frame.minY < initialTitleY - 100, "Minimizing the player must not reset Home to the top")
             XCTAssertEqual(playlist.frame.minY, scrolledY, accuracy: 3,
                            "Home must retain its exact browsing position after player dismissal")
+            XCTAssertFalse(app.descendants(matching:.any)["homePullRefresh"].exists,"Returning to Home must not create a refresh without a pull")
         }
     }
     @MainActor func testHomeRecentSongsAndFullScreenSongActions() {

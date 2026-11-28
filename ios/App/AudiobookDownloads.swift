@@ -88,7 +88,7 @@ import CryptoKit
         return root?.appending(path:id + "/" + record.transferId + "/" + partName(part))
     }
     func file(_ book: Audiobook, part: AudiobookPart) -> URL? {
-        guard let record = records[book.id], record.manifest.book.sourceRevision == book.sourceRevision,
+        guard let record = records[book.id], AudiobookEdition.matches(record.manifest.book,book),
               let file = path(book.id, part),
               let bytes = (try? file.resourceValues(forKeys:[.fileSizeKey]))?.fileSize, bytes > 0,
               part.sizeBytes == nil || part.sizeBytes == 0 || Int64(bytes) == part.sizeBytes else { return nil }
@@ -98,6 +98,11 @@ import CryptoKit
         guard let book = records[id]?.manifest.book, let parts = book.parts, !parts.isEmpty else { return false }
         return parts.allSatisfy { file(book, part:$0) != nil }
     }
+    func needsUpdate(_ book: Audiobook) -> Bool {
+        guard let stored = records[book.id]?.book, book.sourceRevision != nil || book.audioRevision != nil else { return false }
+        return !AudiobookEdition.matches(stored,book)
+    }
+    func complete(_ book: Audiobook) -> Bool { !needsUpdate(book) && complete(book.id) }
     func completedParts(_ id: String) -> Int {
         guard let book = records[id]?.manifest.book else { return 0 }
         return book.parts?.filter { file(book, part:$0) != nil }.count ?? 0
@@ -135,7 +140,7 @@ import CryptoKit
             guard capacity > min(size, Int64.max - 256*1024*1024) + 256*1024*1024 else {
                 errors[id] = "There isn’t enough free space to download this book."; return
             }
-            if let old = records[id], old.manifest.book.sourceRevision != manifest.book.sourceRevision {
+            if let old = records[id], !AudiobookEdition.matches(old.manifest.book,manifest.book) {
                 await remove(id)
             }
             let old = records[id]

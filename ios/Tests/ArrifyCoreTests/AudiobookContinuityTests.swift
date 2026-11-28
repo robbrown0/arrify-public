@@ -114,6 +114,47 @@ import XCTest
         XCTAssertEqual(book.authors?.first?.id,"author"); XCTAssertNil(book.publishedDate)
         XCTAssertEqual(book.publishedYear,"2024")
     }
+    func testShelfStatesTreatUnreadAndFinishedConsistently() {
+        XCTAssertEqual(AudiobookReadingState(nil),.unstarted)
+        XCTAssertEqual(AudiobookReadingState(.init(currentTime:0,lastUpdate:10,isFinished:false)),.unstarted)
+        XCTAssertEqual(AudiobookReadingState(.init(currentTime:30,lastUpdate:10,isFinished:false)),.started)
+        XCTAssertEqual(AudiobookReadingState(.init(currentTime:0,lastUpdate:10,isFinished:true)),.finished)
+        XCTAssertEqual(AudiobookReadingState(.init(currentTime:.nan,lastUpdate:10,isFinished:false)),.unstarted)
+        XCTAssertFalse(AudiobookReadingState.unstarted.matches("started"))
+        XCTAssertTrue(AudiobookReadingState.unstarted.matches("unstarted"))
+        XCTAssertTrue(AudiobookReadingState.finished.matches("all"))
+    }
+    func testMediaIdentityAllowsMetadataCorrectionsButNeverDifferentAudioOrBooks() throws {
+        let original = try identityBook(source:"old-metadata",audio:"same-audio")
+        let corrected = try identityBook(source:"new-metadata",audio:"same-audio")
+        XCTAssertTrue(AudiobookEdition.matches(original,corrected))
+        XCTAssertTrue(AudiobookEdition.matches(AudiobookCheckpoint(book:original,deviceId:"device"),corrected))
+        XCTAssertFalse(AudiobookEdition.matches(original,try identityBook(source:"old-metadata",audio:"replacement-audio")))
+        XCTAssertFalse(AudiobookEdition.matches(original,try identityBook(source:"old-metadata",audio:"same-audio",id:"different-book")))
+        XCTAssertFalse(AudiobookEdition.matches(try identityBook(source:"old-metadata"),corrected),"Legacy metadata alone cannot prove that audio is unchanged")
+        XCTAssertTrue(AudiobookEdition.matches(try identityBook(source:"old-metadata"),original),"Unchanged legacy downloads remain compatible")
+    }
+    func testOldProgressJournalsDecodeWithoutNewMediaIdentityOrStatusFields() throws {
+        let data = Data(#"{"bookId":"book","sourceRevision":"legacy","sessionId":"session","deviceId":"device","baseRemoteStamp":4,"seq":1,"position":30,"finished":false}"#.utf8)
+        let value = try JSONDecoder().decode(AudiobookCheckpoint.self,from:data)
+        XCTAssertNil(value.audioRevision); XCTAssertNil(value.isStatusChange)
+        XCTAssertEqual(value.position,30)
+    }
+    func testEditionConflictsHaveDistinctRecoveryFromPositionConflicts() {
+        let edition = AudiobookPlaybackIssue.classify(APIError.rejected(status:409,code:"audiobook_edition_changed",message:"Fixture"))
+        XCTAssertEqual(edition,.editionChanged); XCTAssertTrue(edition.isConflict)
+        let legacy = AudiobookPlaybackIssue.classify(APIError.rejected(status:409,code:"audiobook_conflict",message:"This audiobook changed. Your offline place is saved; download the current edition before syncing it."))
+        XCTAssertEqual(legacy,.editionChanged)
+        let position = AudiobookPlaybackIssue.classify(APIError.rejected(status:409,code:"audiobook_conflict",message:"Your place changed on another device."))
+        XCTAssertEqual(position,.conflict("Your place changed on another device."))
+        XCTAssertEqual(AudiobookPlaybackIssue.classify(AudiobookPlaybackIssue.storage),.storage)
+    }
+    private func identityBook(source:String,audio:String? = nil,id:String = "book") throws -> Audiobook {
+        var value: [String:Any] = ["id":id,"library_id":"books","title":"Story","author":"Writer","narrator":"Reader","series":"","description":"","cover":"","duration":120,"source_revision":source]
+        value["audio_revision"] = audio
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(Audiobook.self,from:JSONSerialization.data(withJSONObject:value))
+    }
 }
 @MainActor private final class BookSyncBarrier {
     private var work: CheckedContinuation<Void,Never>?

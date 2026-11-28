@@ -272,6 +272,75 @@ final class PlaybackTransitionTests: XCTestCase {
         await next.value
     }
 
+    @MainActor func testInterruptedCachedNextStartsBeforeDelayedAcknowledgement() async throws {
+        let (player, transport) = try await fixture(cachedNext:true)
+        defer { player.stop() }
+        NotificationCenter.default.post(name:AVAudioSession.interruptionNotification,object:nil,
+            userInfo:[AVAudioSessionInterruptionTypeKey:AVAudioSession.InterruptionType.began.rawValue])
+        for _ in 0..<100 where player.showsPauseControl { try await Task.sleep(for:.milliseconds(10)) }
+        XCTAssertFalse(player.showsPauseControl)
+        let started = ProcessInfo.processInfo.systemUptime
+        var returned = false
+        let next = Task { await player.send("next"); returned = true }
+        for _ in 0..<200 where !returned { try await Task.sleep(for:.milliseconds(10)) }
+        XCTAssertTrue(returned,"An explicit Next must reactivate and use verified audio without waiting for the server")
+        XCTAssertEqual(player.state?.currentTrackId,2)
+        if returned {
+            for _ in 0..<500 where player.navigationPending { try await Task.sleep(for:.milliseconds(10)) }
+            XCTAssertFalse(player.navigationPending,"Measure real playback progress, not just a local command")
+            XCTAssertTrue(player.isPlaying)
+            let commits = await transport.nextCommits
+            XCTAssertEqual(commits,0,"The acknowledgement must still be held during the measurement")
+            print("NEXT_LATENCY interrupted-cached actual_progress_ms=\(Int((ProcessInfo.processInfo.systemUptime-started)*1000)) acknowledgement_held=true")
+        }
+        for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for:.milliseconds(10)) }
+        await transport.allowTransitionsImmediately(); await transport.releaseNext(); await next.value
+        for _ in 0..<200 { if await transport.nextCommits == 1 { break }; try await Task.sleep(for:.milliseconds(10)) }
+        let commits = await transport.nextCommits
+        XCTAssertEqual(commits,1)
+        XCTAssertEqual(player.state?.currentTrackId,2,"The late acknowledgement must not replay or skip another song")
+    }
+
+    @MainActor func testPauseAndRapidNextDuringInterruptionActivationCannotAdvance() async throws {
+        let session = DelayedActivationSession()
+        let (player,transport) = try await fixture(cachedNext:true,audioSession:session)
+        defer { player.stop() }
+        NotificationCenter.default.post(name:AVAudioSession.interruptionNotification,object:nil,
+            userInfo:[AVAudioSessionInterruptionTypeKey:AVAudioSession.InterruptionType.began.rawValue])
+        for _ in 0..<100 where player.showsPauseControl { try await Task.sleep(for:.milliseconds(10)) }
+        session.hold = true
+        let next = Task { await player.send("next") }
+        for _ in 0..<100 where !session.waiting { try await Task.sleep(for:.milliseconds(10)) }
+        XCTAssertTrue(session.waiting)
+        await player.send("next") // Coalesce the second tap during activation.
+        await player.send("pause")
+        session.release(); await next.value
+        let requests = await transport.nextRequests
+        XCTAssertEqual(requests,0)
+        XCTAssertEqual(player.state?.currentTrackId,1)
+        XCTAssertEqual(player.player.rate,0)
+        XCTAssertFalse(player.showsPauseControl)
+        XCTAssertFalse(player.navigationPending)
+    }
+
+    @MainActor func testRecoveryCannotRestartPreviousSongWhileNextAwaitsServer() async throws {
+        let (player,transport) = try await fixture()
+        defer { player.stop() }
+        let original = try XCTUnwrap(player.player.currentItem)
+        let next = Task { await player.send("next") }
+        for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for:.milliseconds(10)) }
+        XCTAssertTrue(player.navigationPending)
+        player.player.pause() // The watchdog would see no progress while Next is pending.
+        player.recoverServerRoute()
+        XCTAssertFalse(player.recovering,"Navigation owns the transition; recovery must not restart the old current song")
+        XCTAssertTrue(player.player.currentItem === original)
+        XCTAssertEqual(player.state?.currentTrackId,1)
+        await transport.allowTransitionsImmediately(); await transport.releaseNext(); await next.value
+        for _ in 0..<500 where player.navigationPending { try await Task.sleep(for:.milliseconds(10)) }
+        XCTAssertEqual(player.state?.currentTrackId,2)
+        XCTAssertTrue(player.isPlaying)
+    }
+
     @MainActor func testRapidCachedSkipIsCoalescedUntilPlaybackProgress() async throws {
         let (player, transport) = try await fixture(cachedNext: true, windowSize: 4)
         defer { player.stop() }

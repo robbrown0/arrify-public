@@ -384,7 +384,7 @@ class AudiobookTests(unittest.TestCase):
         first = self.books.download(1, {'book_id':'book-one'}, self.token, 'web')
         old = self.fixture.item
         def changed(book_id='book-one'):
-            item = old(book_id); item['updatedAt'] = 100; return item
+            item = old(book_id); item['media']['tracks'][0]['metadata'] = {'mtimeMs':100}; return item
         self.fixture.item = changed
         second_token = self.a.login('readerone', 'a-strong-password')
         second = self.books.download(1, {'book_id':'book-one'}, second_token, 'web')
@@ -396,10 +396,71 @@ class AudiobookTests(unittest.TestCase):
         self.assertEqual(self.books.download(1, {'book_id':'book-one'}, self.token, 'web')['lease'], first['lease'])
         old = self.fixture.item
         def changed(book_id='book-one'):
-            item = old(book_id); item['updatedAt'] = 100; return item
+            item = old(book_id); item['media']['tracks'][0]['metadata'] = {'mtimeMs':100}; return item
         self.fixture.item = changed
         self.assertNotEqual(self.books.download(1, {'book_id':'book-one'}, self.token, 'web')['lease'], first['lease'])
         with self.assertRaises(BookError): self.books.stream(first['lease'], 0)
+
+    def test_library_rechecks_progress_when_provider_filter_contains_a_reset_book(self):
+        self.books.provider.user(1, 'PATCH', '/api/me/progress/book-one', {'currentTime':30, 'isFinished':False})
+        download = self.books.download(1, {'book_id':'book-one'}, self.token, 'web')
+        stamp = self.books.remote_progress(1, 'book-one')['lastUpdate']
+        self.books.offline_progress(1, {'book_id':'book-one', 'source_revision':download['book']['source_revision'],
+            'session_id':'reset-book', 'device_id':self.device, 'base_remote_stamp':stamp, 'seq':1, 'position':0})
+        original = self.books.provider.user
+        def stale_filter(uid, method, path, *args, **kwargs):
+            if '/items?' in path: return {'results':[self.fixture.item()], 'total':1}
+            return original(uid, method, path, *args, **kwargs)
+        with patch.object(self.books.provider, 'user', side_effect=stale_filter):
+            self.assertEqual(self.books.library(1, progress_filter='started')['items'], [])
+            self.assertEqual(self.books.library(1, progress_filter='finished')['items'], [])
+            self.assertEqual([x['id'] for x in self.books.library(1, progress_filter='unstarted')['items']], ['book-one'])
+        self.assertEqual(self.books.continue_listening(1)['items'], [])
+
+    def test_audio_identity_ignores_metadata_edits_but_detects_media_changes(self):
+        item = self.fixture.item()
+        before = self.books.metadata(item, True)
+        item['updatedAt'] = 200
+        item['media']['metadata']['title'] = 'Corrected title'
+        item['media']['chapters'][0]['title'] = 'Corrected chapter'
+        corrected = self.books.metadata(item, True)
+        self.assertNotEqual(before['source_revision'], corrected['source_revision'], 'Keep the legacy client identity compatible')
+        self.assertEqual(before['audio_revision'], corrected['audio_revision'])
+        for field, value in [('contentUrl','/api/items/book-one/file/456'), ('duration',119), ('startOffset',1)]:
+            changed = self.fixture.item(); changed['media']['tracks'][0][field] = value
+            self.assertNotEqual(before['audio_revision'], self.books.metadata(changed, True)['audio_revision'], field)
+        changed = self.fixture.item(); changed['media']['tracks'][0]['metadata'] = {'mtimeMs':123,'size':800}
+        self.assertNotEqual(before['audio_revision'], self.books.metadata(changed, True)['audio_revision'])
+
+    def test_metadata_only_download_refresh_keeps_grants_on_both_devices(self):
+        first = self.books.download(1, {'book_id':'book-one'}, self.token, 'web')
+        other_token = self.a.login('readerone', 'a-strong-password')
+        other = self.books.download(1, {'book_id':'book-one'}, other_token, 'web')
+        original = self.fixture.item
+        def corrected(book_id='book-one'):
+            item = original(book_id); item['updatedAt'] = 123; return item
+        self.fixture.item = corrected
+        refreshed = self.books.download(1, {'book_id':'book-one'}, self.token, 'web')
+        self.assertEqual(first['lease'], refreshed['lease'])
+        self.books.stream(first['lease'],0); self.books.stream(other['lease'],0)
+
+    def test_audio_identity_allows_metadata_only_sync_and_rejects_real_replacement(self):
+        download = self.books.download(1, {'book_id':'book-one'}, self.token, 'web')
+        data = {'book_id':'book-one', 'source_revision':download['book']['source_revision'],
+                'audio_revision':download['book']['audio_revision'], 'session_id':'metadata-sync',
+                'device_id':self.device, 'base_remote_stamp':0, 'seq':1, 'position':30}
+        original = self.fixture.item
+        def corrected(book_id='book-one'):
+            item = original(book_id); item['updatedAt'] = 321; return item
+        self.fixture.item = corrected
+        self.assertTrue(self.books.offline_progress(1, data)['saved'])
+        def replaced(book_id='book-one'):
+            item = corrected(book_id); item['media']['tracks'][0]['duration'] = 119; return item
+        self.fixture.item = replaced
+        with self.assertRaises(BookError) as failure:
+            self.books.offline_progress(1, {**data, 'seq':2, 'position':40})
+        self.assertEqual(failure.exception.reason, 'edition_changed')
+        self.assertEqual(self.books.remote_progress(1, 'book-one')['currentTime'],30)
 
     def test_offline_download_progress_restarts_rewinds_and_lost_ack_without_claiming_output(self):
         download = self.books.download(1, {'book_id':'book-one'}, self.token, 'web')
@@ -481,3 +542,28 @@ class AudiobookHTTPTests(unittest.TestCase):
         self.assertEqual(code, 200)
         for private in ('private-admin-password', 'access-', 'refresh-', 'contentUrl', 'password'):
             self.assertNotIn(private.encode(), body)
+
+    def test_native_http_distinguishes_changed_audio_from_a_saved_position_conflict(self):
+        from app.native_auth import NativeSessions
+        pair = NativeSessions(self.a).login({'username':'readerone', 'password':'a-strong-password', 'device_name':'iPad'})
+        headers = {'Authorization':'Bearer ' + pair['access_token']}
+        book = self.books.book(1, 'book-one')
+        checkpoint = {'book_id':book['id'], 'source_revision':book['source_revision'],
+                      'audio_revision':book['audio_revision'], 'session_id':'http-offline-session',
+                      'device_id':self.device, 'base_remote_stamp':0, 'seq':1, 'position':30}
+        original = self.fixture.item
+        def changed(book_id='book-one'):
+            value = original(book_id)
+            value['media']['tracks'][0]['metadata'] = {'mtimeMs':987654}
+            return value
+        with patch.object(self.fixture, 'item', side_effect=changed):
+            code, body, _ = self.call('/api/v1/audiobooks/offline-progress', 'POST', checkpoint,
+                                     authenticated=False, csrf=False, headers=headers)
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)['error']['code'], 'audiobook_edition_changed')
+        self.books.provider.user(1, 'PATCH', '/api/me/progress/book-one', {'currentTime':90,'isFinished':False})
+        code, body, _ = self.call('/api/v1/audiobooks/offline-progress', 'POST', checkpoint,
+                                 authenticated=False, csrf=False, headers=headers)
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)['error']['code'], 'audiobook_conflict')
+        self.assertEqual(self.books.remote_progress(1, 'book-one')['currentTime'], 90)

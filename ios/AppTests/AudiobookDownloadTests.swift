@@ -209,6 +209,77 @@ final class AudiobookDownloadTests: XCTestCase {
         XCTAssertEqual(books.position,0)
         XCTAssertTrue(downloads.complete(book.id))
     }
+    @MainActor func testMetadataCorrectionKeepsOfflineAudioButNewMediaNeedsAnUpdate() async throws {
+        let api = try await makeAPI()
+        let downloads = AudiobookDownloads(api:api,configuration:Self.configuration)
+        defer { downloads.clear() }
+        await downloads.download("book-one")
+        for _ in 0..<300 where !downloads.complete("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        let original = try XCTUnwrap(downloads.records["book-one"]?.book)
+        let part = try XCTUnwrap(original.parts?.first)
+        let encoder = JSONEncoder(); encoder.keyEncodingStrategy = .convertToSnakeCase
+        var corrected = try XCTUnwrap(JSONSerialization.jsonObject(with:encoder.encode(original)) as? [String:Any])
+        corrected["source_revision"] = "corrected-metadata"
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let same = try decoder.decode(Audiobook.self,from:JSONSerialization.data(withJSONObject:corrected))
+        XCTAssertTrue(downloads.complete(same)); XCTAssertFalse(downloads.needsUpdate(same))
+        XCTAssertNotNil(downloads.file(same,part:part))
+        corrected["audio_revision"] = "replacement-audio"
+        let changed = try decoder.decode(Audiobook.self,from:JSONSerialization.data(withJSONObject:corrected))
+        XCTAssertTrue(downloads.needsUpdate(changed)); XCTAssertFalse(downloads.complete(changed))
+        XCTAssertTrue(downloads.complete("book-one"),"The earlier copy remains intact until the user updates it")
+        XCTAssertNil(downloads.file(changed,part:part),"Never play earlier audio as the new version")
+    }
+
+    @MainActor func testOfflineUnreadSurvivesStoreRecreationAndSynchronizesWithoutPlayback() async throws {
+        let transport = DownloadContractTransport(fail:false)
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://book-download.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let downloads = AudiobookDownloads(api:api,configuration:Self.configuration)
+        await downloads.download("book-one")
+        for _ in 0..<300 where !downloads.complete("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        downloads.checkpoint("book-one",position:0.5,remoteStamp:100,finished:false)
+        let original = try XCTUnwrap(downloads.records["book-one"]?.book)
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession()), audio = DownloadPlaybackAudio()
+        let books = AudiobookStore(api:api,music:music,audioSession:audio,downloads:downloads)
+        await books.restore(); await transport.setOffline(true)
+        _ = try await books.markUnread(original)
+        XCTAssertTrue(books.hasPendingReadingState(original.id)); XCTAssertTrue(books.resumeBooks.isEmpty)
+        XCTAssertTrue(downloads.complete(original.id)); XCTAssertEqual(audio.activations,0)
+        let nextDownloads = AudiobookDownloads(api:api,configuration:Self.configuration)
+        let restored = AudiobookStore(api:api,music:music,audioSession:audio,downloads:nextDownloads)
+        defer { restored.clear(); books.clear(); music.stop() }
+        await restored.restore()
+        XCTAssertTrue(restored.hasPendingReadingState(original.id)); XCTAssertTrue(restored.resumeBooks.isEmpty)
+        XCTAssertFalse(restored.savedPlaces(for:original.id).isEmpty,"The earlier position is durable before resetting it")
+        await transport.setOffline(false); await restored.networkAvailable()
+        XCTAssertFalse(restored.hasPendingReadingState(original.id))
+        XCTAssertEqual(nextDownloads.records[original.id]?.book.progress?.currentTime,0)
+        XCTAssertEqual(audio.activations,0); XCTAssertFalse(restored.active)
+        let accepted = await transport.acceptedOfflinePositions
+        XCTAssertFalse(accepted.isEmpty); XCTAssertTrue(accepted.allSatisfy { $0 == 0 })
+    }
+
+    @MainActor func testExplicitRemoteChoiceNeverFallsBackToTheOldDownloadedPosition() async throws {
+        let transport = DownloadContractTransport(fail:false)
+        let api = APIClient(transport:transport,store:UITestStore())
+        try await api.login(endpoint:"https://book-download.invalid",username:"fixture",password:"fixture",deviceName:"Test")
+        let downloads = AudiobookDownloads(api:api,configuration:Self.configuration)
+        await downloads.download("book-one")
+        for _ in 0..<300 where !downloads.complete("book-one") { try await Task.sleep(for:.milliseconds(20)) }
+        downloads.checkpoint("book-one",position:0.5)
+        let book = try XCTUnwrap(downloads.records["book-one"]?.book)
+        let music = PlaybackCoordinator(api:api,audioSession:UITestAudioSession()), audio = DownloadPlaybackAudio()
+        let books = AudiobookStore(api:api,music:music,audioSession:audio,downloads:downloads)
+        defer { books.clear(); music.stop() }
+        await books.restore(); await transport.setOffline(true)
+        books.play(book,useRemote:true)
+        for _ in 0..<300 where books.preparing { try await Task.sleep(for:.milliseconds(20)) }
+        XCTAssertFalse(books.playing); XCTAssertFalse(books.active); XCTAssertEqual(audio.activations,0)
+        XCTAssertTrue(downloads.complete(book.id)); XCTAssertNotNil(books.message)
+        XCTAssertEqual(books.savedPlaces(for:book.id).first?.checkpoint.position,0.5)
+    }
+
     @MainActor private func makeAPI(fail: Bool = false, empty: Bool = false) async throws -> APIClient {
         let api = APIClient(transport:DownloadContractTransport(fail:fail, empty:empty), store:UITestStore())
         try await api.login(endpoint:"https://book-download.invalid", username:"fixture", password:"fixture", deviceName:"Test")
@@ -224,6 +295,9 @@ private actor DownloadContractTransport: HTTPTransport {
     private var remotePosition = 0.0
     private var remoteStamp = 0.0
     private(set) var downloadRequests = 0
+    private var offline = false
+    private(set) var acceptedOfflinePositions: [Double] = []
+    func setOffline(_ value: Bool) { offline = value }
     func serverPosition(_ position: Double,stamp: Double) { remotePosition = position; remoteStamp = stamp }
     private var holdBookRead = false
     private var bookReadWaiting = false
@@ -256,6 +330,9 @@ private actor DownloadContractTransport: HTTPTransport {
     init(fail: Bool, empty: Bool = false, holdTransfer: Bool = false) { self.fail = fail; self.empty = empty; self.holdTransfer = holdTransfer }
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let path = request.url!.path
+        if offline { throw URLError(.notConnectedToInternet) }
+        if path.hasSuffix("/offline-progress"), let data = request.httpBody,
+           let value = try JSONSerialization.jsonObject(with:data) as? [String:Any], let position = value["position"] as? Double { acceptedOfflinePositions.append(position) }
         if blocked && (path.hasSuffix("/offline-progress") || path.hasSuffix("/native/playback")) { await withCheckedContinuation { waiter = $0 } }
         let object: [String:Any]
         if path.hasSuffix("capabilities") {
@@ -270,7 +347,7 @@ private actor DownloadContractTransport: HTTPTransport {
                 playWaiting = false
             }
             let lease = String(repeating:fail ? "b" : empty ? "c" : holdTransfer ? "d" : "a", count:43)
-            let book: [String:Any] = ["id":"book-one","library_id":"books","title":"Downloaded story","author":"Author","narrator":"Reader","series":"","description":"","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","duration":1,
+            let book: [String:Any] = ["id":"book-one","library_id":"books","title":"Downloaded story","author":"Author","narrator":"Reader","series":"","description":"","cover":"/api/v1/audiobooks/cover/book-one","source_revision":"fixture","audio_revision":"fixture-audio","duration":1,
                 "parts":[["index":0,"start":0,"duration":1,"size_bytes":BookAudioProtocol.audio.count,"mime":"audio/wav","url":"/api/v1/audiobooks/stream/"+lease+"/0"]],"chapters":[["title":"Chapter","start":0,"end":1]],"progress":["currentTime":remotePosition,"lastUpdate":remoteStamp,"isFinished":false]]
             if path.contains("/book/"), holdBookRead {
                 holdBookRead = false

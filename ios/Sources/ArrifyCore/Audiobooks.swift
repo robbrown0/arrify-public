@@ -8,6 +8,17 @@ public struct AudiobookProgress: Codable, Sendable {
         self.currentTime = currentTime; self.lastUpdate = lastUpdate; self.isFinished = isFinished
     }
 }
+public enum AudiobookReadingState: String, Sendable {
+    case unstarted, started, finished
+    public init(_ progress: AudiobookProgress?) {
+        if progress?.isFinished == true { self = .finished }
+        else if let time = progress?.currentTime, time.isFinite, time > 0 { self = .started }
+        else { self = .unstarted }
+    }
+    public func matches(_ filter: String) -> Bool {
+        !["unstarted","started","finished"].contains(filter) || rawValue == filter
+    }
+}
 public struct AudiobookChapter: Codable, Sendable, Identifiable {
     public let title: String
     public let start: Double
@@ -44,11 +55,25 @@ public struct Audiobook: Codable, Sendable, Identifiable {
     public let cover: String
     public let description: String
     public let sourceRevision: String?
+    public let audioRevision: String?
     public let parts: [AudiobookPart]?
     public let chapters: [AudiobookChapter]?
     public let bookmarks: [AudiobookBookmark]?
     public var progress: AudiobookProgress?
     public var remaining: Double { max(0, duration - (progress?.currentTime ?? 0)) }
+    public var readingState: AudiobookReadingState { AudiobookReadingState(progress) }
+}
+public enum AudiobookEdition {
+    public static func matches(_ left: Audiobook, _ right: Audiobook) -> Bool {
+        guard left.id == right.id, left.libraryId == right.libraryId else { return false }
+        if let first = left.audioRevision, !first.isEmpty, let second = right.audioRevision, !second.isEmpty { return first == second }
+        return left.sourceRevision != nil && left.sourceRevision == right.sourceRevision
+    }
+    public static func matches(_ checkpoint: AudiobookCheckpoint, _ book: Audiobook) -> Bool {
+        guard checkpoint.bookId == book.id else { return false }
+        if let first = checkpoint.audioRevision, !first.isEmpty, let second = book.audioRevision, !second.isEmpty { return first == second }
+        return !checkpoint.sourceRevision.isEmpty && checkpoint.sourceRevision == book.sourceRevision
+    }
 }
 public struct AudiobookPreferences: Codable, Sendable, Equatable {
     public var visible = true
@@ -105,14 +130,17 @@ public struct AudiobookReceipt: Decodable, Sendable {
 public struct AudiobookCheckpoint: Codable, Sendable {
     public let bookId: String
     public let sourceRevision: String
+    public let audioRevision: String?
     public var sessionId: String
     public let deviceId: String
     public var baseRemoteStamp: Double
     public var seq: Int
     public var position: Double
     public var finished: Bool
+    public var isStatusChange: Bool?
     public init(book: Audiobook, deviceId: String) {
         bookId = book.id; sourceRevision = book.sourceRevision ?? ""
+        audioRevision = book.audioRevision
         sessionId = UUID().uuidString.lowercased(); self.deviceId = deviceId
         baseRemoteStamp = book.progress?.lastUpdate ?? 0; seq = 0
         position = book.progress?.currentTime ?? 0; finished = false
@@ -135,6 +163,15 @@ public struct AudiobookJournalEntry: Codable, Sendable {
         if let remoteStamp { checkpoint.baseRemoteStamp = remoteStamp }
         if checkpoint.seq == sequence { dirty = false }
         return !dirty
+    }
+}
+public struct AudiobookSavedPlace: Codable, Sendable, Identifiable {
+    public let checkpoint: AudiobookCheckpoint
+    public let title: String
+    public let savedAt: Date
+    public var id: String { checkpoint.sessionId + ":" + String(checkpoint.seq) }
+    public init(checkpoint: AudiobookCheckpoint, title: String, savedAt: Date = Date()) {
+        self.checkpoint = checkpoint; self.title = title; self.savedAt = savedAt
     }
 }
 public enum AudiobookTimeline {
@@ -216,16 +253,18 @@ public enum AudiobookTimeline {
 }
 
 public enum AudiobookPlaybackIssue: Error, Equatable, Sendable {
-    case offline, temporary, authentication, missing, invalidResponse, progressPending, conflict(String), media
+    case offline, temporary, authentication, missing, invalidResponse, progressPending, conflict(String), editionChanged, storage, media
     public static func classify(_ error: any Error) -> Self {
         if let issue = error as? Self { return issue }
         if case APIError.signInRequired = error { return .authentication }
         if case APIError.retryDeferred = error { return .temporary }
-        if case APIError.rejected(let status, _, let message) = error {
+        if case APIError.rejected(let status, let code, let message) = error {
             switch status {
             case 401, 403: return .authentication
             case 404, 410: return .missing
-            case 409: return .conflict(message)
+            case 409:
+                if code == "audiobook_edition_changed" || message.hasPrefix("This audiobook changed.") || message.contains("edition changed") { return .editionChanged }
+                return .conflict(message)
             case 429, 500...599: return .temporary
             default: return .invalidResponse
             }
@@ -241,8 +280,9 @@ public enum AudiobookPlaybackIssue: Error, Equatable, Sendable {
     public var category: String {
         switch self { case .offline: "network"; case .temporary: "server"; case .authentication: "authentication"
         case .missing: "unavailable"; case .invalidResponse: "invalid-response"; case .progressPending: "progress-pending"
-        case .conflict: "conflict"; case .media: "media" }
+        case .conflict: "conflict"; case .editionChanged: "edition-changed"; case .storage: "storage"; case .media: "media" }
     }
+    public var isConflict: Bool { if case .conflict = self { return true }; return self == .editionChanged }
     public var message: String {
         switch self {
         case .offline: "The server couldn’t be reached. Your place is saved. Try again, or play a downloaded copy."
@@ -252,6 +292,8 @@ public enum AudiobookPlaybackIssue: Error, Equatable, Sendable {
         case .invalidResponse: "The server returned an unexpected audiobook response. Your place is saved. Try again."
         case .progressPending: "Your listening position is still syncing. Your place is saved. Try again shortly."
         case .conflict(let text): text
+        case .editionChanged: "An updated version of this book is available. Your saved place is safe."
+        case .storage: "Your device couldn’t save your place. Check available storage and try again."
         case .media: "This audio could not be opened. Your place is saved. Try again or download the book."
         }
     }

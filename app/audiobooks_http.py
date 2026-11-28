@@ -85,7 +85,8 @@ def dispatch(handler, path, data=None):
         status = 503 if exc.status == 401 else exc.status
         error = {'error': str(exc)}
         if handler.token()[1] == 'native':
-            error = {'error': {'code':'audiobook_conflict' if status==409 else 'audiobooks_unavailable', 'message':str(exc)}}
+            code = 'audiobook_edition_changed' if exc.reason == 'edition_changed' else 'audiobook_conflict' if status == 409 else 'audiobooks_unavailable'
+            error = {'error': {'code':code, 'message':str(exc)}}
         handler.json(error, status)
     return True
 

@@ -14,7 +14,7 @@ struct AudiobookShelf: View {
     private var showsLoading: Bool { !downloaded && (shelf.loading || !shelf.hasLoaded && shelf.message == nil) }
     private var showsEmpty: Bool {
         if downloaded { return displayed.isEmpty }
-        return shelf.hasLoaded && !shelf.loading && displayed.isEmpty && shelf.message == nil
+        return shelf.hasLoaded && !shelf.loading && displayed.isEmpty && shelf.next == nil && shelf.message == nil
     }
     private var taskKey: String { shelf.requestKey + ":" + section + ":" + String(scenePhase == .active) }
     private var recoveryKey: String { taskKey + ":" + String(shelf.needsRecovery) }
@@ -30,13 +30,21 @@ struct AudiobookShelf: View {
                         Text("Continue listening").font(.title2.bold())
                         ScrollView(.horizontal, showsIndicators:false) {
                             HStack(alignment:.top, spacing:16) { ForEach(model.books.resumeBooks) { book in
-                                Button { model.books.play(book) } label: {
-                                    VStack(alignment:.leading, spacing:7) {
+                                VStack(alignment:.leading, spacing:7) {
+                                    ZStack(alignment:.bottomTrailing) {
+                                        NavigationLink { AudiobookDetail(model:model,initial:book) } label: {
                                         RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").aspectRatio(1,contentMode:.fit).clipShape(RoundedRectangle(cornerRadius:12))
-                                        Text(book.title).font(.headline).lineLimit(2)
+                                        }.buttonStyle(.plain).accessibilityLabel("Book details for " + book.title).accessibilityIdentifier("continue-audiobook-" + book.id)
+                                        Button { model.books.play(book) } label: { Image(systemName:"play.fill").foregroundStyle(.black).frame(width:44,height:44).background(.green,in:Circle()) }
+                                            .buttonStyle(.plain).padding(8).accessibilityLabel("Resume " + book.title).accessibilityIdentifier("resume-audiobook-" + book.id)
+                                    }
+                                    HStack(alignment:.top,spacing:4) {
+                                        NavigationLink { AudiobookDetail(model:model,initial:book) } label: { Text(book.title).font(.headline).foregroundStyle(.primary).lineLimit(2) }.buttonStyle(.plain)
+                                        Spacer(minLength:0)
+                                        AudiobookActionsMenu(model:model,initial:book,identifier:"continueBookActions-" + book.id)
+                                    }
                                         Text("Resume · " + AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary)
-                                    }.frame(width:155,alignment:.leading)
-                                }.buttonStyle(.plain).accessibilityIdentifier("continue-audiobook-" + book.id)
+                                }.frame(width:180,alignment:.leading)
                             } }
                         }
                     }
@@ -59,7 +67,7 @@ struct AudiobookShelf: View {
                 if section == "books" && showsEmpty { emptyShelf }
                 if section == "books" && shelf.next != nil && !downloaded { Button("More books") { Task { await shelf.load(more:true) } }.disabled(shelf.loading) }
             }.padding(24)
-        }.background(Color.black).navigationTitle("Audiobooks")
+        }.accessibilityIdentifier("audiobookShelfScroll").background(Color.black).navigationTitle("Audiobooks")
             .searchable(text:$shelf.query, prompt:section == "books" ? "Books, authors, narrators" : "Search " + section)
             .onChange(of:savedSort) { shelf.sort = savedSort }
             .onAppear { if savedSort == "release_date" { savedSort = "release" }; shelf.sort = savedSort }
@@ -97,8 +105,8 @@ struct AudiobookShelf: View {
         HStack { ForEach(["all", "unstarted", "started", "finished", "downloads"], id:\.self) { value in filterButton(value) } }
     }
     private var emptyShelf: some View {
-        let title: String = shelf.filter == "downloads" ? "Take a story with you" : "Your bookshelf"
-        let detail: String = shelf.filter == "downloads" ? "Download a book to listen without a connection." : "Your books will appear here when available."
+        let title = ["downloads":"Take a story with you","started":"No books in progress","unstarted":"No unread books","finished":"No finished books"][shelf.filter] ?? "Your bookshelf"
+        let detail = ["downloads":"Download a book to listen without a connection.","started":"Books you start will appear here until you finish or mark them as unread.","finished":"Finished books will appear here.","unstarted":"Books you haven’t started will appear here."][shelf.filter] ?? "Your books will appear here when available."
         return VStack(spacing:12) {
             Image(systemName:"book.closed").font(.largeTitle).foregroundStyle(.secondary)
             Text(title).font(.title2.bold())
@@ -109,6 +117,7 @@ struct AudiobookShelf: View {
         let selected = shelf.filter == value
         return Button(action:{ shelf.filter = value }) { Text(filterTitle(value)) }
             .buttonStyle(.bordered).tint(selected ? Color.green : Color.gray)
+            .accessibilityIdentifier("audiobookFilter-" + value)
     }
     private var displayed: [Audiobook] {
         if shelf.filter == "downloads" { return model.books.downloads.records.values.map { $0.book }.filter { shelf.query.isEmpty || ($0.title + " " + $0.author).localizedCaseInsensitiveContains(shelf.query) }.sorted { left, right in
@@ -120,7 +129,7 @@ struct AudiobookShelf: View {
             default: return left.title.localizedStandardCompare(right.title) == .orderedAscending
             }
         } }
-        return shelf.items
+        return shelf.items.map(model.books.presentation).filter { $0.readingState.matches(shelf.filter) }
     }
     private func filterTitle(_ value: String) -> String { ["all":"All books", "unstarted":"Not started", "started":"In progress", "finished":"Finished", "downloads":"Downloaded"][value] ?? value }
 }
@@ -129,6 +138,8 @@ private struct AudiobookShelfCard: View {
     let model: AppModel
     let book: Audiobook
     var body: some View {
+        let book = model.books.presentation(self.book)
+        VStack(alignment:.leading,spacing:4) {
         NavigationLink { AudiobookDetail(model:model, initial:book) } label: {
             VStack(alignment:.leading, spacing:7) {
                 RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed")
@@ -136,22 +147,23 @@ private struct AudiobookShelfCard: View {
                 Text(book.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
                 Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                 if let series = book.seriesEntries?.first { Text(series.label).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-                if book.progress?.isFinished == true { Label("Finished", systemImage:"checkmark.circle").font(.caption) }
-                else { Text(AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary) }
+                Text(book.shelfSummary).font(.caption).foregroundStyle(.secondary)
                 AudiobookDownloadStatus(downloads:model.books.downloads, book:book)
             }.frame(maxWidth:.infinity, alignment:.leading)
         }.buttonStyle(.plain).accessibilityIdentifier("audiobook-" + book.id)
+            HStack { Spacer(); AudiobookActionsMenu(model:model,initial:book,identifier:"gridBookActions-" + book.id) }
+        }
     }
 }
 
 struct AudiobookDetail: View {
     let model: AppModel
     let initial: Audiobook
+    var onListen: (() -> Void)? = nil
     @State private var detail: Audiobook?
     @State private var error: String?
-    @State private var markingUnread = false
     @State private var detailGeneration = UUID()
-    private var book: Audiobook { detail ?? initial }
+    private var book: Audiobook { model.books.presentation(detail ?? initial) }
     var body: some View {
         ScrollView {
             VStack(alignment:.leading, spacing:20) {
@@ -170,41 +182,26 @@ struct AudiobookDetail: View {
                 if let release = book.publishedDate ?? book.publishedYear { Text("Published " + release).font(.subheadline).foregroundStyle(.secondary) }
                 if !book.narrator.isEmpty { Text("Narrated by " + book.narrator).foregroundStyle(.secondary) }
                 Text(AudiobookTimeline.time(book.duration)).foregroundStyle(.secondary)
-                Button { model.books.play(book) } label: { Label(listenTitle, systemImage:"play.fill").frame(maxWidth:.infinity, minHeight:44) }.buttonStyle(.borderedProminent)
+                Button { model.books.play(book); onListen?() } label: { Label(book.listenTitle, systemImage:"play.fill").frame(maxWidth:.infinity, minHeight:44) }.buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("listenAudiobook")
-                    .disabled(markingUnread)
-                HStack {
-                    Button("Play next") { Task { await model.books.queueBook(book.id, action:"next") } }
-                    Spacer()
-                    Button("Add to Up Next") { Task { await model.books.queueBook(book.id, action:"last") } }
-                }.frame(minHeight:44)
+                    .disabled(model.books.isUpdatingReadingState(book.id))
                 downloadControls
-                if (book.progress?.currentTime ?? 0) > 0 { Button("Play from beginning") { model.books.play(book, restart:true) } }
-                Button {
-                    markingUnread = true; error = nil; detailGeneration = UUID()
-                    Task {
-                        defer { markingUnread = false }
-                        do { detail = try await model.books.markUnread(book) }
-                        catch { self.error = AudiobookPlaybackIssue.classify(error).message }
-                    }
-                } label: {
-                    HStack { if markingUnread { ProgressView() }; Label("Mark as unread",systemImage:"arrow.counterclockwise") }.frame(minHeight:44)
-                }.disabled(markingUnread).accessibilityIdentifier("markAudiobookUnread")
-                    .accessibilityHint("Reset the saved position to the beginning. Keep downloads and bookmarks.")
+                if model.books.hasPendingReadingState(book.id) { Label("Saved on this device · Waiting to sync",systemImage:"icloud").font(.caption).foregroundStyle(.secondary) }
                 if let error { Text(error).foregroundStyle(.secondary) }
-                if let message = model.books.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
                 Text(plainDescription).textSelection(.enabled)
                 if let chapters = book.chapters {
                     Text("Chapters").font(.title2.bold())
                     ForEach(chapters) { chapter in
                         AudiobookChapterRow(chapter:chapter, current:model.books.book?.id == book.id && model.books.chapter?.id == chapter.id, playing:model.books.playing, waiting:model.books.showsPauseControl && !model.books.playing) {
-                            if model.books.active, model.books.book?.id == book.id { model.books.seek(chapter.start,resumePlayback:true) }
+                            if model.books.conflict, model.books.book?.id == book.id { model.books.play(book,useRemote:true,startingAt:chapter.start); onListen?() }
+                            else if model.books.active, model.books.book?.id == book.id { model.books.seek(chapter.start,resumePlayback:true); onListen?() }
                             else { model.books.play(book,startingAt:chapter.start) }
                         }
                     }
                 }
             }.padding(24)
         }.accessibilityIdentifier("audiobookDetailScroll").background(Color.black).navigationTitle("Audiobook").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement:.topBarTrailing) { AudiobookActionsMenu(model:model,initial:book,showsDetails:false,onListen:onListen,identifier:"detailBookActions") } }
             .task {
                 let generation = detailGeneration
                 do {
@@ -219,12 +216,8 @@ struct AudiobookDetail: View {
             }
     }
     private var plainDescription: String { book.description.replacingOccurrences(of:"<[^>]*>", with:" ", options:.regularExpression) }
-    private var listenTitle: String { (book.progress?.currentTime ?? 0) > 0 ? "Continue listening" : "Listen now" }
     @ViewBuilder private var downloadControls: some View {
         let downloads = model.books.downloads
-        if downloads.complete(book.id) {
-            Button("Remove download", role:.destructive) { Task { await model.books.removeDownload(book.id) } }.frame(minHeight:44)
-        }
         if let error = downloads.errors[book.id] { Text(error).font(.footnote).foregroundStyle(.secondary) }
     }
 }
@@ -251,24 +244,30 @@ struct AudiobookPlayer: View {
     let model: AppModel
     @State private var tab = "Chapters"
     @State private var seeking: Double?
-    @State private var keepLocal = false
+    @State private var showingDetails = false
+    @State private var reviewingPlace = false
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing:20) {
                     if let book = model.books.book {
-                        RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(width:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230, height:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230).clipShape(RoundedRectangle(cornerRadius:18))
+                        Button { showingDetails = true } label: {
+                            RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(width:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230, height:UIDevice.current.userInterfaceIdiom == .pad ? 320 : 230).clipShape(RoundedRectangle(cornerRadius:18))
+                        }.buttonStyle(.plain).accessibilityLabel("Book details for " + book.title).accessibilityIdentifier("audiobookPlayerCoverDetails")
                         VStack(alignment:.leading, spacing:8) {
                             Text(book.author).foregroundStyle(.secondary)
                             HStack(alignment:.center,spacing:16) {
-                                Text(book.title).font(.title.bold()).frame(maxWidth:.infinity,alignment:.leading).accessibilityIdentifier("audiobookPlayerTitle")
+                                Button { showingDetails = true } label: {
+                                    Text(book.title).font(.title.bold()).foregroundStyle(.primary).frame(maxWidth:.infinity,minHeight:44,alignment:.leading)
+                                }.buttonStyle(.plain).accessibilityHint("Open book details").accessibilityIdentifier("audiobookPlayerTitle")
                                 AudiobookDownloadControl(books:model.books,book:book,identifier:"audiobookPlayerDownload").id(book.id)
                             }.padding(.trailing,8)
-                            Text(model.books.chapter?.title ?? "Audiobook").foregroundStyle(.secondary)
+                            if let chapter = model.books.chapter { Text(chapter.title).foregroundStyle(.secondary) }
                         }.frame(maxWidth:.infinity, alignment:.leading)
                         Slider(value:Binding(get:{ seeking ?? model.books.position }, set:{ seeking = $0 }), in:0...max(1,book.duration)) { editing in
                             if !editing, let target = seeking { model.books.seek(target); seeking = nil }
                         }.accessibilityLabel("Book listening position").accessibilityValue(AudiobookTimeline.time(model.books.position)).accessibilityIdentifier("audiobookPosition")
+                            .disabled(model.books.conflict)
                         HStack { Text(AudiobookTimeline.time(model.books.position)); Spacer(); Text("−" + AudiobookTimeline.time(book.duration-model.books.position)) }.font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         HStack(spacing:36) {
                             Button { model.books.seek(model.books.position-Double(model.books.preferences.backSeconds)) } label: { VStack { Image(systemName:"gobackward").font(.title); Text("\(model.books.preferences.backSeconds)").font(.caption) }.frame(width:60, height:60) }.accessibilityLabel("Skip backward \(model.books.preferences.backSeconds) seconds")
@@ -285,11 +284,18 @@ struct AudiobookPlayer: View {
                             }.accessibilityIdentifier("audiobookSleep")
                             AirPlayPicker(enabled:true).frame(width:44, height:44)
                         }.frame(minHeight:44)
-                        if let message = model.books.message { Text(message).font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("audiobookMessage") }
                         if model.books.conflict {
-                            Text("Your earlier offline place is kept on this device.").font(.footnote)
-                            Button("Resume server position") { model.books.play(book, useRemote:true) }
-                            Button("Keep this device’s position") { keepLocal = true }
+                            HStack(spacing:12) {
+                                Image(systemName:model.books.recovery == .edition ? "arrow.triangle.2.circlepath" : "bookmark.circle").font(.title3).foregroundStyle(.green)
+                                VStack(alignment:.leading,spacing:3) {
+                                    Text(model.books.recovery == .edition ? "Book update available" : "Choose where to resume").font(.subheadline.weight(.semibold))
+                                    Text("Your saved place is safe.").font(.caption).foregroundStyle(.secondary)
+                                }.frame(maxWidth:.infinity,alignment:.leading)
+                                Button("Review") { reviewingPlace = true }.buttonStyle(.bordered).tint(.green).frame(minHeight:44).accessibilityIdentifier("reviewAudiobookPlace")
+                            }.padding(14).background(.white.opacity(0.06),in:RoundedRectangle(cornerRadius:14))
+                        } else if let message = model.books.message {
+                            HStack(alignment:.top,spacing:10) { Image(systemName:"info.circle").foregroundStyle(.green); Text(message).font(.footnote).foregroundStyle(.secondary).frame(maxWidth:.infinity,alignment:.leading) }
+                                .padding(12).background(.white.opacity(0.06),in:RoundedRectangle(cornerRadius:12)).accessibilityIdentifier("audiobookMessage")
                         }
                         Picker("Book details", selection:$tab) { Text("Chapters").tag("Chapters"); Text("Up Next").tag("Up Next"); Text("Bookmarks").tag("Bookmarks") }.pickerStyle(.segmented)
                         panel(book)
@@ -299,18 +305,25 @@ struct AudiobookPlayer: View {
                 .navigationTitle("Audiobook").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement:.topBarLeading) { Button { model.books.presented = false } label: { Image(systemName:"chevron.down").frame(width:44, height:44) }.accessibilityLabel("Close audiobook player") }
-                    ToolbarItem(placement:.topBarTrailing) { Button { Task { await model.books.addBookmark() } } label: { Image(systemName:"bookmark").frame(width:44, height:44) }.accessibilityLabel("Save bookmark") }
+                    ToolbarItemGroup(placement:.topBarTrailing) {
+                        Button { Task { await model.books.addBookmark() } } label: { Image(systemName:"bookmark").frame(width:44, height:44) }.accessibilityLabel("Save bookmark").disabled(model.books.conflict || model.books.preparing)
+                        if let book = model.books.book { AudiobookActionsMenu(model:model,initial:book,onDetails:{ showingDetails = true },identifier:"playerBookActions") }
+                    }
+                }
+                .navigationDestination(isPresented:$showingDetails) {
+                    if let book = model.books.book { AudiobookDetail(model:model,initial:book,onListen:{ showingDetails = false }) }
                 }
         }.onChange(of:tab) { if tab == "Up Next" { Task { await model.books.refreshQueue() } } }
-            .confirmationDialog("Replace the saved listening position with this device’s position?", isPresented:$keepLocal, titleVisibility:.visible) {
-                Button("Keep this device’s position") { Task { await model.books.keepLocalPosition() } }
-            }
+            .sheet(isPresented:$reviewingPlace) { AudiobookPlaceReview(books:model.books) }
     }
     @ViewBuilder private func panel(_ book: Audiobook) -> some View {
         switch tab {
         case "Chapters":
             ForEach(book.chapters ?? []) { chapter in
-                AudiobookChapterRow(chapter:chapter,current:model.books.chapter?.id == chapter.id,playing:model.books.playing,waiting:model.books.showsPauseControl && !model.books.playing,identifierPrefix:"audiobookPlayerChapter") { model.books.seek(chapter.start,resumePlayback:true) }
+                AudiobookChapterRow(chapter:chapter,current:!model.books.conflict && model.books.chapter?.id == chapter.id,playing:model.books.playing,waiting:model.books.showsPauseControl && !model.books.playing,identifierPrefix:"audiobookPlayerChapter") {
+                    if model.books.conflict { model.books.play(book,useRemote:true,startingAt:chapter.start) }
+                    else { model.books.seek(chapter.start,resumePlayback:true) }
+                }
             }
         case "Up Next":
             Toggle("Continue to the next queued book", isOn:Binding(get:{ model.books.preferences.continuous }, set:{ enabled in var value = model.books.preferences; value.continuous = enabled; Task { await model.books.updatePreferences(value) } }))
@@ -399,7 +412,8 @@ private struct AudiobookDownloadStatus: View {
     let book: Audiobook
     var body: some View {
         Group {
-            if downloads.complete(book.id) { Label("Downloaded", systemImage:"checkmark.circle.fill").foregroundStyle(.green) }
+            if downloads.needsUpdate(book) { Label("Update available",systemImage:"arrow.triangle.2.circlepath").foregroundStyle(.secondary) }
+            else if downloads.complete(book) { Label("Downloaded", systemImage:"checkmark.circle.fill").foregroundStyle(.green) }
             else if downloads.working.contains(book.id) { Text("Downloading · \(Int(downloads.fraction(book.id)*100))%") }
             else if downloads.records[book.id] != nil { Label("Download paused", systemImage:"pause.circle") }
         }.font(.caption)
@@ -410,24 +424,29 @@ private struct AudiobookDownloadControl: View {
     let book: Audiobook
     let identifier: String
     @State private var pendingAction: String?
+    @State private var actionError: String?
     private var downloads: AudiobookDownloads { books.downloads }
     var body: some View {
-        let complete = downloads.complete(book.id), working = downloads.working.contains(book.id)
-        let progress = downloads.fraction(book.id), paused = downloads.records[book.id] != nil && !working && !complete
-        let action = working ? "Pause download" : paused ? "Resume download" : "Download"
-        let status = pendingAction ?? (working ? "Downloading · \(Int(progress*100))%" : paused ? "Paused · \(Int(progress*100))%" : "Listen offline")
+        let update = downloads.needsUpdate(book)
+        let complete = downloads.complete(book), working = downloads.working.contains(book.id) && !update
+        let progress = update ? 0 : downloads.fraction(book.id), paused = downloads.records[book.id] != nil && !working && !complete && !update
+        let action = update ? "Update download" : working ? "Pause download" : paused ? "Resume download" : "Download"
+        let status = pendingAction ?? (update ? "A newer version is available" : working ? "Downloading · \(Int(progress*100))%" : paused ? "Paused · \(Int(progress*100))%" : "Listen offline")
         Group {
             if complete {
                 circle(complete:true,paused:false,progress:1).frame(width:44,height:44)
                     .accessibilityElement(children:.ignore).accessibilityLabel("Downloaded").accessibilityValue("Available offline")
             } else {
                 Button {
-                    let shouldPause = downloads.working.contains(book.id)
+                    let shouldPause = downloads.working.contains(book.id) && !downloads.needsUpdate(book)
                     pendingAction = shouldPause ? "Pausing download…" : "Preparing download…"
                     Task {
                         defer { pendingAction = nil }
                         if shouldPause { await downloads.pause(book.id) }
-                        else { await downloads.download(book.id) }
+                        else {
+                            do { try books.preservePlaceBeforeDownload(book); await downloads.download(book.id) }
+                            catch { actionError = AudiobookPlaybackIssue.classify(error).message }
+                        }
                     }
                 } label: {
                     circle(complete:false,paused:paused,progress:progress).frame(width:44,height:44).contentShape(Circle())
@@ -435,6 +454,7 @@ private struct AudiobookDownloadControl: View {
                     .accessibilityLabel(action).accessibilityValue(status)
             }
         }.accessibilityIdentifier(identifier)
+            .alert("Couldn’t update the download",isPresented:Binding(get:{ actionError != nil },set:{ if !$0 { actionError = nil } })) { Button("OK",role:.cancel) {} } message: { Text(actionError ?? "") }
     }
     private func circle(complete: Bool, paused: Bool, progress: Double) -> some View {
         ZStack {
@@ -468,11 +488,167 @@ private struct AudiobookDownloadPie: Shape {
         path.closeSubpath(); return path
     }
 }
+
+private extension Audiobook {
+    var listenTitle: String { readingState == .started ? "Continue listening" : readingState == .finished ? "Listen again" : "Listen now" }
+    var shelfSummary: String { readingState == .finished ? "Finished" : AudiobookTimeline.time(readingState == .started ? remaining : duration) + (readingState == .started ? " left" : "") }
+}
+
+/// Home shares book navigation and commands with the audiobook library.
+struct AudiobookContinueRow: View {
+    let model: AppModel
+    let initial: Audiobook
+    private var book: Audiobook { model.books.presentation(initial) }
+    var body: some View {
+        HStack(spacing:12) {
+            NavigationLink { AudiobookDetail(model:model,initial:book) } label: {
+                HStack(spacing:16) {
+                    RemoteCover(path:book.cover,title:book.title,artwork:model.artwork,placeholderSymbol:"book.closed")
+                        .frame(width:72,height:72).clipShape(RoundedRectangle(cornerRadius:10))
+                    VStack(alignment:.leading,spacing:5) {
+                        Text(book.title).font(.headline).foregroundStyle(.primary)
+                        Text(book.author).font(.subheadline).foregroundStyle(.secondary)
+                        Text(book.shelfSummary).font(.caption).foregroundStyle(.secondary)
+                    }.frame(maxWidth:.infinity,alignment:.leading)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel("Book details for " + book.title).accessibilityIdentifier("homeContinueBook-" + book.id)
+            Button { model.books.play(book) } label: { Image(systemName:"play.circle.fill").font(.largeTitle).frame(width:44,height:44) }
+                .buttonStyle(.plain).tint(.green).accessibilityLabel("Resume " + book.title).accessibilityIdentifier("homeResumeBook-" + book.id)
+            AudiobookActionsMenu(model:model,initial:book,identifier:"homeContinueBookActions-" + book.id)
+        }.frame(maxWidth:.infinity,minHeight:80)
+    }
+}
+
+/// Every book surface uses the same commands and the same live progress model.
+/// Cover/title navigation is independent of the explicit listening action.
+private struct AudiobookActionsMenu: View {
+    let model: AppModel
+    let initial: Audiobook
+    var showsDetails = true
+    var onListen: (() -> Void)? = nil
+    var onDetails: (() -> Void)? = nil
+    let identifier: String
+    @State private var showingDetails = false
+    @State private var showingPlaces = false
+    @State private var error: String?
+    private var book: Audiobook { model.books.presentation(initial) }
+    var body: some View {
+        Menu {
+            if showsDetails { Button("Book details",systemImage:"info.circle") { if let onDetails { onDetails() } else { showingDetails = true } } }
+            Button(book.listenTitle,systemImage:"play.fill") { model.books.play(book); onListen?() }
+            Section {
+                Button("Play next",systemImage:"text.line.first.and.arrowtriangle.forward") { perform { await model.books.queueBook(book.id,action:"next") } }
+                Button("Add to Up Next",systemImage:"text.badge.plus") { perform { await model.books.queueBook(book.id,action:"last") } }
+            }
+            Section {
+                if book.readingState != .finished {
+                    Button("Mark as finished",systemImage:"checkmark.circle") { perform { _ = try await model.books.markFinished(book) } }.accessibilityIdentifier("markAudiobookFinished")
+                }
+                Button("Mark as unread",systemImage:"arrow.counterclockwise") { perform { _ = try await model.books.markUnread(book) } }
+                    .accessibilityIdentifier("markAudiobookUnread").accessibilityHint("Reset the saved position. Keep downloads and bookmarks.")
+                if book.readingState != .unstarted {
+                    Button("Play from beginning",systemImage:"backward.end") { perform { try model.books.restart(book); onListen?() } }
+                }
+                if !model.books.savedPlaces(for:book.id).isEmpty { Button("Saved places",systemImage:"clock.arrow.circlepath") { showingPlaces = true } }
+            }
+            Section {
+                if model.books.downloads.needsUpdate(book) {
+                    Button("Update download",systemImage:"arrow.down.circle") { perform { try model.books.preservePlaceBeforeDownload(book); await model.books.downloads.download(book.id) } }
+                } else if model.books.downloads.working.contains(book.id) {
+                    Button("Pause download",systemImage:"pause.circle") { perform { await model.books.downloads.pause(book.id) } }
+                } else if !model.books.downloads.complete(book) {
+                    Button(model.books.downloads.records[book.id] == nil ? "Download" : "Resume download",systemImage:"arrow.down.circle") { perform { await model.books.downloads.download(book.id) } }
+                }
+                if model.books.downloads.records[book.id] != nil {
+                    Button("Remove download",systemImage:"trash",role:.destructive) { perform { await model.books.removeDownload(book.id) } }
+                }
+            }
+        } label: {
+            Group { if model.books.isUpdatingReadingState(book.id) { ProgressView() } else { Image(systemName:"ellipsis") } }.frame(width:44,height:44).contentShape(Rectangle())
+        }.tint(.primary).accessibilityLabel("More options for " + book.title).accessibilityIdentifier(identifier)
+            .disabled(model.books.isUpdatingReadingState(book.id))
+            .navigationDestination(isPresented:$showingDetails) { AudiobookDetail(model:model,initial:book) }
+            .sheet(isPresented:$showingPlaces) { AudiobookSavedPlaces(books:model.books,book:book) }
+            .alert("Couldn’t update the book",isPresented:Binding(get:{ error != nil },set:{ if !$0 { error = nil } })) { Button("OK",role:.cancel) {} } message: { Text(error ?? "") }
+    }
+    private func perform(_ action: @escaping @MainActor () async throws -> Void) {
+        Task { do { try await action() } catch { self.error = AudiobookPlaybackIssue.classify(error).message } }
+    }
+}
+
+private struct AudiobookSavedPlaces: View {
+    let books: AudiobookStore
+    let book: Audiobook
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(books.savedPlaces(for:book.id)) { place in
+                        let matches = AudiobookEdition.matches(place.checkpoint,book)
+                        Button { books.resumeSavedPlace(place,in:book); dismiss() } label: {
+                            HStack(spacing:12) {
+                                Image(systemName:matches ? "play.circle" : "bookmark").foregroundStyle(.green)
+                                VStack(alignment:.leading,spacing:4) {
+                                    Text(AudiobookTimeline.time(place.checkpoint.position)).font(.headline).monospacedDigit()
+                                    Text(place.savedAt,format:.dateTime.month(.abbreviated).day().hour().minute()).font(.caption).foregroundStyle(.secondary)
+                                    if !matches { Text("Earlier version · Choose a chapter in the updated book").font(.caption).foregroundStyle(.secondary) }
+                                }
+                            }.frame(minHeight:44)
+                        }.buttonStyle(.plain).disabled(!matches)
+                    }
+                } footer: { Text("Recent places are kept on this device before you reset a book or choose another saved position.") }
+            }.scrollContentBackground(.hidden).background(.black).navigationTitle("Saved places").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement:.confirmationAction) { Button("Done") { dismiss() } } }
+        }.tint(.green).preferredColorScheme(.dark)
+    }
+}
+
+private struct AudiobookPlaceReview: View {
+    let books: AudiobookStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var loading = false
+    @State private var choosing = false
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text(books.recovery == .edition ? "An updated book is available" : "Choose where to resume").font(.title2.bold())
+                    Text(books.recovery == .edition ? "Choose the saved place to use with the current book. Your earlier place stays saved on this device." : "This book has two saved places. Choose the one you want to continue from.").foregroundStyle(.secondary)
+                }
+                Section("Saved places") {
+                    if let position = books.deviceSavedPosition { place("On this device",position:position) }
+                    if let remote = books.recoveryBook { place("Synced place",position:remote.progress?.currentTime ?? 0) }
+                    else { Label(loading ? "Checking saved places…" : "Connect to compare saved places",systemImage:loading ? "icloud" : "wifi.slash").foregroundStyle(.secondary) }
+                }
+                if let remote = books.recoveryBook {
+                    Section("Continue listening") {
+                        Button { choosing = true; Task { if books.recovery == .edition { books.useDevicePlaceInUpdatedBook() } else { await books.keepLocalPosition() }; choosing = false; if !books.conflict { dismiss() } } } label: { Label("Use this device’s place",systemImage:"play.circle") }
+                            .disabled(choosing || !books.canKeepDevicePlace).accessibilityIdentifier("useDeviceAudiobookPlace")
+                        Button { books.play(remote,useRemote:true); dismiss() } label: { Label("Use synced place",systemImage:"play.circle") }.disabled(choosing).accessibilityIdentifier("useRemoteAudiobookPlace")
+                    }
+                    if books.downloads.needsUpdate(remote) {
+                        Section { Button { Task { await books.updateCurrentDownload() } } label: { Label("Update download",systemImage:"arrow.down.circle") }.accessibilityIdentifier("updateAudiobookEdition") }
+                    }
+                } else { Button("Try again") { Task { await checkPlaces() } }.disabled(loading) }
+                if choosing { ProgressView().frame(maxWidth:.infinity) }
+            }.scrollContentBackground(.hidden).background(.black).navigationTitle("Saved place").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement:.cancellationAction) { Button("Done") { dismiss() } } }
+                .task { await checkPlaces() }
+        }.tint(.green).preferredColorScheme(.dark)
+    }
+    private func place(_ title: String,position:Double) -> some View {
+        HStack { Text(title).foregroundStyle(.secondary); Spacer(); Text(AudiobookTimeline.time(position)).font(.headline).monospacedDigit() }.frame(minHeight:44)
+    }
+    private func checkPlaces() async { loading = true; await books.refreshRecovery(); loading = false }
+}
 private struct AudiobookShelfRow: View {
     let model: AppModel
     let book: Audiobook
     var selectedSeries: String = ""
     var body: some View {
+        let book = model.books.presentation(self.book)
+        HStack(spacing:8) {
         NavigationLink { AudiobookDetail(model:model, initial:book) } label: {
             HStack(alignment:.center, spacing:16) {
                 RemoteCover(path:book.cover, title:book.title, artwork:model.artwork, placeholderSymbol:"book.closed").frame(width:76,height:76).clipShape(RoundedRectangle(cornerRadius:10))
@@ -480,12 +656,13 @@ private struct AudiobookShelfRow: View {
                     Text(book.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
                     Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                     if let series = book.seriesEntries?.first(where:{ $0.id == selectedSeries }) ?? book.seriesEntries?.first { Text(series.label).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-                    Text(book.progress?.isFinished == true ? "Finished" : AudiobookTimeline.time(book.remaining) + " left").font(.caption).foregroundStyle(.secondary)
+                    Text(book.shelfSummary).font(.caption).foregroundStyle(.secondary)
                     AudiobookDownloadStatus(downloads:model.books.downloads, book:book)
                 }.frame(maxWidth:.infinity, alignment:.leading)
-                Image(systemName:"chevron.right").font(.caption).foregroundStyle(.secondary)
             }.padding(.vertical,4).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityIdentifier("audiobook-" + book.id)
+            AudiobookActionsMenu(model:model,initial:book,identifier:"shelfBookActions-" + book.id)
+        }
     }
 }
 private struct AudiobookGroupBrowser: View {
