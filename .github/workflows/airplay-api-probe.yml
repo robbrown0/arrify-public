@@ -35,7 +35,7 @@ jobs:
           mkdir -p build/airplay-probe/Probe.app
           SDK_PATH=$(xcrun --sdk iphonesimulator --show-sdk-path)
           ARCH=$(uname -m)
-          xcrun swiftc -swift-version 6 -sdk "$SDK_PATH" -target "$ARCH-apple-ios27.0-simulator" ios/tools/AirPlayAPIProbe.swift -o build/airplay-probe/Probe.app/Probe
+          xcrun swiftc -parse-as-library -swift-version 6 -sdk "$SDK_PATH" -target "$ARCH-apple-ios27.0-simulator" ios/tools/AirPlayAPIProbe.swift -o build/airplay-probe/Probe.app/Probe
           python3 - <<'PY'
           import plistlib,pathlib
           info={'CFBundleIdentifier':'com.robnets.arrify.airplay-api-probe','CFBundleExecutable':'Probe','CFBundleName':'AirPlay API Probe','CFBundlePackageType':'APPL','CFBundleVersion':'1','CFBundleShortVersionString':'1.0','LSRequiresIPhoneOS':True,'UIDeviceFamily':[1,2],'MinimumOSVersion':'27.0','MDESupportsUniversalURLPlayback':True,'UILaunchScreen':{}}
