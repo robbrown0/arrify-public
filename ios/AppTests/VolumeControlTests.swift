@@ -59,7 +59,7 @@ final class VolumeControlTests: XCTestCase {
     @MainActor func testRefreshWaitsForDragAndNeverCopiesOrWritesVolume() {
         let original = MPVolumeView(frame: .zero)
         let finger = TrackingVolumeSlider(frame: CGRect(x: 0, y: 0, width: 130, height: 30))
-        finger.value = 0.8; finger.tracking = true
+        finger.value = 0.8; finger.simulatedTracking = true
         original.addSubview(finger)
         let receiverSlider = UISlider(frame: finger.frame)
         receiverSlider.value = 0.18
@@ -78,7 +78,7 @@ final class VolumeControlTests: XCTestCase {
         XCTAssertFalse(container.refreshIfIdle())
         XCTAssertTrue(container.volumeView === original, "Do not replace a control during a drag")
         XCTAssertTrue(original.isUserInteractionEnabled)
-        finger.tracking = false
+        finger.simulatedTracking = false
         XCTAssertTrue(container.refreshIfIdle())
         XCTAssertFalse(container.volumeView === original)
         XCTAssertEqual(receiverSlider.value, 0.18, accuracy: 0.001, "Never copy the old route's slider value")
@@ -119,8 +119,8 @@ final class VolumeControlTests: XCTestCase {
 }
 
 @MainActor private final class TrackingVolumeSlider: UISlider {
-    var tracking = false
-    override var isTracking: Bool { tracking }
+    var simulatedTracking = false
+    override var isTracking: Bool { simulatedTracking }
 }
 
 @MainActor private final class VolumeEventCounter: NSObject {
