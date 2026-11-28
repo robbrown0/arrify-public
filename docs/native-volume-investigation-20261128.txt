@@ -12,6 +12,17 @@ has fine one-percentage-point taps, immediate feedback, and correct updates from
 hardware buttons, Control Center and other controllers. Room names alone are not
 device identities. A room can contain a primary speaker and bonded satellites.
 
+Native lifecycle correction
+The reviewed PR73 change is composed into this candidate without editing its
+separate worktree. It removes an MPVolumeView subclass, which Apple explicitly
+disallows. It refreshes native controls after first window attachment, route
+changes, media-service reset and foreground/reattachment. Event bursts coalesce;
+an active drag finishes before replacement. Opening/replacing a control never
+copies a volume value, sends a volume action or activates/reroutes playback.
+Ordinary playback and layout updates retain control identity. This corrects a
+concrete unsupported use and lifecycle risks; it does not prove the audible
+first-touch defect is resolved or provide a universal one-point setter.
+
 First implementation: read-only measurements
 The existing opt-in selected-output capture did not include numeric volume values
 and referenced only the expanded control. Add separate observations for:
@@ -92,6 +103,23 @@ Next implementation gates
 7. Require physical AirPlay qualification on Sonos and a non-Sonos receiver for
    first touch, fine steps, hardware/Control Center changes, groups, backgrounding
    and reconnection. Simulator geometry or fake receiver timings are not that proof.
+
+First device check for the qualified candidate
+Start the local capture in Settings > Audio output diagnostics while already
+playing on the intended output at a comfortable existing level. Capture the
+untouched control, press hardware volume-down once, and capture again. Share
+the local report explicitly. This first check does not require reproducing the
+loud first drag. Compare observations with receiver readback if available; do
+not infer an exact receiver percentage from the phone or player's gain.
+
+The complete volume panel still requires device-specific precision support.
+AVRoutePickerView remains the universal supported nearby-AirPlay list; do not
+replace it with a room-name scan that omits receivers or selects bonded parts.
+Sonos group-relative +/-1 and its ordered events are a distinct adapter, not a
+claim that every AirPlay receiver exposes the same controls. Never show a custom
+step as confirmed until its authority acknowledges it. A failed/unknown relative
+write is reconciled by a read, not blindly repeated. Do not ship decorative +/-
+buttons backed by stale absolute values or undocumentable system-volume writes.
 
 Release status
 Build46 contains the previously qualified audiobook/music corrections. This branch

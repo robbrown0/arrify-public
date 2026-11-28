@@ -672,7 +672,7 @@ extension NowPlayingArtworkTests {
         // A real UISlider supplies asymmetric geometry even when the simulator
         // omits MPVolumeView's system slider. This is a layout regression test,
         // not a claim of physical-device visual verification.
-        let volume = LayoutReportingVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
+        let volume = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 130, height: 44))
         let container = VolumeControlContainer(volumeView: volume, centersNativeHeight: true)
         container.frame = CGRect(x: 0, y: 0, width: 130, height: 44)
         container.layoutIfNeeded()
@@ -687,12 +687,12 @@ extension NowPlayingArtworkTests {
                 slider.frame = CGRect(x: 0, y: y, width: width, height: 30)
                 let originalFrame = slider.frame
                 // Native layout may change after the parent has already laid out.
-                volume.didLayout?()
+                container.setNeedsLayout(); container.layoutIfNeeded()
                 let track = slider.trackRect(forBounds: slider.bounds)
                 XCTAssertEqual(slider.convert(track, to: container).midY, container.bounds.midY, accuracy: 0.5)
                 XCTAssertEqual(slider.frame, originalFrame, "Never reposition the native slider itself")
                 let settledTransform = volume.transform
-                volume.didLayout?()
+                container.setNeedsLayout(); container.layoutIfNeeded()
                 XCTAssertEqual(volume.transform, settledTransform, "Repeated layout must not accumulate an offset")
                 let point = CGPoint(x: track.midX, y: track.midY)
                 let displayedPoint = slider.convert(point, to: container)
