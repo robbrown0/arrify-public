@@ -55,7 +55,7 @@ final class VolumeControlTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(600))
             XCTAssertFalse(container.volumeView === previous)
             let slider = try XCTUnwrap(container.volumeView.viewWithTag(4647) as? UISlider)
-            slider.frame.origin.y = -17
+            slider.frame.origin.y = -13
             let frame = slider.frame
             try await Task.sleep(for: .milliseconds(60))
             assertCentered(slider, in: container)
@@ -83,7 +83,7 @@ final class VolumeControlTests: XCTestCase {
         notifications.post(name: UIApplication.didBecomeActiveNotification, object: nil)
         try await Task.sleep(for: .milliseconds(600))
         let current = try XCTUnwrap(container.volumeView.viewWithTag(4647) as? UISlider)
-        current.frame.origin.y = -15
+        current.frame.origin.y = -11
         try await Task.sleep(for: .milliseconds(60))
         assertCentered(current, in: container)
         container.removeFromSuperview()
@@ -127,6 +127,9 @@ final class VolumeControlTests: XCTestCase {
         let track = slider.trackRect(forBounds: slider.bounds)
         XCTAssertEqual(slider.convert(track, to: container).midY, container.bounds.midY,
                        accuracy: 0.5, file: file, line: line)
+        let point = slider.convert(CGPoint(x: track.midX, y: track.midY), to: container)
+        XCTAssertTrue(container.hitTest(point, with: nil) === slider,
+                      "A touch at the visible track must reach the same slider", file: file, line: line)
     }
 
     @MainActor func testFirstPresentationRefreshesAfterWindowAttachment() async throws {
