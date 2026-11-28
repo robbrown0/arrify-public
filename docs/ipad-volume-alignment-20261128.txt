@@ -1,0 +1,45 @@
+iPad mini-player volume alignment regression (2026-11-28)
+
+The user supplied a build47 iPad screenshot with the visible volume thumb above
+the transport/AirPlay control row. Source history locates the regression in PR73,
+merged c721562: removing an unsupported MPVolumeView subclass also removed the
+after-native-layout callback introduced by the earlier iPad centering fix.
+The replacement observed parent layout and one subsequent main-queue turn only.
+Later native child layout could change the visible center with no parent event.
+
+The existing geometry test explicitly invalidated and laid out the parent AFTER
+moving its stand-in slider. That forced the correction it was supposed to verify,
+so it could not catch the missing late-layout notification. The existing UI test
+saved a screenshot but made no visible-slider center assertion. The simulator
+does not provide a physical receiver-backed slider.
+
+Correction
+A public CFRunLoop beforeWaiting observer follows completed main-loop layout work
+while the tablet control is attached and active. It detects late native insertion,
+replacement and ancestor geometry changes without subclassing MPVolumeView or
+relying on a fixed delay. Only the whole native view's translation changes, and
+only for a meaningful alignment difference. No native slider frame, value, target,
+audio-session setting or route is written. Foreground resumes observation;
+detaching/suspending removes it. It creates no timer or idle wakeup source.
+The existing route/foreground refresh and active-drag protections are retained.
+
+Regression evidence and qualification
+Audit source64bf0fd adds the corrected existing geometry test to build47 code.
+It lets the initial deferred alignment finish, moves the slider later, waits for
+ordinary UI work and checks its visible track WITHOUT invalidating the parent.
+The separate audit run records failing-before evidence; do not ship that branch.
+
+The candidate additionally covers late insertion/replacement, ancestor layout,
+route refresh, resized rows, foreground/detach and unchanged phone geometry.
+The new UI case measures the visible UISlider against Previous in portrait,
+Channels, landscape and restored portrait, and retains screenshots. Its real
+UIKit slider stand-in is explicitly opt-in and simulator-only; it cannot be
+compiled into a physical-device release. This verifies layout, not receiver
+volume behavior. The existing focused workflow includes these regressions;
+full iPhone/iPad release qualification, signing and internal-only gates remain.
+Actual run IDs/results and publication receipts are maintained outside source.
+
+Primary platform references
+https://developer.apple.com/documentation/mediaplayer/mpvolumeview
+https://developer.apple.com/documentation/corefoundation/cfrunloopactivity/beforewaiting
+https://developer.apple.com/documentation/corefoundation/cfrunloopobservercreatewithhandler(_:_:_:_:_:)

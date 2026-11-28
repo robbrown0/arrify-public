@@ -882,6 +882,43 @@ extension LaunchTests {
 }
 
 extension LaunchTests {
+    @MainActor func testTabletVolumeVisibleSliderStaysCenteredAfterLateLayoutAndRotation() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_VOLUME_LAYOUT"] = "1"
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        guard app.textFields["tabletSearch"].waitForExistence(timeout: 5) else { throw XCTSkip("iPad layout only") }
+        app.buttons["Songs"].firstMatch.tap()
+        let play = app.buttons["Play Just Like a Pill by P!nk"]
+        XCTAssertTrue(play.waitForExistence(timeout: 10)); play.tap()
+        let slider = app.sliders["nativeVolumeLayoutFixture"]
+        let previous = app.buttons["Previous song"]
+        @MainActor func assertVisibleAlignment(_ name: String) {
+            let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                slider.exists && (slider.value as? String) == "Late native layout"
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed)
+            XCTAssertTrue(previous.waitForExistence(timeout: 5))
+            XCTAssertEqual(slider.frame.midY, previous.frame.midY, accuracy: 1,
+                           "Check the visible UIKit slider, not its always-centered 44-point wrapper")
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = name; screenshot.lifetime = .keepAlways; add(screenshot)
+        }
+        assertVisibleAlignment("iPad late native volume alignment portrait")
+        app.buttons["Channels"].firstMatch.tap()
+        assertVisibleAlignment("iPad late native volume alignment Channels")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        assertVisibleAlignment("iPad late native volume alignment landscape")
+        XCUIDevice.shared.orientation = .portrait
+        assertVisibleAlignment("iPad late native volume alignment restored portrait")
+    }
+
     @MainActor func testTabletSearchKeepsHeaderAndPlayerVisible() throws {
         let app = XCUIApplication(); app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launch()
         XCTAssertTrue(app.textFields["username"].waitForExistence(timeout: 10))
