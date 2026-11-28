@@ -901,7 +901,9 @@ extension LaunchTests {
         let previous = app.buttons["Previous song"]
         @MainActor func assertVisibleAlignment(_ name: String) {
             let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                slider.exists && (slider.value as? String) == "Late native layout"
+                slider.exists && previous.exists && (slider.value as? String) == "Late native layout" &&
+                slider.frame.height > 0 && previous.frame.height > 0 &&
+                abs(slider.frame.midY - previous.frame.midY) <= 1
             }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed)
             XCTAssertTrue(previous.waitForExistence(timeout: 5))
