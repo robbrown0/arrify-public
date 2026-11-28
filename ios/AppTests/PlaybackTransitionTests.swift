@@ -6,6 +6,18 @@ import ArrifyCore
 @testable import Arrify
 
 final class PlaybackTransitionTests: XCTestCase {
+    @MainActor func testSilentAudioFixturesHaveFinalizedNativeFrameCounts() throws {
+        for seconds in [0.5,1.0,180.0] {
+            let url = try UITestAudiobookAudio.make(seconds:seconds)
+            defer { try? FileManager.default.removeItem(at:url) }
+            try autoreleasepool {
+                let reader = try AVAudioFile(forReading:url)
+                XCTAssertEqual(reader.length,AVAudioFramePosition(seconds*8000))
+                XCTAssertEqual(reader.fileFormat.sampleRate,8000)
+                XCTAssertEqual(reader.fileFormat.channelCount,1)
+            }
+        }
+    }
     @MainActor func testTimelineReplacesPreviousItemClockWithCurrentItemTimeAndLength() async throws {
         let (player, _) = try await fixture(cachedNext: true)
         defer { player.stop() }
@@ -63,20 +75,7 @@ final class PlaybackTransitionTests: XCTestCase {
         let api = APIClient(transport: transport, store: UITestStore())
         try await api.login(endpoint: "https://fixture.invalid", username: "fixture", password: "fixture", deviceName: "Test")
         // Real local silent audio keeps AVQueuePlayer deterministic and offline.
-        let audio = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
-        let format = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)!
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8000 * 180)!
-        buffer.frameLength = buffer.frameCapacity
-        buffer.floatChannelData![0].initialize(repeating: 0, count: Int(buffer.frameLength))
-        do {
-            let file = try AVAudioFile(forWriting: audio, settings: [
-                AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 8000, AVNumberOfChannelsKey: 1,
-                AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false
-            ])
-            try file.write(from: buffer)
-        }
-        let bytes = try Data(contentsOf: audio)
-        try FileManager.default.removeItem(at: audio)
+        let bytes = UITestAudiobookAudio.data(seconds:180)
         await transport.setSize(bytes.count)
         await transport.setWindowSize(queueSize ?? windowSize)
         if queueSize != nil { await transport.useRollingWindow() }
@@ -86,23 +85,35 @@ final class PlaybackTransitionTests: XCTestCase {
             try bytes.write(to: target)
             return (target, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         })
-        let coordinator = PlaybackCoordinator(api: api, audioSession: audioSession, cache: cache, backgroundTasks: backgroundTasks, makePlayerItem: makePlayerItem)
+        var initialItem: AVPlayerItem?, arranging = true
+        let coordinator = PlaybackCoordinator(api: api, audioSession: audioSession, cache: cache, backgroundTasks: backgroundTasks, makePlayerItem: { url in
+            let item = makePlayerItem(url)
+            if arranging, initialItem == nil { initialItem = item }
+            return item
+        })
         coordinator.onHistoryRecorded = onHistoryRecorded
         await transport.setOwner(coordinator.deviceId)
         let manifest = try await api.manifest(deviceId: coordinator.deviceId, epoch: 1, profile: "original")
         await cache.fill(manifest, api: api)
+        for media in manifest.items {
+            let file = try XCTUnwrap(cache.file(for:media))
+            let frames = try autoreleasepool { try AVAudioFile(forReading:file).length }
+            XCTAssertEqual(frames,AVAudioFramePosition(8000*180))
+        }
         await coordinator.send("resume")
         for _ in 0..<500 where coordinator.player.items().count < windowSize || !coordinator.isPlaying {
             if coordinator.playbackFailed { break }
             try await Task.sleep(for: .milliseconds(20))
         }
         guard coordinator.player.items().count == windowSize, coordinator.isPlaying else {
-            let error = coordinator.player.currentItem?.error as NSError?
-            let detail = "Fixture failed to play: \(error?.domain ?? "none") / \(error?.code ?? 0), \(coordinator.message ?? "no message")"
+            let item = coordinator.player.currentItem ?? initialItem
+            let error = item?.error as NSError?
+            let detail = "Fixture failed to play: \(error?.domain ?? "none") / \(error?.code ?? 0), status=\(item?.status.rawValue ?? -1), duration=\(item?.duration.seconds ?? -1), queue=\(coordinator.player.items().count), control=\(coordinator.player.timeControlStatus.rawValue), \(coordinator.message ?? "no message")"
             coordinator.stop()
             XCTFail(detail)
             throw NSError(domain: "PlaybackFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: detail])
         }
+        arranging = false; initialItem = nil
         // Existing network-path regressions exercise an unverified successor.
         // Cached continuity is covered separately with cachedNext: true.
         if !cachedNext {

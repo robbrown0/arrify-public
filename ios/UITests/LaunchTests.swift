@@ -27,6 +27,28 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(reconnecting.waitForNonExistence(timeout:15),"Recovery continues while this screen is visible")
         XCTAssertTrue(book.exists)
     }
+    @MainActor func testAudiobookAuthorSeriesNavigationAndBookNumbers() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"; app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout:30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout:20)); app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Audiobooks"].firstMatch.waitForExistence(timeout:20)); app.buttons["Audiobooks"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["audiobook-book-one"].waitForExistence(timeout:20))
+        let sections = app.segmentedControls["audiobookBrowseSections"]
+        sections.buttons["Authors"].tap()
+        XCTAssertTrue(app.buttons["A Writer"].waitForExistence(timeout:15)); app.buttons["A Writer"].tap()
+        XCTAssertTrue(app.buttons["Stories"].firstMatch.waitForExistence(timeout:15))
+        let author = XCTAttachment(screenshot:app.screenshot()); author.name = "Audiobook author and series"; author.lifetime = .keepAlways; add(author)
+        app.buttons["Stories"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Book 2.5 · Stories"].firstMatch.waitForExistence(timeout:15))
+        let series = XCTAttachment(screenshot:app.screenshot()); series.name = "Audiobook numbered series"; series.lifetime = .keepAlways; add(series)
+        app.buttons["audiobook-book-one"].tap()
+        XCTAssertTrue(app.staticTexts["Published 2024"].waitForExistence(timeout:10))
+    }
     @MainActor func testAudiobookShelfPlayerAndOptionalSettings() {
         let app = XCUIApplication()
         app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
@@ -70,6 +92,99 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["audiobookMiniPlayer"].waitForExistence(timeout:10))
         app.buttons["audiobookMiniPlayer"].tap()
         XCTAssertTrue(app.buttons["audiobookPlayPause"].waitForExistence(timeout:10))
+    }
+    @MainActor func testAudiobookChapterJumpHighlightsPlayingChapterAndCanMarkUnread() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
+        app.launchEnvironment["ARRIFY_UI_UNREAD_READ_RACE"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout:30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout:20)); app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Audiobooks"].firstMatch.waitForExistence(timeout:20)); app.buttons["Audiobooks"].firstMatch.tap()
+        let book = app.buttons["audiobook-book-one"]
+        XCTAssertTrue(book.waitForExistence(timeout:20)); book.tap()
+        let chapter = app.buttons["audiobookChapter-60.0"]
+        let detailScroll = app.scrollViews["audiobookDetailScroll"]
+        for _ in 0..<5 {
+            if chapter.isHittable && chapter.frame.maxY <= detailScroll.frame.maxY-24 { break }
+            detailScroll.swipeUp()
+        }
+        XCTAssertTrue(chapter.waitForExistence(timeout:10))
+        XCTAssertGreaterThanOrEqual(chapter.frame.height,44)
+        XCTAssertLessThanOrEqual(chapter.frame.maxY,detailScroll.frame.maxY-24,"The whole row must be above the bottom player before tapping its center")
+        chapter.coordinate(withNormalizedOffset:CGVector(dx:0.65,dy:0.5)).tap()
+        let player = app.buttons["audiobookPlayPause"]
+        XCTAssertTrue(player.waitForExistence(timeout:20))
+        let playingChapter = app.buttons["audiobookPlayerChapter-60.0"]
+        for _ in 0..<5 where !playingChapter.isHittable { app.swipeUp() }
+        XCTAssertTrue(playingChapter.waitForExistence(timeout:10))
+        let selected = XCTNSPredicateExpectation(predicate:NSPredicate(format:"value == %@","Playing"),object:playingChapter)
+        let result = XCTWaiter.wait(for:[selected],timeout:20)
+        let screenshot = XCTAttachment(screenshot:app.screenshot()); screenshot.name = "Playing chapter and download indicator"; screenshot.lifetime = .keepAlways; add(screenshot)
+        XCTAssertEqual(result,.completed,"Chapter selected=\(playingChapter.isSelected), value=\(String(describing:playingChapter.value)), player=\(player.label)")
+        XCTAssertTrue(playingChapter.isSelected)
+        let download = app.descendants(matching:.any).matching(identifier:"audiobookPlayerDownload").firstMatch
+        for _ in 0..<5 where !download.isHittable { app.swipeDown() }
+        XCTAssertTrue(download.waitForExistence(timeout:10))
+        XCTAssertGreaterThanOrEqual(download.frame.height,44)
+        XCTAssertTrue(download.label.lowercased().contains("download"))
+        let downloadScreenshot = XCTAttachment(screenshot:app.screenshot()); downloadScreenshot.name = "Audiobook cover and download circle"; downloadScreenshot.lifetime = .keepAlways; add(downloadScreenshot)
+        app.buttons["Close audiobook player"].tap()
+        let unread = app.buttons["markAudiobookUnread"]
+        for _ in 0..<5 where !unread.isHittable { app.swipeUp() }
+        XCTAssertTrue(unread.waitForExistence(timeout:10)); unread.tap()
+        let reset = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in !app.buttons["Play from beginning"].exists },object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[reset],timeout:20),.completed)
+        XCTAssertFalse(app.buttons["Play from beginning"].exists)
+        let stale = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in app.buttons["Play from beginning"].exists },object:nil)
+        stale.isInverted = true
+        XCTAssertEqual(XCTWaiter.wait(for:[stale],timeout:2),.completed)
+    }
+    @MainActor func testAudiobookDownloadPiePausesAndResumesWithoutPausingPlayback() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ARRIFY_UI_TESTING"] = "1"
+        app.launchEnvironment["ARRIFY_UI_AUDIOBOOKS"] = "1"
+        app.launchEnvironment["ARRIFY_UI_DOWNLOAD_CONTROL"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["username"].waitForExistence(timeout:30))
+        app.textFields["username"].tap(); app.textFields["username"].typeText("listener")
+        app.secureTextFields["password"].tap(); app.secureTextFields["password"].typeText("fixture")
+        app.buttons["signIn"].tap()
+        XCTAssertTrue(app.buttons["Library"].firstMatch.waitForExistence(timeout:20)); app.buttons["Library"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Audiobooks"].firstMatch.waitForExistence(timeout:20)); app.buttons["Audiobooks"].firstMatch.tap()
+        let book = app.buttons["audiobook-book-one"]
+        XCTAssertTrue(book.waitForExistence(timeout:20)); book.tap()
+        let detailDownload = app.buttons["audiobookDetailDownload"]
+        XCTAssertTrue(detailDownload.waitForExistence(timeout:10)); detailDownload.tap()
+        let halfDownloaded = XCTNSPredicateExpectation(predicate:NSPredicate(format:"value CONTAINS %@","50%"),object:detailDownload)
+        XCTAssertEqual(XCTWaiter.wait(for:[halfDownloaded],timeout:15),.completed)
+        app.buttons["listenAudiobook"].tap()
+        let playback = app.buttons["audiobookPlayPause"]
+        XCTAssertTrue(playback.waitForExistence(timeout:20))
+        let playing = XCTNSPredicateExpectation(predicate:NSPredicate(format:"label == %@","Pause audiobook"),object:playback)
+        XCTAssertEqual(XCTWaiter.wait(for:[playing],timeout:20),.completed)
+        let download = app.buttons["audiobookPlayerDownload"]
+        XCTAssertTrue(download.waitForExistence(timeout:10)); XCTAssertEqual(download.label,"Pause download")
+        XCTAssertEqual(download.frame.width,44,accuracy:1); XCTAssertEqual(download.frame.height,44,accuracy:1)
+        let title = app.staticTexts["audiobookPlayerTitle"]
+        XCTAssertLessThanOrEqual(title.frame.maxX,download.frame.minX)
+        XCTAssertEqual(title.frame.midY,download.frame.midY,accuracy:1)
+        XCTAssertLessThanOrEqual(download.frame.maxX,app.scrollViews["audiobookPlayerScroll"].frame.maxX-32)
+        let active = XCTAttachment(screenshot:app.screenshot()); active.name = "Title download pie at 50 percent"; active.lifetime = .keepAlways; add(active)
+        download.tap()
+        let paused = XCTNSPredicateExpectation(predicate:NSPredicate(format:"label == %@ AND value CONTAINS %@","Resume download","50%"),object:download)
+        XCTAssertEqual(XCTWaiter.wait(for:[paused],timeout:15),.completed)
+        XCTAssertEqual(playback.label,"Pause audiobook","Download Pause must not pause listening")
+        let stopped = XCTAttachment(screenshot:app.screenshot()); stopped.name = "Title download pie paused yellow"; stopped.lifetime = .keepAlways; add(stopped)
+        download.tap()
+        let resumed = XCTNSPredicateExpectation(predicate:NSPredicate(format:"label == %@","Pause download"),object:download)
+        XCTAssertEqual(XCTWaiter.wait(for:[resumed],timeout:15),.completed)
+        XCTAssertEqual(playback.label,"Pause audiobook")
+        download.tap()
     }
     @MainActor func testSongsInitialFailureAndVisiblePageRetry() { checkCatalogPaging("Songs") }
     @MainActor func testAlbumsSelectDistinctItemsAndVisiblePageRetry() { checkCatalogPaging("Albums") }
@@ -419,13 +534,15 @@ final class LaunchTests: XCTestCase {
         // Move well away from the top and keep a visible card as a position
         // anchor. Drag inside content, avoiding the sidebar and player footer.
         for _ in 0..<12 {
-            if title.frame.minY < initialTitleY - 100 && playlist.isHittable && playlist.frame.maxY < takeover.frame.minY { break }
+            if (!title.exists || title.frame.minY < initialTitleY - 100) && playlist.isHittable && playlist.frame.maxY < takeover.frame.minY { break }
             let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0))
             let start = origin.withOffset(CGVector(dx: 0, dy: takeover.frame.minY - 40))
             let end = origin.withOffset(CGVector(dx: 0, dy: max(180, takeover.frame.minY - 340)))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
-        XCTAssertLessThan(title.frame.minY, initialTitleY - 100, "Home must be scrolled before opening the player")
+        // Lazy content may remove the heading's accessibility node after it
+        // scrolls offscreen. Keep verifying the visible playlist anchor below.
+        XCTAssertTrue(!title.exists || title.frame.minY < initialTitleY - 100, "Home must be scrolled before opening the player")
         XCTAssertTrue(playlist.isHittable)
         let scrolledY = playlist.frame.minY
         for _ in 0..<2 {
@@ -436,7 +553,7 @@ final class LaunchTests: XCTestCase {
             XCTAssertTrue(close.waitForNonExistence(timeout: 10))
             expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: playlist)
             waitForExpectations(timeout: 10)
-            XCTAssertLessThan(title.frame.minY, initialTitleY - 100, "Minimizing the player must not reset Home to the top")
+            XCTAssertTrue(!title.exists || title.frame.minY < initialTitleY - 100, "Minimizing the player must not reset Home to the top")
             XCTAssertEqual(playlist.frame.minY, scrolledY, accuracy: 3,
                            "Home must retain its exact browsing position after player dismissal")
         }

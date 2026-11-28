@@ -7,6 +7,7 @@ struct RemoteCover: View {
     let title: String
     let artwork: ArtworkStore
     var channel = false
+    var placeholderSymbol = "music.note"
     @State private var image: UIImage?
     @State private var loadedPath: String?
     var body: some View {
@@ -23,7 +24,7 @@ struct RemoteCover: View {
             }
             else {
                 VStack(spacing: 12) {
-                    Image(systemName: "music.note").font(.title).foregroundStyle(.green)
+                    Image(systemName: placeholderSymbol).font(.title).foregroundStyle(.green)
                     Text(title).font(.headline).multilineTextAlignment(.center).lineLimit(3).padding(.horizontal, 12)
                 }
             }

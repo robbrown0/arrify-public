@@ -1,0 +1,25 @@
+A second device downloading the same book deleted the first device's grant.
+The DELETE in Audiobooks.download matched every download for that user/book,
+although grant lookup and reuse already distinguished authenticated sessions.
+
+The new two-session regression failed against 6c5305b with BookError(403),
+"This audiobook link has expired", when reading the first grant after creating
+the second. This is a reproduced defect, not proof of the original UI incident.
+
+Replacement now removes expired grants, the same session's replaced grant, and
+all grants for obsolete revisions of that book. Another valid session's grant
+for the same revision is retained. The four-grant bound and account, library,
+expiry and session-revocation checks are preserved. No schema migration.
+
+Focused validation covers parallel sessions, revoking only one signed-out
+session, changed-edition revocation across sessions, same-session URL reuse,
+and preservation of music ownership. The full audiobook suite includes 34 tests.
+
+The provider contract review also found that series-filtered ABS results contain
+one series object instead of a list. A regression failed before normalization;
+the adapter now accepts both documented shapes and preserves fractional sequence.
+https://api.audiobookshelf.org/#get-a-library-s-items
+
+This follow-up is based on the audiobook continuity branch so the native UI
+qualification can continue independently. Review and integrate both patches
+before approving the combined rollout. No production deployment was performed.

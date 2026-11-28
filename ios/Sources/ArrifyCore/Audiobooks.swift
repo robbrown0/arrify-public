@@ -35,6 +35,11 @@ public struct Audiobook: Codable, Sendable, Identifiable {
     public let author: String
     public let narrator: String
     public let series: String
+    public let authors: [AudiobookPerson]?
+    public let seriesEntries: [AudiobookSeries]?
+    public let publishedDate: String?
+    public let publishedYear: String?
+    public let addedAt: Double?
     public let duration: Double
     public let cover: String
     public let description: String
@@ -121,6 +126,9 @@ public struct AudiobookJournalEntry: Codable, Sendable {
     public init(checkpoint: AudiobookCheckpoint, lease: String?, playing: Bool, dirty: Bool) {
         self.checkpoint = checkpoint; self.lease = lease; self.playing = playing; self.dirty = dirty
     }
+    public func needsCheckpoint(position: Double, playing: Bool, finished: Bool) -> Bool {
+        checkpoint.seq == 0 || abs(position-checkpoint.position) > 0.001 || self.playing != playing || checkpoint.finished != finished
+    }
     /// A delayed response cannot erase a later seek or a newly opened session.
     @discardableResult public mutating func acknowledge(session: String, sequence: Int, remoteStamp: Double?) -> Bool {
         guard checkpoint.sessionId == session, sequence <= checkpoint.seq else { return false }
@@ -141,4 +149,135 @@ public enum AudiobookTimeline {
         let value = max(0, Int(seconds)), hours = value / 3600
         return hours > 0 ? String(format: "%d:%02d:%02d", hours, value / 60 % 60, value % 60) : String(format: "%d:%02d", value / 60, value % 60)
     }
+}
+
+/// Coalesce concurrent callers without allowing a previous account's completion
+/// to release a newer operation. The owner must still fence its result writes.
+@MainActor public final class AudiobookSyncGate {
+    private var task: Task<Void, Never>?
+    private var identity = UUID()
+    public init() {}
+    public func reset() { identity = UUID(); task?.cancel(); task = nil }
+    @discardableResult public func run(_ operation: @escaping @MainActor () async -> Void) async -> Bool {
+        if let task { await task.value; return false }
+        let token = UUID(); identity = token
+        let current = Task { @MainActor [weak self] in
+            await operation()
+            // Release the slot before any waiter observes completion. A joined
+            // caller may immediately need to drain a newer paused checkpoint.
+            if let self, self.identity == token { self.task = nil }
+        }
+        task = current
+        await current.value
+        return true
+    }
+}
+
+/// A clean downloaded checkpoint can briefly consult the server without making
+/// local playback depend on an unresponsive read or its cancellation handler.
+@MainActor public enum AudiobookReadDeadline {
+    public static func load<Value: Sendable>(timeout: Duration = .seconds(1),
+        wait: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for:$0) },
+        operation: @escaping @Sendable () async throws -> Value) async throws -> Value {
+        let race = AudiobookReadRace<Value>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                race.install(continuation)
+                race.attach(Task { @MainActor in
+                    do { try Task.checkCancellation(); race.resolve(.success(try await operation())) }
+                    catch { race.resolve(.failure(error)) }
+                })
+                race.attach(Task { @MainActor in
+                    do { try await wait(timeout); race.resolve(.failure(URLError(.timedOut))) }
+                    catch { race.resolve(.failure(error)) }
+                })
+            }
+        } onCancel: {
+            Task { @MainActor in race.resolve(.failure(CancellationError())) }
+        }
+    }
+}
+@MainActor private final class AudiobookReadRace<Value: Sendable> {
+    private var continuation: CheckedContinuation<Value, any Error>?
+    private var result: Result<Value, any Error>?
+    private var workers: [Task<Void,Never>] = []
+    func install(_ continuation: CheckedContinuation<Value, any Error>) {
+        if let result { continuation.resume(with:result) } else { self.continuation = continuation }
+    }
+    func attach(_ task: Task<Void,Never>) {
+        if result != nil { task.cancel() } else { workers.append(task) }
+    }
+    func resolve(_ result: Result<Value, any Error>) {
+        guard self.result == nil else { return }
+        self.result = result; continuation?.resume(with:result); continuation = nil
+        let tasks = workers; workers = []
+        for task in tasks { task.cancel() }
+    }
+}
+
+public enum AudiobookPlaybackIssue: Error, Equatable, Sendable {
+    case offline, temporary, authentication, missing, invalidResponse, progressPending, conflict(String), media
+    public static func classify(_ error: any Error) -> Self {
+        if let issue = error as? Self { return issue }
+        if case APIError.signInRequired = error { return .authentication }
+        if case APIError.retryDeferred = error { return .temporary }
+        if case APIError.rejected(let status, _, let message) = error {
+            switch status {
+            case 401, 403: return .authentication
+            case 404, 410: return .missing
+            case 409: return .conflict(message)
+            case 429, 500...599: return .temporary
+            default: return .invalidResponse
+            }
+        }
+        if let url = error as? URLError {
+            switch url.code {
+            case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .timedOut: return .offline
+            default: return .media
+            }
+        }
+        return .invalidResponse
+    }
+    public var category: String {
+        switch self { case .offline: "network"; case .temporary: "server"; case .authentication: "authentication"
+        case .missing: "unavailable"; case .invalidResponse: "invalid-response"; case .progressPending: "progress-pending"
+        case .conflict: "conflict"; case .media: "media" }
+    }
+    public var message: String {
+        switch self {
+        case .offline: "The server couldn’t be reached. Your place is saved. Try again, or play a downloaded copy."
+        case .temporary: "The audiobook server is temporarily unavailable. Your place is saved. Try again shortly."
+        case .authentication: "This book needs access to the audiobook library. Check your connection or library access."
+        case .missing: "This edition is no longer available on the server. Your listening position is saved."
+        case .invalidResponse: "The server returned an unexpected audiobook response. Your place is saved. Try again."
+        case .progressPending: "Your listening position is still syncing. Your place is saved. Try again shortly."
+        case .conflict(let text): text
+        case .media: "This audio could not be opened. Your place is saved. Try again or download the book."
+        }
+    }
+}
+
+public enum AudiobookResume {
+    /// Rewinds are intentional: choose a history, never the greatest position.
+    public static func position(remote: AudiobookProgress?, local: Double?, localStamp: Double?, pending: AudiobookJournalEntry?, restart: Bool, finished: Bool) -> Double {
+        if restart { return 0 }
+        if let pending, pending.dirty { return pending.checkpoint.finished ? 0 : pending.checkpoint.position }
+        if let remote, (remote.lastUpdate ?? 0) > (localStamp ?? 0) { return remote.isFinished == true ? 0 : remote.currentTime ?? 0 }
+        if finished { return 0 }
+        return local ?? remote?.currentTime ?? 0
+    }
+}
+
+public struct AudiobookPerson: Codable, Sendable, Identifiable { public let id: String; public let name: String }
+public struct AudiobookSeries: Codable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let sequence: String?
+    public var label: String { sequence.map { "Book " + $0 + " · " + name } ?? name }
+}
+public struct AudiobookGroups: Decodable, Sendable {
+    public let items: [AudiobookPerson]
+    public let libraryId: String
+    public let total: Int
+    public let nextPage: Int?
 }

@@ -96,12 +96,21 @@ class Audiobooks:
         if item.get('mediaType') != 'book' or item.get('libraryId') not in self.provider.config().get('libraries', []):
             raise BookError('This audiobook is not available in your library.', 404)
         media = item.get('media', {}); meta = media.get('metadata', {})
+        series = meta.get('series') or []
+        # Series-filtered ABS item responses replace the list with one object.
+        if isinstance(series, dict): series = [series]
+        meta = {**meta, 'authors': meta.get('authors') or [], 'series': series}
         duration = number(media.get('duration'), 86400 * 31)
         book = {'id': identifier(item['id']), 'library_id': identifier(item['libraryId']),
                 'title': str(meta.get('title') or 'Untitled audiobook')[:500],
                 'author': str(meta.get('authorName') or ', '.join(x.get('name', '') for x in meta.get('authors', [])))[:500],
                 'narrator': str(meta.get('narratorName') or ', '.join(meta.get('narrators', [])))[:500],
                 'series': str(meta.get('seriesName') or ', '.join(x.get('name', '') for x in meta.get('series', [])))[:500],
+                'authors': [{'id': identifier(x['id']), 'name': str(x.get('name', ''))[:500]} for x in meta.get('authors', [])[:50] if x.get('id')],
+                'series_entries': [{'id': identifier(x['id']), 'name': str(x.get('name', ''))[:500], 'sequence': str(x['sequence'])[:80] if x.get('sequence') is not None else None} for x in meta.get('series', [])[:50] if x.get('id')],
+                'published_date': str(meta.get('publishedDate') or '')[:40] or None,
+                'published_year': str(meta.get('publishedYear') or '')[:8] or None,
+                'added_at': item.get('addedAt') if isinstance(item.get('addedAt'), (int, float)) else None,
                 'duration': duration, 'cover': '/api/v1/audiobooks/cover/' + identifier(item['id']),
                 'description': str(meta.get('description') or '')[:12000], 'missing': bool(item.get('isMissing') or item.get('isInvalid'))}
         if detail:
@@ -165,7 +174,7 @@ class Audiobooks:
         value['bookmarks'] = self.provider.user(uid, 'GET', '/api/me/bookmarks/' + book_id).get('bookmarks', [])
         return value
 
-    def library(self, uid, library_id=None, page=0, query='', progress_filter='all'):
+    def library(self, uid, library_id=None, page=0, query='', progress_filter='all', sort='title', author=None, series=None):
         self.provider.require()
         libraries = self.provider.user(uid, 'GET', '/api/libraries').get('libraries', [])
         allowed = [{'id': identifier(x['id']), 'name': str(x.get('name') or 'Audiobooks')[:120]} for x in libraries
@@ -174,16 +183,29 @@ class Audiobooks:
         selected = library_id or allowed[0]['id']
         if selected not in {x['id'] for x in allowed}: raise BookError('This library is not available to your account.', 403)
         if type(page) is not int or not 0 <= page <= 10000: raise BookError('Invalid library page.', 400)
-        if progress_filter not in ('all', 'started', 'finished'): raise BookError('Invalid audiobook filter.', 400)
+        if progress_filter not in ('all', 'started', 'finished', 'unstarted'): raise BookError('Invalid audiobook filter.', 400)
+        sorts = {'title': ('media.metadata.title', 0), 'author': ('media.metadata.authorName', 0),
+                 'release': ('media.metadata.publishedYear', 1), 'added': ('addedAt', 1),
+                 'duration': ('media.duration', 0), 'sequence': ('sequence', 0)}
+        if sort not in sorts: raise BookError('Invalid audiobook sort.', 400)
+        if author and series: raise BookError('Choose an author or series scope.', 400)
+        if author: author = identifier(author)
+        if series: series = identifier(series)
+        if (author or series) and progress_filter != 'all': raise BookError('Progress filters are unavailable in this scope.', 400)
+        if sort == 'sequence' and not series: raise BookError('Choose a series before sorting by book number.', 400)
         query = str(query).strip()[:200]
+        if query and (author or series): raise BookError('Search within a library before choosing an author or series.', 400)
+        if query and sort != 'title': raise BookError('Search results use relevance order.', 400)
         if query:
             result = self.provider.user(uid, 'GET', '/api/libraries/' + selected + '/search?' + urllib.parse.urlencode({'q': query, 'limit': 100}))
             rows = [x.get('libraryItem', x) for x in result.get('book', [])]
             total = len(rows); next_page = None
         else:
-            params = {'limit': 48, 'page': page, 'sort': 'media.metadata.title', 'desc': 0, 'minified': 1}
-            if progress_filter != 'all':
-                params['filter'] = 'progress.' + base64.b64encode(('in-progress' if progress_filter == 'started' else 'finished').encode()).decode()
+            params = {'limit': 48, 'page': page, 'sort': sorts[sort][0], 'desc': sorts[sort][1], 'minified': 0 if author or series else 1}
+            if author or series:
+                params['filter'] = ('authors.' if author else 'series.') + base64.b64encode((author or series).encode()).decode()
+            elif progress_filter != 'all':
+                params['filter'] = 'progress.' + base64.b64encode({'started':'in-progress', 'finished':'finished', 'unstarted':'not-started'}[progress_filter].encode()).decode()
             result = self.provider.user(uid, 'GET', '/api/libraries/' + selected + '/items?' + urllib.parse.urlencode(
                 params))
             rows = result.get('results', []); total = int(result.get('total', 0)); next_page = page + 1 if (page + 1) * 48 < total else None
@@ -197,8 +219,34 @@ class Audiobooks:
         return {'libraries': allowed, 'library_id': selected, 'items': books, 'total': total, 'next_page': next_page,
                 'preferences': self.preferences(uid)}
 
+    def groups(self, uid, kind, library_id=None, page=0, query='', author=None):
+        if kind not in ('authors', 'series'): raise BookError('Invalid audiobook grouping.', 400)
+        self.provider.require()
+        libraries = self.provider.user(uid, 'GET', '/api/libraries').get('libraries', [])
+        allowed = [x['id'] for x in libraries if x.get('mediaType') == 'book' and x['id'] in self.provider.config()['libraries']]
+        selected = library_id or (allowed[0] if allowed else None)
+        if selected not in allowed: raise BookError('This library is not available to your account.', 403)
+        if type(page) is not int or not 0 <= page <= 10000: raise BookError('Invalid library page.', 400)
+        # Filter data contains names and IDs, not audio tracks or full book objects.
+        # The provider transport bounds the response at 8 MiB.
+        if author:
+            if kind != 'series': raise BookError('Choose an author to browse series.', 400)
+            author = identifier(author)
+            result = self.provider.user(uid, 'GET', '/api/authors/' + author + '?' + urllib.parse.urlencode({'include':'items,series', 'library':selected}))
+            rows = [x for x in result.get('series', []) if any(item.get('libraryId') == selected for item in x.get('items', []))]
+        else:
+            result = self.provider.user(uid, 'GET', '/api/libraries/' + selected + '/filterdata')
+            rows = result.get(kind, [])
+        query = str(query).strip().casefold()[:200]
+        values = [{'id': identifier(x['id']), 'name': str(x.get('name', ''))[:500]} for x in rows
+                  if x.get('id') and query in str(x.get('name', '')).casefold()]
+        values.sort(key=lambda x: (x['name'].casefold(), x['id']))
+        return {'items': values[page*48:(page+1)*48], 'total': len(values), 'library_id': selected,
+                'next_page': page+1 if (page+1)*48 < len(values) else None}
+
     @staticmethod
     def matches_progress(progress, value):
+        if value == 'unstarted': return not progress.get('isFinished') and not progress.get('currentTime', 0)
         return value == 'all' or (bool(progress.get('isFinished')) if value == 'finished' else
                                   progress.get('currentTime', 0) > 0 and not progress.get('isFinished'))
 
@@ -308,7 +356,14 @@ class Audiobooks:
                      'lease':secrets.token_urlsafe(32), 'anchor':anchor, 'expires':self.now()+3600,
                      'position':number(book['progress'].get('currentTime'), book['duration']), 'revision':0}
             with self.lock:
-                self.db.execute("DELETE FROM downloads WHERE user_id=? AND (json_extract(payload,'$.expires')<=? OR json_extract(payload,'$.book_id')=?)", (uid, self.now(), book['id']))
+                # Another device can download the same unchanged edition. Only
+                # replace this session's grant, or grants for an obsolete edition.
+                self.db.execute("""DELETE FROM downloads WHERE user_id=? AND
+                    (json_extract(payload,'$.expires')<=? OR
+                     (json_extract(payload,'$.book_id')=? AND
+                      (json_extract(payload,'$.anchor')=? OR
+                       json_extract(payload,'$.book.source_revision') IS NOT ?)))""",
+                    (uid, self.now(), book['id'], anchor, book['source_revision']))
                 count = self.db.execute('SELECT count(*) FROM downloads WHERE user_id=?', (uid,)).fetchone()[0]
                 if count >= 4: raise BookError('Finish or cancel another book download first.', 409)
                 self.db.execute('INSERT INTO downloads VALUES(?,?,?)', (state['lease'], uid, json.dumps(state)))

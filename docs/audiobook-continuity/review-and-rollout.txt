@@ -1,0 +1,244 @@
+Scope and provenance
+====================
+This branch continues the Nov 27 audiobook investigation on upstream main
+79b499074943e3e6ff892fc18685606029d7fdcf, preserving unrelated live changes.
+The previously reviewed audiobook modules match upstream main. Build 44 source is
+fcd0de971230fc9156e04d22d334fdc70e03ae99: successful TestFlight run 45944102009
+contains qualification and size artifacts explicitly named build 44. The reviewed
+audiobook modules are unchanged between that commit and the branch base.
+https://github.com/robbrown0/arrify-public/actions/runs/45944102009
+The original incident's underlying error remains unproven: its pre-stream failure
+was not logged. Removing and downloading the book again restored the user's
+position; that is evidence of retained progress, not proof of the earlier race.
+
+Delivered behavior
+==================
+- Compatible complete downloads make a one-second bounded fresh-position read when the journal is clean, then open local audio. Progress/ownership writes do not gate availability; a missed deadline falls back to the durable local cursor.
+  Local playback journals its position and reconciles when the server returns.
+  Known conflicts retain both histories; intentional rewinds never use max(position).
+- Concurrent synchronization callers await shared work; forced selected-book work
+  can drain a newer checkpoint. Errors/backoff are per book; old account completion
+  cannot release a newer account's synchronization gate.
+- Ambiguous playback-start retries reuse the original request ID and revision.
+  The backend's accepted-ID path is tested to avoid a second ownership claim.
+- Startup failures identify stage/category without titles, accounts, grants or URLs.
+- Truncated files are not considered downloaded. Old transfer callbacks cannot
+  update a replacement transfer. Removing a playing local copy first attempts a
+  server handoff; the file is kept if the handoff fails. Pausing allows removal.
+- Books, Authors and Series navigation; author series are fetched independently
+  of the first page of books. Numbered series use provider sequence ordering and
+  retain fractional/unknown numbers. Author and series IDs remain structured.
+- One-tap Continue listening, list/grid layouts, publication-year
+  sorting, recently-added/author/title/duration sort, Not started filter,
+  explicit complete/downloading/paused download badges.
+- Dates retain provider precision. The installed provider only supports global
+  publication-year ordering; exact dates are shown in book details when supplied.
+  No unsupported exact-date sort is offered. Unknown dates stay unknown. Existing downloads and API consumers accept optional new metadata.
+
+Design references
+=================
+Audible: separate library hierarchy (Authors, Series), listening filters, sort,
+and clear distinction between removing a download and removing a library title.
+https://help.audible.com/s/article/manage-your-library?language=en_US
+https://help.audible.com/s/article/title-is-missing?language=en_US
+Visual review used Audible's public iPad App Store screenshots: cover-forward
+layout, compact book rows, persistent labeled sidebar and contextual book actions.
+https://apps.apple.com/us/app/audible-audiobooks-podcasts/id379693831
+Libby: recoverable recent-place navigation, a candidate for the next iteration.
+https://help.libbyapp.com/en-us/6285.htm
+Prologue: audiobook-specific controls, smart rewind, per-book settings and reading
+list. These inform follow-up work; no rating or best-in-class claim is made.
+https://prologue.audio/
+Provider contracts: https://api.audiobookshelf.org/
+
+Validation and remaining qualification
+======================================
+The initial 30 backend tests passed; the author-scope addition raises this to 31
+and those passed too. Initial Swift contract tests and unsigned iPhone build passed
+on Apple's CI. Subsequent commits must pass the same contracts, app and iPhone/iPad
+UI qualification; CI is authoritative for the final exact commit.
+New tests cover shared synchronization, account reset during requests, latest
+remote rewind versus older download position, error categories, metadata precision,
+blocked server reads during local startup, truncated files, provider pagination,
+filter authorization, author-series library scope, and accepted-command idempotency.
+The UI test captures author/series screenshots for review.
+No physical-device playback latency, AirPlay gap, or resource before/after result
+has been measured for this patch. Simulator tests and fixture timings cannot
+substitute for those measurements. Do not describe this as release-ready until the
+final CI and screenshot review are complete.
+
+Follow-up product work and risks
+===============================
+- Verify ordinary online device handoff and the exact removal -> streaming ->
+  re-download scenario on real devices, including an offline device reconnecting
+  after a second device listened. Competing offline histories still need a choice.
+- A full listening history/undo system needs a durable retention/migration design.
+  Add smart rewind and per-book speed with explicit behavior tests, then collections
+  and opt-in next-in-series playback. Preserve existing sleep/bookmark behavior.
+- Exact-day ordering needs a separate bounded metadata index; the installed
+  provider getOrder implementation does not support publishedDate.
+  Provider publishedDate may be absent or refer to publication rather than the
+  audio edition's release. Do not label unknown dates as known audiobook release
+  dates. Provider sequence metadata, not invented title parsing, determines order.
+- Provider filter data and scoped author inventory are bounded by the existing
+  8-MiB transport limit. Very large author inventories may need a paginated index.
+- A same-size damaged local file can pass the size check and then fail decoding.
+  Full media validation and automatic repair require additional tests.
+- This iteration targets the native iPhone/iPad audiobook experience. Existing web
+  clients remain compatible; matching new web navigation is separate product work.
+
+Rollout and rollback
+====================
+No production service or book files were changed. No TestFlight build was published.
+After final CI and review, obtain explicit approval for a beta build and any server
+deployment. Back up the running server configuration and database with online-safe
+methods. Deploy a pinned server image supporting the optional library parameters,
+then a separately identified beta iOS build. Check streaming, local startup in
+Airplane Mode, removal/re-download, multipart seeking, two-device handoff and AirPlay.
+Record device, network conditions and tap-to-audio measurements before and after.
+Retain the prior image and beta build. If qualification fails, revert the deployment
+and distribute the prior app build without restoring older listening progress or
+book files over newer user data. These changes add no server schema migration.
+
+Additional Nov 27 continuity and listening UX corrections
+- Clean downloaded copies consult newer server progress briefly; dirty local
+  history still requires conflict-safe reconciliation. A late cancelled read
+  cannot begin playback. Known access denial stops local playback.
+- Unchanged paused heartbeats no longer manufacture dirty history. Initial
+  intents, rewinds, play/pause and finished changes still produce checkpoints.
+- Chapter rows visibly distinguish Playing from Current chapter / Paused, support
+  direct chapter playback from details, and retain the native seek fences.
+- Mark as unread uses the existing conflict-aware offline-progress protocol to
+  reset canonical position/finished state without taking playback ownership,
+  starting audio, deleting downloads or erasing bookmarks. Dirty history is
+  discarded only after acknowledgement; failed resets preserve it.
+- Listen begins playback at the synchronized cursor, then automatically downloads
+  in the background after actual audio advances. Completed local parts can serve
+  later chapter/part transitions; the current stream is never interrupted just
+  to switch its source. Visible download progress/check/paused indicators and
+  Pause/Resume controls remain. A device setting disables automatic downloads.
+  User-paused partial downloads remain paused. Cellular use is disclosed there.
+
+Current Audible download guidance explicitly describes immediate streaming with
+background download: https://help.audible.co.uk/s/article/download-titles
+This supports the interaction pattern; it is not a claim that Arrify has matched
+Audible's measured responsiveness or visual quality.
+New Core deadline/checkpoint tests, native downloaded-resume/automatic-download/
+mark-unread/no-op-sync tests and chapter/unread UI checks require fresh native
+qualification. The previous ac7 iPad run failed an existing buffered-music Pause/
+activation test; the parent e30 passed both full native/UI matrices. Do not call
+this latest tree qualified until its fresh results pass.
+
+Visual review of the qualified parent iPad screenshots confirmed the author ->
+series -> numbered-book hierarchy and player spacing. Missing audiobook covers
+now use a book symbol; the generic music fallback is unchanged. Background book
+transfers use low task priority after initial playback. Unread reset also updates
+the local shelf and rejects delayed detail reads that could restore stale UI
+progress. The new chapter/unread UI regression includes that delayed-read race.
+These latest visual/behavior changes still require their new iPhone/iPad results.
+
+Combined source integration, 2026-11-27
+The follow-up branch now retains all primary commits and integrates main
+bd3b9c408cb7cd88173724fe0c65069651a170e5 (qualified native Next plus deployed
+discovery fix). PR68 targets main and supersedes the earlier stacked PR67.
+The public diff contains the audiobook work; existing music/discovery fixes
+remain intact. No live source tree or production book state was changed.
+
+Two startup races are fenced: recheck complete files after the awaited position
+read, and cancel a target book's pending startup when marking it unread. A held
+stream-grant regression proves removed local audio cannot activate first.
+Shelf and detail generations reject late reads after an acknowledged reset.
+The chapter UI test exposed a PlainButton hit-area bug: the full label looked
+tappable but its empty center did not accept taps. An explicit rectangular
+content shape covers the 52-point row; the regression taps its empty area.
+
+Before this integration, the reviewed backend passed 774 tests and the book
+client passed 60 Core/118 app tests on both device configurations. The earlier
+chapter UI failure is not waived. Full combined backend/Core/app/UI checks and
+final screenshot review remain required; final results belong in PR68.
+Production audiobook rollout remains staged pending explicit approval.
+
+Combined iPad qualification exposed a paused-clock race: periodic callbacks
+could move the cursor or report playing again after Pause, creating a redundant
+write that conflicted with another device. Pause now captures the current item
+clock once. Later notices cannot move a paused checkpoint, and active notices
+sample the current item rather than accepting a timestamp queued before a seek.
+The regression injects stale zero/90-second notices around a real seek and Pause,
+then verifies an unchanged paused seek makes no server writes or conflict.
+Known chapter-end and finished-book coordinates remain canonical; a sleep-boundary
+pause does not replace that exact endpoint with a resetting AVPlayer clock.
+Play/Pause labels now follow playback intent, including buffering. Failed opens
+stop that intent so one Play tap retries, and a stale cancelled local fallback
+cannot pause a newer selection. The activation-failure regression retains this
+single-tap retry contract; chapter rows distinguish starting from a user pause.
+
+Final UI evidence confirmed the player at 1:29 with the second chapter visibly
+green and Playing. The failed selector matched both the detail and player rows;
+their accessibility identifiers are now scoped separately, retaining the Playing
+assertion and adding an explicit selected-trait assertion. An existing Home test
+also queried an offscreen heading after LazyVStack removed its accessibility node.
+It now accepts that eviction as offscreen evidence while retaining the visible
+playlist anchor and before/after scroll-position assertions.
+
+The fresh iPad run also exposed a separate shared-sync completion race. A joined
+forced caller could resume before the original caller cleared the completed task,
+then join that completed task a second time and leave a newer paused checkpoint
+dirty. The gate now clears its generation-fenced slot inside the shared task,
+before completion becomes visible to waiters. A barrier regression covers a
+cancelled owner and an immediate higher-priority follow-up over 50 schedules.
+Existing paused-write, account-reset and sequence-acknowledgement assertions stay.
+The f957 iPhone run passed all four audiobook UI cases, including chapter jumping,
+highlighting and unread reset. The remaining Home failure was its second query
+of the same evicted heading after player dismissal; both queries now accept
+offscreen eviction while retaining the exact visible-card position check (3pt).
+
+User review identified the bare paused-download cover badge as ambiguous. The
+artwork is now unobstructed. A compact download control beneath the player cover
+uses a downward arrow in a circular progress ring, a percentage while downloading,
+an explicit Download paused label with Resume download, and a completed checkmark
+with Downloaded / Available offline. Detail actions use the same labeled control.
+Only the main playback button uses an unlabeled Pause glyph. Download actions
+keep their own state per book and do not invoke playback Pause.
+Reference: current official Audible App Store screenshots reviewed Nov27:
+https://apps.apple.com/us/app/audible-audiobooks-podcasts/id379693831
+Arrify retains its green theme; this is a familiar download pattern, not a claim
+that the layout is identical to Audible or physically performance-qualified.
+
+Repeated simulator failures occurred during initial test-media preparation before
+the ownership/Pause assertions. Silent test audio now has a directly finalized PCM
+WAV header; native AVAudioFile frame counts are verified for short and long files
+and every initial cached item. No production media, quality, readiness deadline,
+or policy assertion changed. Initial-item error/status/duration/queue diagnostics
+are retained if preparation still fails. The old writer lifetime is eliminated as
+a test dependency; it is not established as the sole cause of those CI failures.
+
+Final user design correction supersedes the earlier labeled ring: the download
+control is now a compact44-point button at the far right of the title, on details
+and player. A filled radial pie shows byte progress; a green downward arrow
+becomes a yellow Pause symbol when paused. Tapping the circle pauses/resumes
+only the transfer. No visible download text row; VoiceOver retains action/state/
+percentage labels. Completed media uses a green check. Retain last observed
+partial-byte progress while paused; clear it when the grant or source URL changes.
+A real URLSession delegate fixture holds50% for pause/resume UI screenshots and
+checks listening remains active. Focused app coverage checks partial progress
+survives cancellation and can resume. This does not claim partial byte counts
+persist across process termination; completed parts remain durable.
+The latest pre-correction iPhone passed Core63/App124/UI32 (2Pad-only skips).
+iPad passed Core63/App124 and31of32UI, but the chapter test stopped scrolling
+when only14points of the row were visible. Its center landed beneath the bottom
+player (row1266..1318, viewport ends1280). Target the detail ScrollView and require
+the entire row to be above its bottom before the same empty-area tap. No chapter
+hit-area/Playing/unread assertions are removed. Fresh qualification is required.
+The existing targeted audiobook workflow also includes these new UI regressions;
+the full release gates still run all native tests on both device families.
+
+Apple HIG references reviewed Nov27 for the requested polish:
+https://developer.apple.com/design/human-interface-guidelines/buttons
+https://developer.apple.com/design/human-interface-guidelines/layout
+https://developer.apple.com/design/human-interface-guidelines/accessibility
+The control uses44x44pt hit bounds,16pt separation from title,32pt trailing
+content inset, adaptive system title text, SF Symbols, VoiceOver action/state,
+and explicit dimmed press feedback. The32pt inset is the reviewed design choice,
+not a claimed Apple-mandated value. Existing safe-area-aware ScrollViews and
+bounded iPad content width remain. Large Dynamic Type and physical-device visual
+quality are not yet independently qualified by these default-size screenshots.

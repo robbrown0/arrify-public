@@ -1,0 +1,66 @@
+Continue the prepared work; do not start over. Source worktrees on Podflix:
+/home/rob/arrify-ops/audiobook-continuity-20261127
+/home/rob/arrify-ops/audiobook-download-grants-20261127
+Earlier source PR (retained in the combined branch): https://github.com/robbrown0/arrify-public/pull/67
+Combined review PR: https://github.com/robbrown0/arrify-public/pull/68
+Use branch fix/audiobook-download-device-grants-20261127. It retains the primary changes and integrates main bd3b9c408cb7cd88173724fe0c65069651a170e5, including the qualified music Next and deployed discovery corrections. Verify its head and read docs/audiobook-continuity/review-and-rollout.txt and device-download-grants.txt before editing. Preserve unrelated live changes.
+
+Verified starting evidence: build 44 came from fcd0de971230fc9156e04d22d334fdc70e03ae99 (successful TestFlight run 45944102009). The relevant audiobook modules match the reviewed base. Two-session download revocation and the provider's single-series response shape have failing-before regressions and tested fixes. The installed Audiobookshelf getOrder implementation supports publication-year sorting, not exact publishedDate sorting. Keep precise dates when supplied; exact-day global ordering needs a separate bounded index. Do not offer an unsupported sort or sort only one fetched page.
+
+Prepared changes cover a one-second bounded clean-position read before downloaded startup, account-scoped synchronization, per-book retries, explicit progress conflicts, safe download removal, transfer callback fencing, typed startup errors, authors/series navigation, provider-backed publication-year sorting, list/grid layouts, chapter highlighting/jumps, Mark as unread, and automatic background downloading after audio starts. Review and finish these changes; do not recreate them. Before integration with the music fix, 34 focused book tests, the 774-test server suite, 60 Swift contracts and 118 app regressions passed. The chapter UI test exposed a full-row hit-area defect, which is corrected. The integrated final tree requires fresh full qualification; inspect current CI rather than attributing older runs to the new head.
+
+Continue Arrify's audiobook continuity and library work from this branch. Preserve unrelated work and coordinate through the available hub. For the audiobook changes, do not deploy, publish a book beta, alter production book files, or interrupt listening without explicit approval. The separate native music Next TestFlight release is authorized.
+
+Incident: a previously downloaded audiobook was removed from the device; streaming then failed with a misleading reconnect message while music continued. Downloading again resumed at the saved position. Do not claim the exact original failure is known: diagnostics omit pre-stream startup errors. Use the verified build 44 source above.
+
+Deliver one listening experience across downloaded audio, streaming, and supported devices. Removing audio must preserve progress and bookmarks. Prefer compatible local audio; reconcile progress without making available local audio wait for a server outage. Normal online handoff should adopt the latest acknowledged position; offline updates must survive relaunch and reconcile when connected. Preserve explicit rewinds, restarts, edition boundaries, and competing offline histories. Never choose the largest position as a conflict rule. Add recoverable recent-position history/undo as a follow-up if safe migrations require a separate change.
+
+Correct overlapping synchronization, global cross-book retry blocking, and account-switch completion races. Use account/operation identities, awaitable synchronization, per-book errors/backoff, and sequence-safe acknowledgements. Add categorized user errors and privacy-safe startup-stage diagnostics. Verify playback-start idempotency; any bounded retry after an ambiguous response must reuse the original request identity and stop when superseded. Preserve music ownership, AirPlay, interruption handling, and offline behavior.
+
+Preserve independent download grants for different authenticated sessions/devices reading the same unchanged edition. A second download currently revokes the first session’s grant; this has a failing-before regression test. Replacing an edition must still revoke obsolete grants, and signing out must still revoke that session’s access. Preserve expiry, account/library permission checks, and grant-count bounds.
+
+Improve the native bookshelf with Books, Authors and Series navigation; Author -> Series -> numbered books; standalone books; natural numeric series order (including 0.5/2.5); publication-year, title, author, duration and recently-added sorting; exact release-date sorting only after a tested global index or verified provider support. Add structured author/series IDs and sequences, date precision, and unknown metadata fallbacks. Paginate at the provider; never sort only one fetched page and present it as global order. Do not infer missing series entries, invent dates, merge editions by title, or invent book numbers. Keep existing clients and stored downloads compatible.
+
+Use Audible's library hierarchy/filter clarity, Libby's recoverable navigation, and Prologue's audiobook-focused controls as references, retaining Arrify's identity. Prioritize Continue listening, clear complete/partial/paused download states, list/grid layouts, labeled controls, accessible responsive iPhone/iPad layout, saved browsing choices, useful retry/empty states and cached content during refresh. Treat smart rewind, per-book speed, listening history/undo, collections and opt-in next-in-series playback as explicit product work; implement and validate them separately rather than silently expanding playback semantics.
+
+Reproduce removal -> streaming -> re-download, downloaded startup with a failing server, ordinary cross-device handoff, overlapping sync, newer seek during acknowledgement, unrelated-book conflict, account switch during requests, ambiguous accepted start, rapid play/cancel, multipart source changes, incomplete/corrupt downloads, and series/date pagination boundaries. Use deterministic async barriers. Run backend and Swift tests plus iPhone/iPad app/UI qualification, capture reviewable screenshots, and report actual startup/interaction measurements. Do not claim tests or visual quality that were not verified.
+
+Commit focused changes and open a reviewable PR with source provenance, test results, remaining risks and staged rollout/rollback instructions. Resolve CI failures before describing the implementation as ready. Record blocked validation and outstanding product work explicitly.
+
+References:
+https://help.audible.com/s/article/manage-your-library?language=en_US
+https://help.audible.com/s/article/title-is-missing?language=en_US
+https://help.libbyapp.com/en-us/6285.htm
+https://prologue.audio/
+https://api.audiobookshelf.org/
+
+Additional accepted requirements (Nov 27; preserve alongside all the above):
+- Clearly highlight the currently playing chapter, distinguish its paused state,
+  and allow direct chapter selection from book details and the player.
+- Provide Mark as unread without starting audio or removing downloaded files.
+  Reset position and finished state through the acknowledged progress protocol;
+  preserve other books, bookmarks and unrelated pending history.
+- Follow Audible's documented tap-to-listen / background-download pattern rather
+  than waiting for a full book download: resume promptly, then automatically
+  download after audio starts, with a clear progress ring, downloaded/paused
+  indicators, Pause/Resume download controls and an automatic-download setting.
+  Disclose cellular use. Never auto-resume a download the user explicitly paused.
+  Reference: https://help.audible.co.uk/s/article/download-titles
+- Verify clean downloaded copies adopt newer remote rewinds; unchanged paused
+  heartbeats must not create competing writes; first intent still sends seq 1.
+  Bound clean-position reads without waiting for uncooperative cancellation,
+  fence late account/selection results, and respect known library-access denials.
+- These additional source changes are pending fresh native qualification; inspect
+  current CI rather than assuming earlier green runs qualify the latest tree.
+
+Other authorized parallel work: music discovery date handling is isolated in
+PR #69 and its helper-only deployment. Native music Next performance is isolated
+in PR #70 with a requested TestFlight release. Preserve both efforts and report
+their validation/deployment status separately. Do not silently include unqualified
+audiobook changes in the native music TestFlight release.
+
+Final startup/UI contracts:
+- Recheck downloaded-file availability after the bounded position read. Removing a download during that read must fall through to a server grant before audio activates.
+- Mark as unread must cancel pending startup for that book even before playback becomes active. Releasing an old metadata read must never restart it.
+- The entire 52-point chapter row, including the empty space between title and duration, must accept taps. The UI regression verifies an accessible target at least 44 points high and taps that empty area.
+- Validate all of these together with the merged music Next changes. The book branch is staged source; do not deploy or publish its server/client changes without the user's approval. The separate music TestFlight release is authorized and remains separate.
