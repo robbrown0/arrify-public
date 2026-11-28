@@ -413,8 +413,10 @@ padding; the layout still scrolls when larger text needs more room.
 ### Receiver volume lifecycle
 
 The iPhone full-screen player and iPad mini/full-screen players refresh their native
-volume view after audio-route changes, media-service resets, returning to the app,
-and reattaching a previously displayed control. Route notifications are coalesced;
+volume view after its first window attachment, audio-route changes, media-service
+resets, returning to the app, and reattaching a previously displayed control.
+The initial control waits for this refresh before accepting a first touch.
+Route notifications are coalesced;
 a pending refresh waits until an active drag finishes. Normal playback updates and
 layout changes preserve control identity. Opening or refreshing a control never
 copies a previous slider value, writes a volume, or changes the audio route.

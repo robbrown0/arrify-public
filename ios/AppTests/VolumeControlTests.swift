@@ -5,6 +5,18 @@ import MediaPlayer
 @testable import Arrify
 
 final class VolumeControlTests: XCTestCase {
+    @MainActor func testFirstPresentationRefreshesAfterWindowAttachment() async throws {
+        let original = MPVolumeView(frame: .zero)
+        let container = VolumeControlContainer(volumeView: original, notifications: NotificationCenter())
+        XCTAssertNil(container.window)
+        let window = host(container)
+        defer { window.isHidden = true }
+        XCTAssertFalse(original.isUserInteractionEnabled, "Do not accept a first touch while binding to the output")
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertFalse(container.volumeView === original)
+        XCTAssertTrue(container.volumeView.isUserInteractionEnabled)
+    }
+
     @MainActor func testRouteChangeRefreshesNativeControlAndCoalescesNegotiation() async throws {
         let notifications = NotificationCenter()
         let original = MPVolumeView(frame: .zero)
@@ -60,6 +72,8 @@ final class VolumeControlTests: XCTestCase {
         })
         let window = host(container)
         defer { window.isHidden = true }
+        // The initial mount already scheduled a refresh while the finger was
+        // down; it must leave this in-progress gesture alone as well.
         container.requestRefresh()
         XCTAssertFalse(container.refreshIfIdle())
         XCTAssertTrue(container.volumeView === original, "Do not replace a control during a drag")

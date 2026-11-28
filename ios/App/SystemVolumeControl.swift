@@ -13,7 +13,6 @@ final class VolumeControlContainer: UIView {
     private let notifications: NotificationCenter
     private var refreshTask: Task<Void, Never>?
     private var refreshPending = false
-    private var hasAttached = false
     private var alignPending = false
 
     init(volumeView: MPVolumeView, centersNativeHeight: Bool = false,
@@ -65,8 +64,10 @@ final class VolumeControlContainer: UIView {
             refreshTask?.cancel(); refreshTask = nil
             return
         }
-        if hasAttached || refreshPending { requestRefresh() }
-        hasAttached = true
+        // The view is initially constructed before it is in a window. Refresh
+        // once after mounting as well: its initial thumb must not retain a value
+        // obtained before MediaPlayer attached to the selected output.
+        requestRefresh()
         scheduleAlignment()
     }
 
