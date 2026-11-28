@@ -1062,7 +1062,10 @@ import Network
     /// This only replaces the authorized current item; it never advances the queue.
     func recoverServerRoute() {
         guard ProcessInfo.processInfo.systemUptime >= routeSettlingUntil else { return }
-        guard !navigationPending, routeRecoveryTask == nil, !busy, loadedKey != nil, loadedKey != completedKey,
+        // While the command awaits acknowledgement there is no target yet, so
+        // recovery must not revive the previous song. Once the authorized target
+        // is installed it can recover normally, even before navigation finishes.
+        guard (!navigationPending || navigationTarget == loadedKey), routeRecoveryTask == nil, !busy, loadedKey != nil, loadedKey != completedKey,
               permission.allowsPlayback(ownsOutput: ownsOutput, serverPlaying: state?.playing == true, mediaReady: true),
               let current = player.currentItem, let id = state?.currentTrackId,
               queuedTracks[ObjectIdentifier(current)] == id, let epoch = state?.ownerEpoch else { return }
