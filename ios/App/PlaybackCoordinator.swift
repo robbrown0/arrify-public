@@ -1406,6 +1406,20 @@ import Network
             }
         }
     }
+    /// Refresh only future media; retain the current output and queue fences.
+    func refreshCachedSuccessors(_ manifest: Manifest, expectedRevision: Int) async throws {
+        guard state?.queueRevision == expectedRevision, state?.ownerEpoch == manifest.ownerEpoch,
+              ownsOutput, !endedInFlight else { return }
+        for queued in player.items().dropFirst() {
+            if let id = queuedTracks[ObjectIdentifier(queued)],
+               let media = manifest.items.first(where: { $0.trackId == id }),
+               let file = cache.file(for:media),
+               (queued.status == .failed || (queued.asset as? AVURLAsset)?.url != file) {
+                player.remove(queued); queuedTracks.removeValue(forKey:ObjectIdentifier(queued))
+            }
+        }
+        try await enqueueAhead(manifest,expectedRevision:expectedRevision)
+    }
     private func startReadAhead() {
         guard !cachedReconcileRequired, !cache.startupPending,
               cachedTransitions.isEmpty || cachedConfirmedRevision != nil else { return }
@@ -1436,15 +1450,7 @@ import Network
                         try? await self.enqueueAhead(manifest, expectedRevision: state.queueRevision)
                     }
                     guard self.acceptsReadAhead(manifest, expected: state) else { return }
-                    // Replace only future items with verified local files; never interrupt current audio.
-                    for queued in self.player.items().dropFirst() {
-                        if let id = self.queuedTracks[ObjectIdentifier(queued)],
-                           let media = manifest.items.first(where: { $0.trackId == id }),
-                           self.cache.file(for: media) != nil {
-                            self.player.remove(queued); self.queuedTracks.removeValue(forKey: ObjectIdentifier(queued))
-                        }
-                    }
-                    try await self.enqueueAhead(manifest, expectedRevision: state.queueRevision)
+                    try await self.refreshCachedSuccessors(manifest, expectedRevision: state.queueRevision)
                     if self.cache.items.allSatisfy({ ["ready", "oversized", "budget"].contains($0.state) }) {
                         self.aheadCompletedRevision = state.queueRevision
                         return

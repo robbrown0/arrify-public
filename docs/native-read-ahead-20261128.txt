@@ -1,0 +1,29 @@
+The first TestFlight46 iPad qualification passed124of125app tests but failed
+LostCachedTransitionAcknowledgementRetriesSameIDWithoutReplay at the final current
+item identity assertion. The one-commit and same-transition-ID assertions passed.
+Other Next timing/ownership/pause and audiobook tests passed. Upload was blocked.
+
+Code inspection found read-ahead unconditionally removes and recreates every
+future item that has a cache file, including a healthy item already using that
+same verified file. A test can capture that queued object before a pending
+read-ahead finishes, then observe a different local successor at transition.
+This also discards prebuffered decoder state needlessly. This explains a concrete
+identity race; independent simulator recovery is not ruled out for the old trace.
+
+The extracted refresh operation retains queue revision/owner/ended-event fences.
+It now replaces only failed or nonmatching future assets, preserving healthy
+matching local items. It never changes the current item. A deterministic test
+refreshes a four-item cached queue three times and requires every object identity,
+order and current selection to remain. The audit branch retains the old removal
+condition with this test to establish failing-before behavior on native AVPlayer.
+Audit1760cf8b40890bb64eaf5202673af459262ca067.
+
+The lost-ack test also now requires a real second request and checks the retained
+successor before and after acknowledgement. Reconciliation is retried while the
+old shared task completes instead of assuming a100ms sleep establishes that state.
+The existing bounded retry loop and identity/commit/ID assertions remain. No
+production readiness, retry, ownership, pause or audio-profile policy was loosened.
+
+Full native qualification and an internal TestFlight46 release are still required
+for the final merged source. The approved book server and discovery deployments
+are unchanged; the title-aligned pie UI is retained unchanged from main9bd9909.

@@ -178,6 +178,23 @@ final class PlaybackTransitionTests: XCTestCase {
         XCTAssertFalse(player.showsPauseControl)
     }
 
+    @MainActor func testReadAheadKeepsVerifiedLocalSuccessors() async throws {
+        let (player, _) = try await fixture(cachedNext:true,windowSize:4)
+        defer { player.stop() }
+        let state = try XCTUnwrap(player.state)
+        let manifest = try await player.api.manifest(deviceId:player.deviceId,epoch:state.ownerEpoch,profile:"original")
+        let original = player.player.items()
+        XCTAssertEqual(original.count,4)
+        XCTAssertTrue(original.allSatisfy { ($0.asset as? AVURLAsset)?.url.isFileURL == true })
+        for _ in 0..<3 {
+            try await player.refreshCachedSuccessors(manifest,expectedRevision:state.queueRevision)
+            XCTAssertEqual(player.player.items().map { ObjectIdentifier($0) },original.map { ObjectIdentifier($0) },
+                           "Read-ahead must not discard already verified and prebuffered local items")
+            XCTAssertTrue(player.player.currentItem === original.first)
+            XCTAssertEqual(player.state?.currentTrackId,state.currentTrackId)
+        }
+    }
+
     @MainActor func testLostCachedTransitionAcknowledgementRetriesSameIDWithoutReplay() async throws {
         let (player, transport) = try await fixture(cachedNext: true)
         defer { player.stop() }
@@ -187,13 +204,18 @@ final class PlaybackTransitionTests: XCTestCase {
         player.player.pause()
         NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: first)
         for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(player.player.currentItem === next,"The cached successor must be retained before its acknowledgement")
         await transport.releaseNext()
         for _ in 0..<100 { if await transport.nextCommits == 1 { break }; try await Task.sleep(for: .milliseconds(10)) }
-        try await Task.sleep(for: .milliseconds(100))
-        await player.reconcile()
-        for _ in 0..<100 { if await transport.nextRequests >= 2 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<100 {
+            await player.reconcile()
+            if await transport.nextRequests >= 2 { break }
+            try await Task.sleep(for:.milliseconds(10))
+        }
+        let requests = await transport.nextRequests
         let commits = await transport.nextCommits
         let ids = await transport.transitionIds
+        XCTAssertGreaterThanOrEqual(requests,2,"A lost acknowledgement must actually retry before checking idempotency")
         XCTAssertEqual(commits, 1)
         XCTAssertEqual(Set(ids).count, 1)
         XCTAssertTrue(player.player.currentItem === next)
