@@ -2,7 +2,7 @@ name: AirPlay API investigation
 on:
   push:
     branches: ['investigate/airplay-destination-names-20261128']
-    paths: ['ios/tools/AirPlayAPIProbe.swift', '.github/workflows/airplay-api-probe.yml']
+    paths: ['ios/tools/AirPlay*Probe.*', '.github/workflows/airplay-api-probe.yml']
 permissions:
   contents: read
 jobs:
@@ -49,13 +49,14 @@ jobs:
       - name: Typecheck device-only routing APIs
         run: |
           DEVICE_SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          xcrun swiftc -parse-as-library -swift-version 6 -sdk "$DEVICE_SDK" -target arm64e-apple-ios27.0 -typecheck ios/tools/AirPlayAPIProbe.swift 2>&1 | tee build/airplay-probe/device-api-typecheck.txt
+          xcrun swiftc -parse-as-library -swift-version 6 -sdk "$DEVICE_SDK" -target arm64e-apple-ios27.0 -import-objc-header ios/tools/AirPlayLegacyRouteProbe.h -typecheck ios/tools/AirPlayAPIProbe.swift 2>&1 | tee build/airplay-probe/device-api-typecheck.txt
       - name: Compile public routing API probe
         run: |
           mkdir -p build/airplay-probe/Probe.app
           SDK_PATH=$(xcrun --sdk iphonesimulator --show-sdk-path)
           ARCH=$(uname -m)
-          xcrun swiftc -parse-as-library -swift-version 6 -sdk "$SDK_PATH" -target "$ARCH-apple-ios27.0-simulator" ios/tools/AirPlayAPIProbe.swift -o build/airplay-probe/Probe.app/Probe
+          xcrun clang -fobjc-arc -isysroot "$SDK_PATH" -target "$ARCH-apple-ios27.0-simulator" -c ios/tools/AirPlayLegacyRouteProbe.m -o build/airplay-probe/LegacyRoute.o 2>&1 | tee build/airplay-probe/legacy-compile.txt
+          xcrun swiftc -parse-as-library -swift-version 6 -sdk "$SDK_PATH" -target "$ARCH-apple-ios27.0-simulator" -import-objc-header ios/tools/AirPlayLegacyRouteProbe.h ios/tools/AirPlayAPIProbe.swift build/airplay-probe/LegacyRoute.o -o build/airplay-probe/Probe.app/Probe
           python3 - <<'PY'
           import plistlib,pathlib
           info={'CFBundleIdentifier':'com.robnets.arrify.airplay-api-probe','CFBundleExecutable':'Probe','CFBundleName':'AirPlay API Probe','CFBundlePackageType':'APPL','CFBundleVersion':'1','CFBundleShortVersionString':'1.0','LSRequiresIPhoneOS':True,'UIDeviceFamily':[1,2],'MinimumOSVersion':'27.0','MDESupportsUniversalURLPlayback':True,'UILaunchScreen':{},'UIApplicationSceneManifest':{'UIApplicationSupportsMultipleScenes':False,'UISceneConfigurations':{'UIWindowSceneSessionRoleApplication':[{'UISceneConfigurationName':'Probe'}]}}}

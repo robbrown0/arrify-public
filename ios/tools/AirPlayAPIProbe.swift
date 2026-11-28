@@ -21,7 +21,7 @@ import AVSystemRouting
         let file = directory.appendingPathComponent("probe.jsonl")
         let line = Data((text + "\n").utf8)
         if FileManager.default.fileExists(atPath: file.path), let handle = try? FileHandle(forWritingTo: file) {
-            try? handle.seekToEnd()
+            _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: line)
             try? handle.close()
         } else { try? line.write(to: file) }
@@ -40,7 +40,7 @@ final class RouteObserver: NSObject, AVSystemRouteControllerObserver {
 
 @main @MainActor final class ProbeApp: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        report("application-start")
+        report("application-start", ["legacyRoute": AirPlayLegacyRouteProbe()])
         return true
     }
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
@@ -79,7 +79,8 @@ final class RouteObserver: NSObject, AVSystemRouteControllerObserver {
                 ["label": control.accessibilityLabel ?? "", "value": control.accessibilityValue ?? ""]
             }
             report("settled", ["pickerLabel": picker.accessibilityLabel ?? "",
-                               "pickerValue": picker.accessibilityValue ?? "", "publicControlAccessibility": controls])
+                               "pickerValue": picker.accessibilityValue ?? "", "publicControlAccessibility": controls,
+                               "legacyRoute": AirPlayLegacyRouteProbe()])
             #if canImport(AVSystemRouting)
             AVSystemRouteController.shared.removeObserver(observer)
             #endif
