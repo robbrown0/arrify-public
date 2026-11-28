@@ -536,6 +536,92 @@ extension NowPlayingArtworkTests {
         XCTAssertFalse(coordinator.routeDiagnostics.capturing)
         XCTAssertTrue(coordinator.routeDiagnostics.records.isEmpty)
     }
+
+    @MainActor func testVolumeCaptureKeepsStaleNativeAndSystemLevelsDistinctWithoutWriting() throws {
+        let recorder = AudioRouteDiagnostics(readSystemVolume: { 0.16 }, observeVolume: { _ in nil })
+        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        for child in view.subviews { child.isHidden = true }
+        let slider = UISlider(frame: CGRect(x: 8, y: 3, width: 280, height: 30))
+        slider.value = 0.8
+        view.addSubview(slider)
+        var valueEvents = 0
+        slider.addAction(UIAction { _ in valueEvents += 1 }, for: .valueChanged)
+        let originalFrame = slider.frame
+        recorder.registerVolumeView(view, location: "fixture-expanded")
+        let player = AVPlayer()
+        recorder.record(trigger: "not-enabled", player: player, volumeView: view, localName: "Fixture", displayedName: "Fixture", remoteOwner: false)
+        XCTAssertTrue(recorder.records.isEmpty)
+        recorder.start(); defer { recorder.stop() }
+        recorder.record(trigger: "before-first-touch", player: player, volumeView: view, localName: "Fixture", displayedName: "Fixture", remoteOwner: false)
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let entry = try decoder.decode(AudioRouteDiagnostics.Entry.self, from: Data(try XCTUnwrap(recorder.records.last).utf8))
+        XCTAssertEqual(try XCTUnwrap(entry.snapshot.sessionOutputVolume), 0.16, accuracy: 0.001)
+        let control = try XCTUnwrap(entry.snapshot.nativeVolumeControls.first { $0.location == "fixture-expanded" })
+        XCTAssertEqual(try XCTUnwrap(control.sliders.last?.value), 0.8, accuracy: 0.001)
+        XCTAssertEqual(slider.value, 0.8, accuracy: 0.001)
+        XCTAssertEqual(slider.frame, originalFrame)
+        XCTAssertEqual(valueEvents, 0, "Observing a stale display must never send a volume action")
+        XCTAssertNil(player.currentItem)
+    }
+
+    @MainActor func testVolumeCaptureKeepsDistinctControlsAndIgnoresDuplicateRegistration() throws {
+        let recorder = AudioRouteDiagnostics(readSystemVolume: { 0.16 }, observeVolume: { _ in nil })
+        let expanded = MPVolumeView()
+        let tablet = MPVolumeView()
+        recorder.registerVolumeView(expanded, location: "expanded")
+        recorder.registerVolumeView(tablet, location: "tablet")
+        recorder.registerVolumeView(expanded, location: "duplicate")
+        recorder.start(); defer { recorder.stop() }
+        let player = AVPlayer()
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        recorder.record(trigger: "two-controls", player: player, volumeView: expanded, localName: "Fixture", displayedName: "Fixture", remoteOwner: false)
+        let entry = try decoder.decode(AudioRouteDiagnostics.Entry.self, from: Data(try XCTUnwrap(recorder.records.last).utf8))
+        XCTAssertEqual(entry.snapshot.nativeVolumeControls.count, 2)
+        XCTAssertEqual(Set(entry.snapshot.nativeVolumeControls.map(\.location)), Set(["expanded", "tablet"]))
+    }
+
+    @MainActor func testVolumeEventsUpdateCaptureAndLatePreviousCaptureIsIgnored() async throws {
+        var level: Float = 0.16
+        var callbacks: [AudioRouteDiagnostics.VolumeEvent] = []
+        let recorder = AudioRouteDiagnostics(readSystemVolume: { level }, observeVolume: { callback in callbacks.append(callback); return nil })
+        let player = AVPlayer()
+        recorder.start()
+        recorder.record(trigger: "old-capture", player: player, volumeView: nil, localName: "Fixture", displayedName: "Fixture", remoteOwner: false)
+        let oldCallback = try XCTUnwrap(callbacks.first)
+        recorder.stop()
+        recorder.start(); defer { recorder.stop() }
+        recorder.record(trigger: "new-capture", player: player, volumeView: nil, localName: "Fixture", displayedName: "Fixture", remoteOwner: false)
+        let observedAt = Date(timeIntervalSince1970: 1234.567)
+        oldCallback(0.16, 0.99, observedAt)
+        level = 0.15
+        try XCTUnwrap(callbacks.last)(0.16, 0.15, observedAt)
+        for _ in 0..<200 where recorder.records.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let entries = try recorder.records.map { try decoder.decode(AudioRouteDiagnostics.Entry.self, from: Data($0.utf8)) }
+        XCTAssertEqual(entries.count, 2, "A queued callback from a stopped capture must not enter its replacement")
+        let update = try XCTUnwrap(entries.last)
+        XCTAssertEqual(update.trigger, "system-volume-change")
+        XCTAssertEqual(try XCTUnwrap(update.volumeChange?.newValue), 0.15, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(update.volumeChange?.observedAtSeconds), 1234.567, accuracy: 0.00001)
+        XCTAssertEqual(try XCTUnwrap(update.snapshot.sessionOutputVolume), 0.15, accuracy: 0.001)
+        XCTAssertNil(player.currentItem)
+    }
+
+    @MainActor func testVolumeCaptureStaysBoundedAndInvalidReadbackDoesNotInventZero() throws {
+        let recorder = AudioRouteDiagnostics(readSystemVolume: { .nan }, observeVolume: { _ in nil })
+        let player = AVPlayer()
+        recorder.start(); defer { recorder.stop() }
+        for index in 0..<150 {
+            recorder.record(trigger: "fixture-\(index)", player: player, volumeView: nil, localName: "Fixture", displayedName: "Fixture", remoteOwner: false)
+        }
+        XCTAssertEqual(recorder.records.count, 120)
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let entry = try decoder.decode(AudioRouteDiagnostics.Entry.self, from: Data(try XCTUnwrap(recorder.records.last).utf8))
+        XCTAssertNil(entry.snapshot.sessionOutputVolume)
+        recorder.clear()
+        XCTAssertTrue(recorder.records.isEmpty)
+        XCTAssertFalse(recorder.capturing)
+    }
 }
 
 @MainActor private final class NamedOutputSession: PlaybackAudioSession {

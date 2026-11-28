@@ -172,7 +172,10 @@ struct NowPlayingView: View {
             if playback.hasOtherOutput {
                 if playback.needsTakeover { PlaybackTakeoverBanner(playback: playback, actionIdentifier: "fullScreenTakeOverPlayback").tint(.green) }
             } else {
-                SystemVolumeSlider(onCreate: { playback.expandedVolumeView = $0 })
+                SystemVolumeSlider(onCreate: {
+                    playback.expandedVolumeView = $0
+                    playback.routeDiagnostics.registerVolumeView($0, location: "music-expanded")
+                })
                     .frame(height: 44).padding(.top, 6)
                     .accessibilityIdentifier("localVolumeControl")
             }
@@ -490,7 +493,9 @@ struct TabletPlayerBar: View {
                     }
                 }.frame(width: 180)
                 if !playback.hasOtherOutput {
-                    SystemVolumeSlider(centersNativeHeight: true).frame(width: 130, height: 44)
+                    SystemVolumeSlider(centersNativeHeight: true, onCreate: {
+                        playback.routeDiagnostics.registerVolumeView($0, location: "music-tablet")
+                    }).frame(width: 130, height: 44)
                         .accessibilityIdentifier("localVolumeControl")
                 }
                 if !playback.serverConnection.connected || playback.serverConnection.degraded { ServerConnectionBadge(connection: playback.serverConnection) }
