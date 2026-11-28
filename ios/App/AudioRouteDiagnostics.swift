@@ -41,7 +41,9 @@ struct RoutePortDetails: Codable, Sendable {
     private let readSystemVolume: @MainActor () -> Float
     private let observeVolume: ObserveVolume
     private var context: CaptureContext?
-    private var controls: [WeakControl] = []
+    // UIKit registration runs during view creation. Diagnostic references must
+    // not establish observation dependencies or invalidate that mounting view.
+    @ObservationIgnored private var controls: [WeakControl] = []
     private final class WeakControl {
         weak var view: MPVolumeView?
         let id = UUID().uuidString

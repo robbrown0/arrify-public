@@ -37,6 +37,9 @@ explicitly enabled, limited to ten minutes/120 snapshots and cleared on sign-out
 No audio, credentials, song metadata or network upload is added. The observer
 never changes a slider value/frame, activates an audio session, sends a control
 action, or sends a speaker-volume command. It is not a shipped volume fix.
+The internal weak registry is excluded from Observation: registration during
+UIViewRepresentable creation must not establish a SwiftUI rendering dependency.
+Visible capture state remains observable. A focused regression checks both.
 
 The regressions preserve distinct stale/native and system levels, verify no value
 actions or geometry writes, cover two control locations and duplicate registration, ensure
