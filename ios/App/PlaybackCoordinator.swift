@@ -1413,7 +1413,8 @@ import Network
         for queued in player.items().dropFirst() {
             if let id = queuedTracks[ObjectIdentifier(queued)],
                let media = manifest.items.first(where: { $0.trackId == id }),
-               cache.file(for: media) != nil {
+               let file = cache.file(for:media),
+               (queued.status == .failed || (queued.asset as? AVURLAsset)?.url != file) {
                 player.remove(queued); queuedTracks.removeValue(forKey:ObjectIdentifier(queued))
             }
         }

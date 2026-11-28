@@ -204,13 +204,18 @@ final class PlaybackTransitionTests: XCTestCase {
         player.player.pause()
         NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: first)
         for _ in 0..<100 { if await transport.nextWaiting { break }; try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(player.player.currentItem === next,"The cached successor must be retained before its acknowledgement")
         await transport.releaseNext()
         for _ in 0..<100 { if await transport.nextCommits == 1 { break }; try await Task.sleep(for: .milliseconds(10)) }
-        try await Task.sleep(for: .milliseconds(100))
-        await player.reconcile()
-        for _ in 0..<100 { if await transport.nextRequests >= 2 { break }; try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<100 {
+            await player.reconcile()
+            if await transport.nextRequests >= 2 { break }
+            try await Task.sleep(for:.milliseconds(10))
+        }
+        let requests = await transport.nextRequests
         let commits = await transport.nextCommits
         let ids = await transport.transitionIds
+        XCTAssertGreaterThanOrEqual(requests,2,"A lost acknowledgement must actually retry before checking idempotency")
         XCTAssertEqual(commits, 1)
         XCTAssertEqual(Set(ids).count, 1)
         XCTAssertTrue(player.player.currentItem === next)
