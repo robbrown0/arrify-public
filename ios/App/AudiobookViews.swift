@@ -81,7 +81,9 @@ struct AudiobookShelf: View {
                 let key = taskKey
                 // Details/menus are not a new shelf request. Keep the loaded
                 // pages and native scroll anchor when returning to this view.
-                if loadedTaskKey == key && shelf.hasLoaded && !shelf.needsRecovery { return }
+                // The separate recovery task retries the failed cursor. Returning
+                // from details must not replace loaded pages with page zero.
+                if loadedTaskKey == key && shelf.hasLoaded { return }
                 do {
                     if !shelf.query.isEmpty { try await Task.sleep(for:.milliseconds(250)) }
                     await shelf.load()
