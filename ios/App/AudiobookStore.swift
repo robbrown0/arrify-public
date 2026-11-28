@@ -76,7 +76,9 @@ import CryptoKit
     }
     var failedNextPage: Bool { failedMore && message != nil }
     func loadNextPage(_ expectedPage: Int) async {
-        guard next == expectedPage, !loading, scope == requestKey else { return }
+        // A departing footer can deliver its final geometry/loading callback
+        // after a read failed. Only explicit Retry/reconnect may retry that page.
+        guard next == expectedPage, !loading, !failedNextPage, scope == requestKey else { return }
         await load(more:true)
     }
     func retry() async { await load(more:failedMore) }

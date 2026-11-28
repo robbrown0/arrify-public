@@ -766,7 +766,7 @@ private struct AudiobookGroupBrowser: View {
             if let message { Text(message).foregroundStyle(.secondary).padding(); Button("Retry") { Task { await load(more:failedMore) } }.disabled(loading) }
             else if let page = next {
                 AutomaticAudiobookPage(page:page,loading:loading,label:"Loading more " + kind) { page in
-                    guard next == page, !loading else { return }; await load(more:true)
+                    guard next == page, !loading, message == nil else { return }; await load(more:true)
                 }.id(key + ":page:" + String(page))
             }
         }.task(id:key) { await load(more:false) }

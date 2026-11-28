@@ -96,7 +96,16 @@ rejects stale cursors/scope/account responses, deduplicates overlapping rows and
 rejects non-advancing provider cursors. Native regressions cover rapid callbacks,
 failed-page retry, late responses after a search/account change, and scrolling
 through three pages in list and cover-grid layouts.
+Departing footer callbacks cannot retry an already failed page; Retry and the
+normal reconnect policy retain control. UI fixtures choose their initial layout
+without inheriting another test's saved grid preference.
 https://developer.apple.com/documentation/swiftui/view/ongeometrychange(for:of:action:)
+
+Release qualification still runs the complete app and UI suites on both device
+families. The UI methods are divided into two balanced shards per device, each
+on its own runner. Source discovery fails on unsupported declarations, and the
+runtime audit checks every selected method, the executed count and zero failures.
+All six app/UI matrix jobs must pass before the signing/upload job is eligible.
 
 Validation and deployment
 Four new server regressions were run before the implementation in an isolated
