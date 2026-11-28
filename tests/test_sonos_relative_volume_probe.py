@@ -129,6 +129,18 @@ class SonosRelativeProbeTests(unittest.TestCase):
             with self.subTest(action=action, adjustment=adjustment), self.assertRaises(ProbeError):
                 client.rpc(action, adjustment)
 
+    def test_ambiguous_rpc_attempt_is_audited_without_retry(self):
+        client = object.__new__(Client)
+        client.audit = []
+        client.services = {'urn:schemas-upnp-org:service:GroupRenderingControl:1': {'controlURL': '/group'}}
+        with patch.object(client, 'request', side_effect=ProbeError('ambiguous')) as request:
+            with self.assertRaises(ProbeError):
+                client.rpc('SetRelativeGroupVolume', -1)
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(client.audit[0]['action'], 'SetRelativeGroupVolume')
+        self.assertEqual(client.audit[0]['adjustment'], -1)
+        self.assertEqual(client.audit[0]['outcome'], 'failed-or-ambiguous')
+
 
 if __name__ == '__main__':
     unittest.main()
