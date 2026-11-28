@@ -17,9 +17,9 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connect to your Arrify server and verify nearby Arrify devices for same-account Lock Screen controls.</string>
+	<string>Connect to your Arrify server, verify nearby Arrify devices for same-account Lock Screen controls, and discover AirPlay receiver names during an audio output diagnostic capture.</string>
 	<key>NSBonjourServices</key>
-	<array><string>_arrify-local._tcp</string></array>
+	<array><string>_arrify-local._tcp</string><string>_airplay._tcp</string><string>_raop._tcp</string></array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

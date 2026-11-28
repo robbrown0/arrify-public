@@ -2,13 +2,13 @@ name: AirPlay API investigation
 on:
   push:
     branches: ['investigate/airplay-destination-names-20261128']
-    paths: ['ios/tools/AirPlay*Probe.*', '.github/workflows/airplay-api-probe.yml']
+    paths: ['ios/**', '.github/workflows/airplay-api-probe.yml']
 permissions:
   contents: read
 jobs:
   sdk-and-simulator:
     runs-on: xcode-27
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Record compiler and public SDK surface
@@ -82,6 +82,13 @@ jobs:
               time.sleep(1)
           else:raise RuntimeError('Probe did not produce a settled route snapshot')
           PY
+      - name: Test integrated receiver diagnostics
+        run: |
+          python3 ios/tools/generate_project.py
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for runtime,devices in d["devices"].items() if "iOS-27" in runtime for x in devices if "iPad" in x["name"]))')
+          set -o pipefail
+          xcodebuild test -project ios/Arrify.xcodeproj -scheme Arrify -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build/app-tests -resultBundlePath build/airplay-probe/ReceiverDiagnostics.xcresult -parallel-testing-enabled NO -only-testing:ArrifyAppTests/AirPlayReceiverDiscoveryTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/airplay-probe/app-tests.txt
+          swift test --package-path ios --filter SelectedOutputNamesTests 2>&1 | tee build/airplay-probe/output-name-tests.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

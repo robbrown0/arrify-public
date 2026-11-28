@@ -20,10 +20,12 @@ struct RoutePortDetails: Codable, Sendable {
     let portType: String
     let uid: String
     let selectedDataSource: DataSource?
+    let dataSources: [DataSource]
     let channels: [Channel]
     init(_ port: AVAudioSessionPortDescription) {
         portName = port.portName; portType = port.portType.rawValue; uid = port.uid
         selectedDataSource = port.selectedDataSource.map(DataSource.init)
+        dataSources = (port.dataSources ?? []).map(DataSource.init)
         channels = (port.channels ?? []).map(Channel.init)
     }
 }
@@ -34,6 +36,7 @@ struct RoutePortDetails: Codable, Sendable {
     private(set) var records: [String] = []
     private var lastSnapshot: String?
     private var expiry: Task<Void, Never>?
+    let discovery = AirPlayReceiverDiscovery()
     struct Snapshot: Codable {
         let category: String
         let mode: String
@@ -41,6 +44,9 @@ struct RoutePortDetails: Codable, Sendable {
         let routeSharingPolicy: UInt
         let outputs: [RoutePortDetails]
         let selectedOutputDataSource: RoutePortDetails.DataSource?
+        let outputDataSources: [RoutePortDetails.DataSource]
+        let nearbyReceiverServices: [AirPlayReceiverService]
+        let receiverDiscoveryStatus: [String: String]
         let playerAllowsExternalPlayback: Bool
         let playerIsExternalPlaybackActive: Bool
         let playerTimeControlStatus: Int
@@ -59,13 +65,14 @@ struct RoutePortDetails: Codable, Sendable {
     }
     func start() {
         clear(); capturing = true
+        discovery.start()
         expiry = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(600)) } catch { return }
             self?.stop()
         }
     }
-    func stop() { capturing = false; expiry?.cancel(); expiry = nil }
-    func clear() { stop(); records = []; lastSnapshot = nil }
+    func stop() { capturing = false; expiry?.cancel(); expiry = nil; discovery.stop() }
+    func clear() { stop(); discovery.clear(); records = []; lastSnapshot = nil }
     func record(trigger: String, player: AVPlayer, volumeView: MPVolumeView?,
                 localName: String, displayedName: String, remoteOwner: Bool,
                 reason: UInt? = nil, previousOutputs: [RoutePortDetails]? = nil) {
@@ -75,6 +82,8 @@ struct RoutePortDetails: Codable, Sendable {
             categoryOptions: session.categoryOptions.rawValue, routeSharingPolicy: session.routeSharingPolicy.rawValue,
             outputs: session.currentRoute.outputs.map(RoutePortDetails.init),
             selectedOutputDataSource: session.outputDataSource.map(RoutePortDetails.DataSource.init),
+            outputDataSources: (session.outputDataSources ?? []).map(RoutePortDetails.DataSource.init),
+            nearbyReceiverServices: discovery.state.services, receiverDiscoveryStatus: discovery.state.statuses,
             playerAllowsExternalPlayback: player.allowsExternalPlayback, playerIsExternalPlaybackActive: player.isExternalPlaybackActive,
             playerTimeControlStatus: player.timeControlStatus.rawValue, volumeViewWirelessRouteActive: volumeView?.isWirelessRouteActive,
             volumeViewAttachedToWindow: volumeView?.window != nil,
@@ -91,7 +100,7 @@ struct RoutePortDetails: Codable, Sendable {
     var exportText: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        return "Arrify selected-output diagnostics \(version) (\(build))\n\(UIDevice.current.model); iOS \(UIDevice.current.systemVersion)\nLocal user-requested capture; raw names and port UIDs included.\n" + records.joined(separator: "\n")
+        return "Arrify selected-output diagnostics \(version) (\(build))\n\(UIDevice.current.model); iOS \(UIDevice.current.systemVersion)\nLocal user-requested capture; raw names, port UIDs and nearby receiver advertisements included. Nearby receivers are not necessarily selected.\n" + records.joined(separator: "\n")
     }
 }
 
@@ -104,7 +113,7 @@ struct AudioRouteDiagnosticsView: View {
                 AirPlayPicker(onDismiss: { playback.outputSelectionChanged() }, onPresent: { playback.refreshOutput(trigger: "picker-presented") }).frame(height: 44)
             }
             Section("Capture") {
-                Text("Records selected route names, port IDs, session settings and player flags for up to 10 minutes. Stays on this device until you share it. No audio or login details are recorded.").font(.footnote)
+                Text("Records selected route names, port IDs, nearby AirPlay receiver names and identifiers, session settings and player flags for up to 10 minutes. Nearby receivers are not necessarily selected. Stays on this device until you share it. No audio or login details are recorded.").font(.footnote)
                 Button(playback.routeDiagnostics.capturing ? "Stop capture" : "Start capture") {
                     if playback.routeDiagnostics.capturing { playback.routeDiagnostics.stop() }
                     else { playback.routeDiagnostics.start(); playback.refreshOutput(trigger: "capture-start") }
@@ -112,6 +121,7 @@ struct AudioRouteDiagnosticsView: View {
                 Button("Capture current output") { playback.refreshOutput(trigger: "manual") }
                     .disabled(!playback.routeDiagnostics.capturing)
                 Text("\(playback.routeDiagnostics.records.count) snapshots")
+                Text("\(playback.routeDiagnostics.discovery.state.services.count) nearby receiver service records").font(.footnote)
                 ShareLink("Share diagnostic report", item: playback.routeDiagnostics.exportText)
                     .disabled(playback.routeDiagnostics.records.isEmpty)
                 Button("Clear capture", role: .destructive) { playback.routeDiagnostics.clear() }
